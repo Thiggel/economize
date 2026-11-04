@@ -16,6 +16,41 @@ loaded from its own repository. The Hub collection [economize drafters](https://
 | [`flaitenberger/economize-medusa-gemma-4-31B-it`](https://huggingface.co/flaitenberger/economize-medusa-gemma-4-31B-it) | gemma-4-31B-it | Medusa heads | 1.85x | 1.63x | 1.96x | 2.29x | 1.43x | 1.39x | 2.03 |
 | [`flaitenberger/economize-early-exit-gemma-4-31B-it`](https://huggingface.co/flaitenberger/economize-early-exit-gemma-4-31B-it) | gemma-4-31B-it | Early-exit drafter | 1.49x | 1.37x | 1.55x | 1.66x | 1.19x | 1.33x | 1.73 |
 
+## Decoding settings
+
+Each figure shows a checkpoint's speedup over plain decoding, overall and per task group, at every measured decoding
+setting: a fixed number of drafts per base-model pass (left), and up to 8 drafts with drafting that stops once the
+drafter's top probability falls below a confidence threshold (right). The model card of each repository lists the
+same numbers as a table.
+
+### EAGLE-3 draft head for Olmo-3-7B-Instruct
+
+![EAGLE-3 draft head for Olmo-3-7B-Instruct: speedup at every measured decoding setting](https://huggingface.co/flaitenberger/economize-eagle3-Olmo-3-7B-Instruct/resolve/main/speedup.png)
+
+### EAGLE-3 draft head for Ministral-3-8B-Instruct-2512
+
+![EAGLE-3 draft head for Ministral-3-8B-Instruct-2512: speedup at every measured decoding setting](https://huggingface.co/flaitenberger/economize-eagle3-Ministral-3-8B-Instruct-2512/resolve/main/speedup.png)
+
+### EAGLE-3 draft head for Qwen3.5-4B
+
+![EAGLE-3 draft head for Qwen3.5-4B: speedup at every measured decoding setting](https://huggingface.co/flaitenberger/economize-eagle3-Qwen3.5-4B/resolve/main/speedup.png)
+
+### EAGLE-3 draft head for Qwen3.5-27B
+
+![EAGLE-3 draft head for Qwen3.5-27B: speedup at every measured decoding setting](https://huggingface.co/flaitenberger/economize-eagle3-Qwen3.5-27B/resolve/main/speedup.png)
+
+### EAGLE-3 draft head for gemma-4-31B-it
+
+![EAGLE-3 draft head for gemma-4-31B-it: speedup at every measured decoding setting](https://huggingface.co/flaitenberger/economize-eagle3-gemma-4-31B-it/resolve/main/speedup.png)
+
+### Medusa heads for gemma-4-31B-it
+
+![Medusa heads for gemma-4-31B-it: speedup at every measured decoding setting](https://huggingface.co/flaitenberger/economize-medusa-gemma-4-31B-it/resolve/main/speedup.png)
+
+### Early-exit drafter for gemma-4-31B-it
+
+![Early-exit drafter for gemma-4-31B-it: speedup at every measured decoding setting](https://huggingface.co/flaitenberger/economize-early-exit-gemma-4-31B-it/resolve/main/speedup.png)
+
 ## Usage
 
 `economize.from_pretrained` loads the base model named in the checkpoint and attaches the drafter:

@@ -101,6 +101,11 @@ Drafters trained with economize are published on the Hugging Face Hub in the col
 | [`flaitenberger/economize-eagle3-Ministral-3-8B-Instruct-2512`](https://huggingface.co/flaitenberger/economize-eagle3-Ministral-3-8B-Instruct-2512) | Ministral-3-8B-Instruct-2512 | 1.59x |
 | [`flaitenberger/economize-eagle3-Olmo-3-7B-Instruct`](https://huggingface.co/flaitenberger/economize-eagle3-Olmo-3-7B-Instruct) | Olmo-3-7B-Instruct | 1.55x |
 
+![Speedup of the EAGLE-3 drafter for Gemma-4-31B-it at every measured decoding setting](https://huggingface.co/flaitenberger/economize-eagle3-gemma-4-31B-it/resolve/main/speedup.png)
+
+*Speedup of `flaitenberger/economize-eagle3-gemma-4-31B-it` over plain decoding, overall and per task group, with a
+fixed number of drafts per base-model pass (left) and with drafting that stops below a confidence threshold (right).*
+
 The speedups are lossless, at batch size 1 on one H100, averaged over chat, code, math, summarization and
 long-context prompts. The [model zoo](https://thiggel.github.io/economize/model_zoo/) lists every checkpoint with
 its speedup per task group, and [Benchmarks](https://thiggel.github.io/economize/benchmarks/) compares economize
