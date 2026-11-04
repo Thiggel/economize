@@ -1,0 +1,87 @@
+# Lint, type gate, CPU test suite and docs build on every push and pull request (docs/CONTRIBUTING.md, "Checks
+# before a change lands"). The tools and the torch/transformers versions are pinned in ci/constraints.txt so that a
+# result does not depend on the day the workflow runs; bump them in a change of their own.
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # CPU wheels of torch (the CUDA wheels are 2 GB and the suite never uses a GPU).
+  PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  CUDA_VISIBLE_DEVICES: ""
+  HF_HUB_OFFLINE: "1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uvx ruff@0.16.10 check src tests ci docs/hooks
+
+  types:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            ci/constraints.txt
+      - uses: astral-sh/setup-uv@v6
+      - run: pip install -c ci/constraints.txt -e .
+      - run: python ci/mypy_gate.py
+
+  tests:
+    runs-on: ubuntu-latest
+    # About 8 minutes of tests on 4 workers plus the install; the limit leaves headroom for
+    # slower runners.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            ci/constraints.txt
+      # train and peft: the Trainer, data-source and LoRA tests skip without them.
+      - run: pip install -c ci/constraints.txt -e ".[test,train,peft]" pytest-xdist pytest-timeout
+      # The default markers of pyproject.toml ("not slow and not gpu"); the golden tensors run with the rest.
+      - run: python -m pytest -q -n auto --timeout 600 --durations 15 tests
+
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            ci/constraints.txt
+      # economize itself is installed: the API reference and the technique table (docs/hooks) import it.
+      - run: pip install -c ci/constraints.txt -e ".[docs]"
+      - run: mkdocs build --strict

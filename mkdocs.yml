@@ -1,0 +1,122 @@
+site_name: economize
+site_description: Efficient decoding for any Hugging Face causal LM, with any combination of efficiency techniques.
+site_url: https://thiggel.github.io/economize/
+repo_url: https://github.com/Thiggel/economize
+repo_name: Thiggel/economize
+edit_uri: edit/main/docs/
+docs_dir: docs
+exclude_docs: |
+  _build/
+  hooks/
+  snippets/
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.sections
+    - navigation.top
+    - toc.follow
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      toggle:
+        icon: material/brightness-7
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      toggle:
+        icon: material/brightness-4
+        name: Light mode
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.snippets:
+      check_paths: true
+
+# The API reference (docs/api/) is rendered from the docstrings; installing the `docs` extra (pip install -e
+# ".[docs]") brings mkdocstrings and economize itself, whose registries the technique table hook reads.
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            docstring_options:
+              ignore_init_summary: true
+              warn_unknown_params: false
+              warn_missing_types: false
+            filters: public
+            members_order: source
+            merge_init_into_class: true
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            show_root_heading: false
+            show_root_toc_entry: false
+            show_source: false
+            show_submodules: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            heading_level: 2
+
+# Generates the technique table of docs/techniques.md from every registered technique's metadata.
+hooks:
+  - docs/hooks/techniques.py
+
+nav:
+  - Home: index.md
+  - Getting started: getting_started.md
+  - Model zoo: model_zoo.md
+  - Benchmarks: benchmarks.md
+  - User guide:
+      - Techniques: techniques.md
+      - Drafters: drafters.md
+      - Dynamic draft trees: dynamic_tree.md
+      - Sequoia and SpecExec trees: tree_search.md
+      - MagicDec and TriForce: long_context_draft.md
+      - DFlash: dflash.md
+      - Weights and activations: weights.md
+      - Dynamic depth and KV cache: depth_kv.md
+      - Training: training.md
+      - Ecosystem: ecosystem.md
+      - Serving with vLLM: VLLM_BACKEND.md
+      - Serving with SGLang: SGLANG_BACKEND.md
+      - Exports to other runtimes: exports.md
+      - Examples: examples.md
+      - Scripts: scripts.md
+  - Tutorials:
+      - Overview: tutorials/index.md
+  - Extending:
+      - Overview: extending.md
+      - Writing a technique: writing_a_technique.md
+      - Adding an architecture: adding_an_architecture.md
+      - Architecture: ARCHITECTURE.md
+      - Contributing: CONTRIBUTING.md
+  - API reference:
+      - economize: api/economize.md
+      - economize.core: api/core.md
+      - economize.decoding: api/decoding.md
+      - economize.techniques: api/techniques.md
+      - economize.train: api/train.md
+      - economize.runtime: api/runtime.md
+      - economize.arch: api/arch.md
+      - economize.modules: api/modules.md
+      - economize.attention: api/attention.md
+      - economize.distributed: api/distributed.md
+      - economize.backends: api/backends.md
+      - economize.integrations: api/integrations.md
+      - economize.bench: api/bench.md
+      - economize.errors: api/errors.md
+      - economize.registry: api/registry.md
+  - Citation: citation.md

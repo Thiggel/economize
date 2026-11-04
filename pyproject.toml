@@ -1,0 +1,168 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "economize"
+# The version lives in src/economize/_version.py ([tool.hatch.version] below).
+dynamic = ["version"]
+description = "Composable efficiency techniques (speculative decoding, early exit, quantization, pruning, KV-cache compression, ...) for Hugging Face causal LMs."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Filipe Laitenberger", email = "f.laitenberger@gmail.com" }]
+keywords = [
+    "llm", "inference", "efficiency", "speculative-decoding", "early-exit", "layer-skipping", "quantization",
+    "pruning", "kv-cache", "transformers", "huggingface", "vllm",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+dependencies = [
+    "torch>=2.4",
+    "transformers>=5.0",
+    "safetensors>=0.4",
+    "huggingface_hub>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Thiggel/economize"
+Repository = "https://github.com/Thiggel/economize"
+Issues = "https://github.com/Thiggel/economize/issues"
+Documentation = "https://thiggel.github.io/economize/"
+
+[project.optional-dependencies]
+test = ["pytest>=8", "tomli>=2; python_version < '3.11'"]
+# The site (mkdocs build --strict): the theme, and mkdocstrings for the API reference of docs/api/.
+docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.6,<10", "mkdocstrings[python]>=1.0,<2"]
+# The pinned lint and type gate (docs/CONTRIBUTING.md runs the same versions through uvx).
+dev = ["economize[test]", "ruff==0.16.10", "mypy==2.4.0"]
+peft = ["peft>=0.21"]
+quant = ["torchao>=0.18", "compressed-tensors>=0.19"]
+kernels = ["kernels>=0.17"]
+train = ["accelerate>=1.14", "datasets>=5.0", "trl>=1.14"]
+eval = ["lm-eval[hf]>=0.4.13"]
+# The vLLM plugin patches private vLLM classes, so the extra is capped at the series in
+# economize.backends.vllm.plugin.TESTED_VLLM (tests/unit/test_packaging.py keeps the two in step). A vLLM installed
+# outside the extra still loads the plugin, which logs a warning.
+vllm = ["vllm>=0.30,<0.31"]
+# Suffix decoding on vLLM (method="suffix" imports arctic_inference.suffix_decoding). Its vLLM patches stay off unless
+# ARCTIC_INFERENCE_ENABLED=1 (they target vLLM 0.26 and refuse 0.30); economize uses only the suffix trees.
+arctic = ["economize[vllm]", "arctic-inference>=0.3"]
+bench = ["datasets>=5.0"]
+sglang = ["sglang>=0.5.21"]
+# Export runtimes (economize.backends.gguf / .onnx / .mlx / .trtllm). llama-cpp-python only loads a GGUF
+# export (economize.backends.gguf.load_llama); the MLX and TensorRT-LLM exports are written without their runtime
+# (TensorRT-LLM installs from NVIDIA's index on GPU machines, so it has no extra here).
+gguf = ["gguf>=0.17", "numpy>=1.26"]
+llama-cpp = ["economize[gguf]", "llama-cpp-python>=0.3"]
+onnx = ["onnx>=1.17", "onnxruntime>=1.20", "onnxscript>=0.2"]
+mlx = ["mlx-lm>=0.22; sys_platform == 'darwin'"]
+all = ["economize[peft,quant,kernels,train,eval,bench]"]
+
+[project.scripts]
+economize-lm-eval = "economize.integrations.lm_eval:main"
+
+[project.entry-points."vllm.general_plugins"]
+economize = "economize.backends.vllm:register"
+
+[project.entry-points."sglang.srt.plugins"]
+economize = "economize.backends.sglang:register"
+
+[project.entry-points."economize.quant_backends"]
+compressed-tensors = "economize.integrations.compressed_tensors:CompressedTensorsBackend"
+
+# Drafter exporters (economize.backends.EXPORTERS, keyed "<backend>/<technique>"): the built-in ones register with the
+# @register_exporter decorator when economize.backends imports its subpackages, so they have no entry point here (one
+# registration mechanism per exporter). The "economize.exporters" group is for serving backends in other packages.
+
+# Built-in benchmark suites; other packages add suites (``economize.prompt_sources``) and accelerator presets
+# (``economize.hardware``, an ``economize.bench.Hardware`` object per entry) through the same groups.
+[project.entry-points."economize.prompt_sources"]
+spec-bench = "economize.bench.prompts:spec_bench"
+gsm8k = "economize.bench.prompts:gsm8k"
+humaneval = "economize.bench.prompts:humaneval"
+smoke = "economize.bench.prompts:smoke"
+
+[tool.hatch.version]
+path = "src/economize/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/economize"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/economize", "tests", "docs", "README.md", "CHANGELOG.md", "LICENSE", "pyproject.toml"]
+exclude = ["__pycache__", "*.pyc"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+addopts = "-m 'not slow and not gpu'"
+markers = [
+    "oracle: compares economize against a reference implementation (skipped when it is not importable)",
+    "slow: loads a pretrained model and research checkpoints (run with -m slow)",
+    "gpu: needs a CUDA device (run with -m gpu)",
+]
+# economize's own deprecation shims (``economize._deprecation.warn_moved``) fail the suite; only the shim tests
+# (tests/unit/test_compat_tskip.py, tests/train/test_technique_objective.py) reach them, under ``pytest.warns``.
+filterwarnings = [
+    'error:(economize\..*|CostLog\.to_tskip\(\)) is deprecated:DeprecationWarning',
+]
+
+# Lint gate: `uvx ruff@0.16.10 check src tests` (docs/CONTRIBUTING.md; pinned, as in the `dev` extra). ruff is used as a linter only; the code is not
+# run through a formatter.
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F",  # pycodestyle, pyflakes
+    "I",            # import order
+    "UP",           # pyupgrade (py310+ syntax)
+    "B",            # bugbear
+    "SIM",          # simplify
+    "RUF",          # ruff-specific (sorted __all__, unused noqa, mutable class defaults, ...)
+    "C4",           # comprehensions
+    "PIE",          # misc. lints
+    "PLE",          # pylint errors (invalid __all__, ...)
+    "T10",          # debugger calls
+]
+ignore = [
+    "B905",  # zip() without strict=: adding strict=True changes runtime behaviour; lengths are checked where it matters
+    "B027",  # empty non-abstract methods in ABCs are optional hooks with a no-op default, by design
+    "C408",  # dict(key=value) is used deliberately for keyword-style option dicts
+    "E741",  # single-letter names (l, I) follow the paper's notation for layers and identities
+    "UP038",  # isinstance(x, A | B): deprecated upstream (slower than a tuple) and removed in ruff 0.13; ignored so
+              # that an older ruff gives the same result as the pinned one
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["economize"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests define small fakes inline: one-line lambdas stand in for callbacks (E731), and fake classes declare their
+# canned attributes as plain class-level lists/dicts the way the real classes do (RUF012).
+"tests/**" = ["E731", "RUF012"]
+
+# Type gate: `uvx mypy@2.4.0 --python-executable <venv python> src/economize` (docs/CONTRIBUTING.md; pinned).
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+files = ["src/economize"]

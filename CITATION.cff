@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use economize in your research, please cite it as below."
+type: software
+title: "economize: Composable Efficiency Techniques for Hugging Face Language Models"
+abstract: >-
+  economize equips any Hugging Face causal language model with any combination of efficiency techniques, among them
+  speculative decoding, early exit, layer skipping, quantization, pruning and KV-cache
+  compression, behind one interface for decoding, training, saving and serving.
+authors:
+  - family-names: Laitenberger
+    given-names: Filipe
+    email: f.laitenberger@gmail.com
+repository-code: "https://github.com/Thiggel/economize"
+url: "https://github.com/Thiggel/economize"
+license: Apache-2.0
+version: 0.4.0
+date-released: "2026-11-04"
+keywords:
+  - large language models
+  - inference efficiency
+  - speculative decoding
+  - early exit
+  - quantization
+  - transformers

@@ -1,0 +1,5 @@
+# Versions of the CI environment (.github/workflows/ci.yml). The golden tensors (tests/golden) and the mypy baseline
+# (ci/mypy_baseline.txt) were produced with these; a bump regenerates the baseline (python ci/mypy_gate.py --write)
+# and checks the golden tensors (python tests/golden/regenerate.py --check).
+torch==2.14.1+cpu
+transformers==5.18.0
