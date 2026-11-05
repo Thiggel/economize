@@ -78,15 +78,18 @@ plugins:
             show_symbol_type_toc: true
             heading_level: 2
 
-# Generates the technique table of docs/techniques.md from every registered technique's metadata.
+# Generates the technique table of docs/techniques.md from every registered technique's metadata, and the tables of
+# docs/reproductions.md from docs/data/reproductions.yaml.
 hooks:
   - docs/hooks/techniques.py
+  - docs/hooks/reproductions.py
 
 nav:
   - Home: index.md
   - Getting started: getting_started.md
   - Model zoo: model_zoo.md
   - Benchmarks: benchmarks.md
+  - Reproductions: reproductions.md
   - User guide:
       - Techniques: techniques.md
       - Drafters: drafters.md
