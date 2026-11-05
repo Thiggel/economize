@@ -374,7 +374,7 @@ def test_a_merged_recovery_lora_is_the_hooked_one_folded_into_the_weights(tmp_pa
     assert lora is not None and not lora.installed
     torch.testing.assert_close(merged(TOKENS).logits, expected, rtol=1e-4, atol=1e-4)  # float32 rounding of W + BA
     assert WidthPruneTechnique.trainable_for(merged_config) == ()
-    weights = QuantConfig(format="int8", symmetric=True, group_size=None)
+    weights = QuantConfig(format="int8", symmetric=True, group_size=None, backend="fake")
     states = {"width_prune": checkpoint.states["width_prune"]}
     quantized = economize.attach(make_tiny_model(), economize.Checkpoint([merged_config, weights], states))
     assert list(quantized.techniques) == ["width_prune", "quant"]
@@ -453,7 +453,8 @@ def test_minitron_depth_pruning_removes_one_window(calib) -> None:
 
 def test_width_pruning_composes_with_quantization_and_unstructured_pruning(calib) -> None:
     width = WidthPruneConfig(method="minitron", sparsity=0.5)
-    for weights in (QuantConfig(format="int8", symmetric=True, group_size=None), PruneConfig(method="wanda")):
+    for weights in (QuantConfig(format="int8", symmetric=True, group_size=None, backend="fake"),
+                    PruneConfig(method="wanda", semi_structured=False)):
         model = economize.apply(make_tiny_model(), width, weights, calibration=[calib])
         assert list(model.techniques) == ["width_prune", weights.technique]
         assert model.techniques["width_prune"].summary["intermediate"] == [64] * 6
@@ -538,7 +539,8 @@ def test_conflicts(calib) -> None:
                         SliceGPTConfig(rotation="global"), calibration=[calib])
     lora = WidthPruneConfig(method="llm_pruner", keep_first=1, keep_last=1, lora_rank=4)
     with pytest.raises(IncompatibleTechniquesError, match="recovery LoRA"):
-        economize.apply(make_tiny_model(), lora, QuantConfig(format="int8", group_size=None), calibration=[calib])
+        economize.apply(make_tiny_model(), lora, QuantConfig(format="int8", group_size=None, backend="fake"),
+                        calibration=[calib])
     with pytest.raises(IncompatibleTechniquesError, match="head geometry"):
         economize.apply(make_tiny_model(), WidthPruneConfig(method="flap"),
                         KIVIConfig(bits=2, group_size=4, residual_length=4), calibration=[calib])

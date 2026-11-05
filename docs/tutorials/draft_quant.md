@@ -80,10 +80,12 @@ formats are `int2`, `int3`, `int4`, `int8` and `fp8`. `group_size=None` uses one
 
 ## Kernels
 
-The default `backend="fake"` stores the rounded weights in the model's dtype. It reproduces the numerics of the
-integer kernels, and with them the acceptance rate, but saves no memory or latency. On a CUDA GPU a kernel backend
-stores the codes and runs the draft step with a low-bit GEMM: `"torchao"`, `"marlin"` (int4, int8 and fp8 on sm80
-and newer) or `"machete"` (int4 and int8 on sm90):
+The default `backend="auto"` stores the codes with the fastest installed kernel that fits the format and the
+drafter's device and dtype, and runs the draft step with a low-bit GEMM: `"machete"` (int4 and int8 on sm90),
+`"marlin"` (int4, int8 and fp8 on sm80 and newer) or `"torchao"`. When none fits, it raises a `ConfigError` that names
+the package to install. Each kernel can also be named. `backend="fake"` is the simulated reference: it stores the
+rounded weights in the model's dtype, which reproduces the numerics of the integer kernels and with them the
+acceptance rate, but saves no memory or latency. (The page's tests run on a CPU with `backend="fake"`.)
 
 <!-- not run: needs CUDA kernels -->
 ```python
@@ -117,15 +119,18 @@ it after the base model's weight transforms, as [EAGLE-3](eagle3.md) describes.
 
 ## Serving
 
-The vLLM export writes the drafter with its rounded weights in a dense format, so vLLM reproduces the acceptance of
-the quantized head:
+vLLM and SGLang load hidden-state drafters (EAGLE-3, Medusa, DFlash heads) only with dense float weights, so their
+exports refuse a drafter quantized with a kernel. `backend="fake"` writes the rounded weights in the dense format:
+vLLM then reproduces the acceptance of the quantized head without its saving, which `economize.backend_support`
+reports as simulated. A separate draft model is quantized with `quant` on the draft model itself, which both engines
+serve with real kernels.
 
 <!-- not run: needs vLLM -->
 ```python
 from economize.backends.vllm import serving
 
 model.detach()
-model = economize.apply(base, Eagle3Config(), DraftQuantConfig(format="int8", group_size=128))
+model = economize.apply(base, Eagle3Config(), DraftQuantConfig(format="int8", group_size=128, backend="fake"))
 plan = serving.to_vllm(model, "out/qwen-eagle3-int8", num_speculative_tokens=5)
 llm = plan.llm()
 ```

@@ -185,7 +185,7 @@ def test_quantize_draft_restores_every_module_when_a_backend_fails(monkeypatch) 
 
     monkeypatch.setattr(FakeQuantBackend, "apply", failing_apply)
     with pytest.raises(RuntimeError, match="kernel conversion failed"):
-        quantize_draft(modules, DraftQuantConfig(group_size=32))
+        quantize_draft(modules, DraftQuantConfig(group_size=32, backend="fake"))
     for name, module in modules.items():
         assert torch.equal(module.weight, before[name]), name
         assert module.weight.requires_grad, name
@@ -221,5 +221,6 @@ def test_svd_llm_full_rank_reconstructs_the_weight_and_whitening_survives_a_sing
 def test_fp8_summary_reports_a_scale_only_grid() -> None:
     from economize.techniques.quant.model import quantize_modules
 
-    summary = quantize_modules(_drafter_linears(), DraftQuantConfig(format="fp8", symmetric=False, group_size=None))
+    summary = quantize_modules(_drafter_linears(), DraftQuantConfig(format="fp8", symmetric=False, group_size=None,
+                                                                    backend="fake"))
     assert summary["symmetric"] is True and summary["bits_per_weight"] == pytest.approx(8 + 32 / 64)

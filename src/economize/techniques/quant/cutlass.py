@@ -150,6 +150,9 @@ class CutlassBackend(QuantBackend):
         if reason is not None:
             raise ConfigError(reason)
 
+    def unavailable(self, config: QuantSpec) -> str | None:
+        return _cutlass_reason()
+
     def check(self, modules: Mapping[str, nn.Linear], config: QuantSpec) -> None:
         reason = _cutlass_reason()
         if reason is not None:

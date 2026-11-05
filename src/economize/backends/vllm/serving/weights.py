@@ -8,15 +8,14 @@ model class, the tensors follow its parameter names). The weight techniques chan
   kernels (Marlin / Machete for ``wNa16``, the fp8 GEMMs for ``fp8``). The kernel backends' codes are read back from
   their packed weights (:mod:`economize.techniques.quant.readback`). ``backend="fake"`` holds dequantized weights, so
   vLLM serves the same numbers in the dense dtype (``DENSIFIED``).
-* ``prune`` (unstructured or 2:4 masks): the masked dense weights. vLLM 0.30 removed sparse checkpoints from its
-  compressed-tensors support and has no 2:4 GEMM left, so the 2:4 masks run dense (``DENSIFIED`` for
-  ``semi_structured``).
+* ``prune``: refused. vLLM 0.30 removed sparse checkpoints from its compressed-tensors support and has no 2:4
+  GEMM left, so a pruned model would run at the dense model's cost. The explicit masked-dense reference
+  ``prune(semi_structured=False)`` is served as dense weights (``DENSIFIED``).
 * ``depth_prune``: the model with the removed layers (the technique edits the model and its config in place), which
   vLLM runs natively since it is just a shallower model of the same architecture.
-* ``littlebit``: the factored modules multiplied out (LittleBit's dense weight), ``DENSIFIED``: the outputs equal
-  the HF runtime's to rounding, the memory and speed savings are lost. ``lowrank`` serves its factors through
-  economize's linear method (:mod:`economize.backends.vllm.serving.lowrank`) and is multiplied out the same way only
-  next to a quantized base.
+* ``littlebit``: refused (vLLM has no format for binary factors and no LittleBit GEMM; multiplied out, the
+  model would lose the whole saving). ``lowrank`` serves its factors through economize's linear method
+  (:mod:`economize.backends.vllm.serving.lowrank`) and is multiplied out only next to a quantized base.
 
 :func:`serving_state` builds the state dict all of them write: the base state dict with every module that has a
 ``dense_weight()`` replaced by ``<name>.weight`` / ``<name>.bias`` (or by the tensors of
@@ -186,12 +185,14 @@ class QuantVllm(VllmTechnique):
     technique = "quant"
     role = Role.WEIGHTS
     support = Support.NATIVE
-    reason = ("backends compressed-tensors, marlin, machete, cutlass and torchao are written in the compressed-tensors "
-              "format (vLLM's wNa16 / fp8 kernels); backend='fake' is served dense")
+    reason = ("backends auto (the default), compressed-tensors, marlin, machete, cutlass and torchao are written in "
+              "the compressed-tensors format and run on vLLM's wNa16 / fp8 kernels; the explicit backend='fake' "
+              "reference is served dense")
     #: Quantization backend -> how vLLM serves it; a new backend registers its level here or subclasses. A NATIVE
     #: backend's modules must yield their codes to ``compressed_tensors.quantized_modules`` (recorded, or through a
     #: reader in ``economize.techniques.quant.readback.CODE_READERS``).
     levels: ClassVar[dict[str, Support]] = {
+        "auto": Support.NATIVE,
         "compressed-tensors": Support.NATIVE,
         "marlin": Support.NATIVE,
         "machete": Support.NATIVE,
@@ -237,9 +238,9 @@ class QuantVllm(VllmTechnique):
             )
         if self.level(technique) is Support.UNSUPPORTED:
             raise UnsupportedBackendError(
-                f"quant backend {config.backend!r} has no vLLM export: quantize with backend "
-                "'compressed-tensors', 'marlin', 'machete' or 'torchao' (exported as compressed-tensors; vLLM picks "
-                "its Marlin or Machete kernels for such a checkpoint) or 'fake' (served dense)"
+                f"quant backend {config.backend!r} has no vLLM export: quantize with backend 'auto' (the "
+                "default), 'compressed-tensors', 'marlin', 'machete' or 'torchao' (exported as compressed-tensors; "
+                "vLLM picks its Marlin or Machete kernels for such a checkpoint) or 'fake' (served dense)"
             )
         activations = getattr(config, "activations", None)
         if activations is not None:
@@ -292,41 +293,39 @@ class QuantVllm(VllmTechnique):
                                          "(same outputs, no memory or speed saving)")
 
 
-class _DenseWeights(VllmTechnique):
-    """A weight technique that vLLM serves as the dense weights the base already holds (or multiplies out)."""
-
-    role = Role.WEIGHTS
-    support = Support.DENSIFIED
-    message: str = ""
-
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        builder.rewrite_base = True
-        if self.message:
-            builder.note(self.technique, self.message)
-
-
 @register_vllm_technique
-class LittleBitVllm(_DenseWeights):
+class LittleBitVllm(VllmTechnique):
+    """``littlebit``: refused (vLLM would serve the binary factors multiplied out, at the dense model's cost)."""
+
     technique = "littlebit"
-    reason = "served as the dense weight of the binary factors (vLLM has no LittleBit GEMM)"
-    message = "binary factors are multiplied out: same outputs, no memory or speed saving"
-
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        if any("LittleBit" in type(module).__name__ and not callable(getattr(module, "dense_weight", None))
-               for module in builder.base.modules()):
-            raise UnsupportedBackendError("littlebit in its latent (QAT) form has no dense weight: finish "
-                                          "training (convert to LittleBitLinear) before serving")
+    role = Role.WEIGHTS
+    support = Support.UNSUPPORTED
+    reason = ("vLLM has no format for LittleBit's binary factors and no LittleBit GEMM, so they would be multiplied "
+              "out into dense weights and the whole saving lost; run littlebit with the transformers backend")
 
 
 @register_vllm_technique
-class PruneVllm(_DenseWeights):
+class PruneVllm(VllmTechnique):
+    """``prune``: refused, except the explicit masked-dense reference ``semi_structured=False`` (served dense)."""
+
     technique = "prune"
-    reason = "the masked dense weights (vLLM 0.30 has no sparse checkpoint format and no 2:4 GEMM)"
-    simulation = Simulation(Saving.WEIGHT_MEMORY | Saving.COMPUTE | Saving.LATENCY,
-                            "the masked weights are served dense")
+    role = Role.WEIGHTS
+    support = Support.UNSUPPORTED
+    reason = ("vLLM 0.30 has no sparse checkpoint format and no 2:4 GEMM, so the pruned model would run at dense "
+              "cost; pass prune(semi_structured=False) to serve the masked dense reference (simulated: same "
+              "outputs, no memory or speed saving)")
+    #: What the reference serves.
+    reference_reason: ClassVar[str] = ("semi_structured=False (the simulated reference): the masked weights are "
+                                       "served dense")
 
     def level(self, technique: nn.Module) -> Support:
-        return Support.DENSIFIED if technique.config.semi_structured else Support.NATIVE
+        """``DENSIFIED`` for the explicit reference ``semi_structured=False``, else ``UNSUPPORTED``."""
+        reference = getattr(technique.config, "semi_structured", None) is False
+        return Support.DENSIFIED if reference else Support.UNSUPPORTED
+
+    def reason_of(self, technique: nn.Module) -> str:
+        """The refusal, or what the reference serves (see :meth:`level`)."""
+        return self.reference_reason if self.level(technique) is Support.DENSIFIED else self.reason
 
     def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
         builder.rewrite_base = True

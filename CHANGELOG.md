@@ -4,6 +4,31 @@
 
 54 techniques (28 new), 21 training objectives, 46 model types.
 
+### Real weight compression by default (breaking)
+
+The default configuration of every weight compression now runs on a real kernel or is refused with the reason;
+the simulated paths remain as explicit references that `economize.backend_support` reports as simulated.
+
+- `quant` and `draft_quant`: the default backend is `auto`, the best installed real kernel (`machete`, `marlin`,
+  `cutlass`, then `torchao`; registry `AUTO_QUANT_CANDIDATES`, entry-point group `economize.auto_quant`). The
+  summary key `kernel` names the choice, and without a fitting kernel the error names the extras to install
+  (`economize[vllm]`, `economize[quant]`). `backend="fake"` is the explicit dequantized reference.
+- `prune`: `semi_structured` is now `None` by default, which stores the default 2:4 weights as
+  `SparseSemiStructuredTensor` (refused before any weight changes without a CUDA sm80+ GPU and fp16 / bf16 weights).
+  Unstructured and other N:M patterns are refused unless `semi_structured=False` asks for the masked dense
+  reference. Sparse storage cannot be quantized or factorized, so the default `prune` no longer combines with `quant`
+  or `lowrank` (`economize.compatible("prune", "quant")` is `False`); use `semi_structured=False` for that recipe.
+- vLLM and SGLang refuse `prune` (no 2:4 GEMM), `littlebit` and `draft_quant` with kernel backends; SGLang also
+  refuses `lowrank` (vLLM serves the factors). The references `prune(semi_structured=False)` and
+  `draft_quant(backend="fake")` are served dense and reported as densified.
+- GGUF, MLX, ONNX and TensorRT-LLM exports refuse `prune`, `littlebit`, `lowrank` (except ONNX) and quantized codes
+  their format cannot store, with an `UnsupportedBackendError` that names the storable layouts; only
+  `quant(backend="fake")` and `prune(semi_structured=False)` are written dense. TensorRT-LLM refuses the default
+  asymmetric int4 codes (`W4A16_AWQ` has no zero points).
+- ONNX exports keep `lowrank` factored: each factored map is two `MatMul` nodes (`MatMulNBits` for a quantized
+  factor), `economize.backends.onnx.factored`.
+- The ONNX graph writer refuses non-integer zero points instead of rounding them.
+
 ### New techniques
 
 - Drafters: `dflash` (DFlash block drafter with z-lab and speculators checkpoint readers), `pard` (parallel

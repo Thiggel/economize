@@ -196,7 +196,8 @@ def test_layer_skip_on_a_pruned_model_equals_its_greedy(calib) -> None:
     from economize.techniques.prune import PruneConfig
 
     base = make_tiny_model()
-    model = economize.apply(base, PruneConfig(method="wanda", sparsity="2:4"), LayerSkipConfig(num_skip=2),
+    model = economize.apply(base, PruneConfig(method="wanda", sparsity="2:4", semi_structured=False),
+                            LayerSkipConfig(num_skip=2),
                          decoding=DecodeConfig(cycle_length=4), calibration=calib)
     assert list(model.techniques) == ["prune", "layer_skip"]
     prompts = _prompts()

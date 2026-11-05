@@ -67,8 +67,9 @@ class QuantSglang(DelegatedSglang):
     technique = "quant"
     role = Role.WEIGHTS
     support = Support.NATIVE
-    reason = ("backends compressed-tensors, marlin, machete and torchao are written in the compressed-tensors format "
-              "(SGLang's wNa16 Marlin / fp8 kernels); backend='fake' is served dense")
+    reason = ("backends auto (the default), compressed-tensors, marlin, machete, cutlass and torchao are written in "
+              "the compressed-tensors format and run on SGLang's wNa16 Marlin / fp8 kernels; the explicit "
+              "backend='fake' reference is served dense")
     vllm = QuantVllm
     #: Formats whose compressed-tensors checkpoint SGLang (0.5.21) cannot load, with the reason. A format SGLang
     #: learns to serve is removed here (or by a subclass).
@@ -91,24 +92,57 @@ class QuantSglang(DelegatedSglang):
             return Support.UNSUPPORTED
         return super().level(technique)
 
+    def reason_of(self, technique: nn.Module) -> str:
+        """Why SGLang refuses the configured format, or :attr:`reason` (what it runs).
+
+        Parameters
+        ----------
+        technique : nn.Module
+            The technique, or any object with its ``config``.
+
+        Returns
+        -------
+        str
+            The reason shown by :func:`economize.backend_support`.
+        """
+        config: Any = technique.config
+        return self.unsupported_formats.get(config.format, self.reason)
+
 
 @register_sglang_technique
 class LittleBitSglang(DelegatedSglang):
+    """``littlebit``: refused (SGLang would serve the binary factors multiplied out)."""
+
     technique = "littlebit"
     role = Role.WEIGHTS
-    support = Support.DENSIFIED
-    reason = "served as the dense weight of the binary factors (SGLang has no LittleBit GEMM)"
+    support = Support.UNSUPPORTED
+    reason = ("SGLang has no format for LittleBit's binary factors and no LittleBit GEMM, so they would be "
+              "multiplied out into dense weights and the whole saving lost; run littlebit with the transformers "
+              "backend")
     vllm = LittleBitVllm
 
 
 @register_sglang_technique
 class PruneSglang(DelegatedSglang):
+    """``prune``: refused, except the explicit masked-dense reference ``semi_structured=False`` (served dense).
+
+    SGLang 0.5.21 refuses the 2:4 compressed-tensors scheme (``CompressedTensorsW4A16Sparse24 is not supported
+    now``) and has no other sparse checkpoint format.
+    """
+
     technique = "prune"
     role = Role.WEIGHTS
-    support = Support.NATIVE
-    reason = ("the masked weights as a dense checkpoint (unstructured sparsity is dense anyway; SGLang has no 2:4 "
-              "sparse checkpoint format, so 2:4 masks are DENSIFIED)")
+    support = Support.UNSUPPORTED
+    reason = ("SGLang has no sparse checkpoint format and no 2:4 GEMM (it refuses the compressed-tensors 2:4 "
+              "scheme), so the pruned model would run at dense cost; pass prune(semi_structured=False) to serve the "
+              "masked dense reference (simulated: same outputs, no memory or speed saving)")
     vllm = PruneVllm
+
+    def reason_of(self, technique: nn.Module) -> str:
+        """The refusal, or what the reference serves (the level follows :class:`PruneVllm`)."""
+        if self.level(technique) is Support.DENSIFIED:
+            return PruneVllm.reference_reason
+        return self.reason
 
 
 @register_sglang_technique
@@ -122,26 +156,11 @@ class DepthPruneSglang(DelegatedSglang):
 
 @register_sglang_technique
 class LowRankSglang(SglangTechnique):
-    """``lowrank``: SGLang has no linear-method plugin, so the factors are multiplied out into dense weights."""
+    """``lowrank``: refused (SGLang has no linear-method plugin, so the factors would be multiplied out)."""
 
     technique = "lowrank"
     role = Role.WEIGHTS
-    support = Support.DENSIFIED
-    reason = ("the dense product up @ down of every factored map (SGLang has no plugin hook for a factored linear "
-              "method)")
-
-    def check(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
-        from ...vllm.serving.weights import dense_modules, quantized_inside
-
-        for name, module in dense_modules(builder.base).items():
-            inner = quantized_inside(module)
-            if inner is not None:
-                raise UnsupportedBackendError(
-                    f"lowrank next to a compressed-tensors base: {name}.{inner} quantizes a factor, while SGLang "
-                    "serves the factored map multiplied out. Quantize with backend='fake' (served dense) or serve "
-                    "lowrank without quant"
-                )
-
-    def contribute(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
-        builder.rewrite_base = True
-        builder.note(self.technique, "factored maps are multiplied out: same outputs, no memory or speed saving")
+    support = Support.UNSUPPORTED
+    reason = ("SGLang has no plugin hook for a factored linear method, so the factors would be multiplied out into "
+              "dense weights and the memory and compute saving lost; serve lowrank with vLLM (economize's "
+              "factored linear method) or export it to ONNX Runtime")

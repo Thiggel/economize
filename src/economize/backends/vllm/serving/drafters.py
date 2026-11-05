@@ -19,7 +19,7 @@ economize                  vLLM 0.30 (``speculative_config``)
 ``dflash``                 ``method="dflash"`` (:class:`~economize.backends.vllm.dflash.DFlashVllmExporter`)
 ``jump``                   economize's vLLM plugin (``EconomizeJumpEagle3`` through ``method="eagle3"``)
 ``frspec`` over ``eagle3``  ``method="eagle3"`` with ``draft_vocab_size``, ``d2t`` and the head rows of the ids
-``draft_quant``            the drafter's dequantized weights (``backend="fake"``): a draft option
+``draft_quant``            ``backend="fake"`` only: the drafter's dequantized weights, served dense
 =========================  ==================================================================================
 
 Model-based proposers draft by sampling when the plan samples (``draft_sample_method="probabilistic"``); the
@@ -33,7 +33,7 @@ from __future__ import annotations
 import dataclasses
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import torch
 from torch import nn
@@ -45,6 +45,8 @@ from ..spec import speculative_config
 from .base import PlanBuilder, Role, Support, VllmTechnique, register_vllm_technique
 
 __all__ = [
+    "DRAFT_QUANT_FAKE",
+    "DRAFT_QUANT_REASON",
     "DraftModelVllm",
     "DraftQuantVllm",
     "Eagle3Vllm",
@@ -84,6 +86,17 @@ def _model_spec(builder: PlanBuilder, method: str, drafter: str | Path | None, *
     if builder.sampling:
         spec |= {"draft_sample_method": "probabilistic", "rejection_sample_method": "standard"}
     return spec | extra
+
+
+#: Why the vLLM and SGLang exports refuse a drafter quantized with a kernel backend (``{engine}`` is the engine).
+DRAFT_QUANT_REASON = (
+    "the drafter exports ({engine}'s EAGLE-3, Medusa and DFlash heads, economize's jump plugin) write dense float "
+    "weights, and {engine} has no checkpoint format economize writes for a quantized hidden-state drafter; "
+    "backend='fake' serves the rounded drafter dense (simulated), and a separate draft LM is quantized with "
+    "quant on the draft model itself"
+)
+#: What the vLLM and SGLang exports serve for ``draft_quant(backend="fake")``.
+DRAFT_QUANT_FAKE = "the drafter is exported with its rounded (dequantized) weights in the dense dtype"
 
 
 class _Drafter(VllmTechnique):
@@ -602,12 +615,32 @@ class DraftQuantVllm(VllmTechnique):
 
     technique = "draft_quant"
     role = Role.DRAFT_OPTION
-    support = Support.DENSIFIED
-    reason = "the drafter is exported with its rounded (dequantized) weights in the dense dtype"
+    support = Support.UNSUPPORTED
+    reason = DRAFT_QUANT_REASON.format(engine="vLLM")
+    #: Quantization backend -> how vLLM serves the quantized drafter. Only the explicit ``fake`` reference has a
+    #: path (its rounded weights, served dense); a kernel backend that gains a quantized drafter export registers
+    #: its level here.
+    levels: ClassVar[dict[str, Support]] = {"fake": Support.DENSIFIED}
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        if technique.config.backend != "fake":
-            raise UnsupportedBackendError(f"draft_quant backend {technique.config.backend!r} has no vLLM export")
+    def level(self, technique: nn.Module) -> Support:
+        return self.levels.get(str(technique.config.backend), Support.UNSUPPORTED)
+
+    def reason_of(self, technique: nn.Module) -> str:
+        """What vLLM serves for the configured backend, or why it refuses it.
+
+        Parameters
+        ----------
+        technique : nn.Module
+            The technique, or any object with its ``config``.
+
+        Returns
+        -------
+        str
+            The reason shown by :func:`economize.backend_support`.
+        """
+        if self.level(technique) is Support.DENSIFIED:
+            return DRAFT_QUANT_FAKE
+        return self.reason
 
     def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
         builder.note(self.technique, "the drafter runs the rounded weights in the dense dtype: same drafts, no "

@@ -105,7 +105,7 @@ def test_two_kv_cache_techniques_are_refused(tiny_dir: Path) -> None:
 
 
 def test_draft_quant_without_a_drafter_is_refused(tiny_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    model = economize.apply(_base(tiny_dir), JUMP, DraftQuantConfig())
+    model = economize.apply(_base(tiny_dir), JUMP, DraftQuantConfig(backend="fake"))
     assert check_servable(model) == {"jump": Support.PLUGIN, "draft_quant": Support.DENSIFIED}
     techniques = dict(model.techniques)
     techniques.pop("jump")
@@ -116,7 +116,8 @@ def test_draft_quant_without_a_drafter_is_refused(tiny_dir: Path, monkeypatch: p
 
 def test_quant_levels_and_refusals(tiny_dir: Path) -> None:
     adapter = serving.base.adapter_for("quant")
-    fake = economize.apply(_base(tiny_dir), QuantConfig(format="int4", group_size=32)).techniques["quant"]
+    fake = economize.apply(_base(tiny_dir), QuantConfig(format="int4", group_size=32,
+                                                        backend="fake")).techniques["quant"]
     assert adapter.level(fake) is Support.DENSIFIED
     for backend in ("compressed-tensors", "marlin", "machete", "torchao"):  # codes recorded or read back
         fake.config = QuantConfig(format="int4", group_size=64, backend=backend)
@@ -131,17 +132,18 @@ def test_quant_levels_and_refusals(tiny_dir: Path) -> None:
 
 
 def test_fake_quant_writes_the_dequantized_base(tiny_dir: Path, tmp_path: Path) -> None:
-    model = economize.apply(_base(tiny_dir), QuantConfig(format="int4", group_size=32))
+    model = economize.apply(_base(tiny_dir), QuantConfig(format="int4", group_size=32, backend="fake"))
     plan = to_vllm(model, tmp_path / "out")
     assert plan.model == str(tmp_path / "out" / "model") and plan.tokenizer == str(tiny_dir)
     assert plan.techniques == {"quant": "densified"}
     torch.testing.assert_close(_base(Path(plan.model))(TOKENS).logits, _logits(model), atol=1e-5, rtol=1e-5)
 
 
-def test_unstructured_prune_is_native_and_reloads(tiny_dir: Path, tmp_path: Path) -> None:
-    model = economize.apply(_base(tiny_dir), PruneConfig(method="magnitude", sparsity=0.5))
+def test_masked_prune_is_written_dense_and_reloads(tiny_dir: Path, tmp_path: Path) -> None:
+    """The masked reference serves the same function at dense cost (vLLM has no sparse GEMM): densified."""
+    model = economize.apply(_base(tiny_dir), PruneConfig(method="magnitude", sparsity=0.5, semi_structured=False))
     plan = to_vllm(model, tmp_path / "out")
-    assert plan.techniques == {"prune": "native"}
+    assert plan.techniques == {"prune": "densified"}
     torch.testing.assert_close(_base(Path(plan.model))(TOKENS).logits, _logits(model), atol=1e-5, rtol=1e-5)
 
 
@@ -366,7 +368,7 @@ def test_frspec_around_jump_is_refused(tiny_dir: Path) -> None:
 
 
 def test_jump_with_draft_quant(tiny_dir: Path, tmp_path: Path) -> None:
-    model = economize.apply(_base(tiny_dir), JUMP, DraftQuantConfig(format="int8"))
+    model = economize.apply(_base(tiny_dir), JUMP, DraftQuantConfig(format="int8", backend="fake"))
     plan = to_vllm(model, tmp_path / "out")
     assert plan.model == str(tiny_dir)  # the base is unchanged, vLLM loads it from its folder
     assert plan.techniques == {"jump": "plugin", "draft_quant": "densified"}

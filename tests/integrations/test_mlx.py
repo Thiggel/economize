@@ -57,7 +57,9 @@ def test_every_technique_has_an_mlx_status() -> None:
     assert set(listed_techniques()) <= set(rows)
     assert all(reason for _, _, reason in rows.values())
     assert rows["draft_model"][1] == rows["kv_evict"][1] == rows["depth_prune"][1] == Support.NATIVE.value
-    assert rows["quant"][1] == rows["lowrank"][1] == Support.DENSIFIED.value
+    assert rows["quant"][1] == Support.NATIVE.value  # the default int4 codes are MLX's affine 4-bit layout
+    for refused in ("lowrank", "littlebit", "prune"):  # nothing in the format holds them: refused, never densified
+        assert rows[refused][1] == Support.UNSUPPORTED.value, refused
     for refused in ("lookup", "eagle", "eagle3", "medusa", "kv_fp8", "teal", "calm", "frspec"):
         assert rows[refused][1] == Support.UNSUPPORTED.value, refused
     assert "jump" not in rows and MLX.support_table(["jump"])[0][2] == Support.UNSUPPORTED.value  # unlisted
@@ -75,7 +77,7 @@ def test_quant_level_follows_its_configuration() -> None:
     assert adapter.level(_quant()) is Support.NATIVE
     assert adapter.level(_quant("int8", symmetric=True, backend="marlin")) is Support.NATIVE
     assert adapter.level(_quant(backend="fake")) is Support.DENSIFIED
-    assert adapter.level(QuantConfig(format="fp8", backend="torchao", group_size=None)) is Support.DENSIFIED
+    assert adapter.level(QuantConfig(format="fp8", backend="torchao", group_size=None)) is Support.UNSUPPORTED
     w8a8 = QuantConfig(format="fp8", backend="torchao", fp8_activations=True, group_size=None)
     assert adapter.level(w8a8) is Support.UNSUPPORTED
 
@@ -194,12 +196,16 @@ def test_fake_quant_is_written_dense_with_a_warning(tmp_path: Path) -> None:
     assert _load(export.path)["model.layers.0.self_attn.q_proj.weight"].dtype == np.float32
 
 
-def test_groups_mlx_does_not_have_are_written_dense(tmp_path: Path) -> None:
+def test_groups_mlx_does_not_have_are_refused(tmp_path: Path) -> None:
+    """A real kernel's codes in a layout MLX cannot store are refused; only the fake reference is written dense."""
     model = economize.apply(make_tiny_model(), _quant(group_size=16))
+    with pytest.raises(UnsupportedBackendError, match=r"group_size=16 is not one of MLX's group sizes.*backend='fake'"):
+        to_mlx(model, tmp_path / "real", dtype="float32")
+    reference = economize.apply(make_tiny_model(), _quant(group_size=16, backend="fake"))
     with pytest.warns(SimulatedPathWarning):
-        export = to_mlx(model, tmp_path, dtype="float32")
-    assert export.supports == {"quant": "densified"} and "group size 16" in export.simulations["quant"]
-    assert "quantization" not in json.loads((tmp_path / "config.json").read_text())
+        export = to_mlx(reference, tmp_path / "fake", dtype="float32")
+    assert export.supports == {"quant": "densified"}
+    assert "quantization" not in json.loads((tmp_path / "fake" / "config.json").read_text())
 
 
 def test_mixed_settings_get_per_module_entries() -> None:

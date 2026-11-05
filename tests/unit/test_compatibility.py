@@ -58,9 +58,12 @@ def test_one_technique_per_exclusive_family(a: str, b: str, reason: str) -> None
     assert reason in str(economize.incompatibility(a, b))
 
 
-@pytest.mark.parametrize(("a", "b"), [("teal", "quant"), ("prune", "quant"), ("jump", "kivi"), ("eagle3", "teal")])
-def test_orthogonal_techniques_combine(a: str, b: str) -> None:
-    assert economize.compatible(a, b)
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [("teal", "quant"), (PruneConfig(semi_structured=False), "quant"), ("jump", "kivi"), ("eagle3", "teal")],
+)
+def test_orthogonal_techniques_combine(a: object, b: str) -> None:
+    assert economize.compatible(a, b)  # type: ignore[arg-type]
 
 
 def test_queries_accept_names_classes_configs_and_techniques() -> None:
@@ -71,8 +74,12 @@ def test_queries_accept_names_classes_configs_and_techniques() -> None:
 
 
 def test_a_configuration_is_checked_as_configured() -> None:
-    """2:4 storage as sparse tensors leaves nothing a later weight transform can rewrite; masked pruning does."""
-    assert economize.compatible(PruneConfig(), QuantConfig())
+    """2:4 storage as sparse tensors leaves nothing a later weight transform can rewrite; masked pruning does.
+
+    The default ``PruneConfig()`` stores 2:4 sparse tensors, so it is refused next to quantization by name too."""
+    assert economize.compatible(PruneConfig(semi_structured=False), QuantConfig())
+    assert economize.compatible(PruneConfig(sparsity=0.5), QuantConfig())  # unstructured: masked weights
+    assert not economize.compatible(PruneConfig(), QuantConfig()) and not economize.compatible("prune", "quant")
     sparse = PruneConfig(sparsity="2:4", semi_structured=True)
     assert "semi_structured=False" in str(economize.incompatibility(sparse, QuantConfig()))
     assert economize.incompatibility(QuantConfig(), sparse) == economize.incompatibility(sparse, QuantConfig())
@@ -101,9 +108,11 @@ def test_backends_are_reported() -> None:
     assert {"transformers", "vllm", "sglang"} <= set(economize.backend_support("jump"))
 
 
-@pytest.mark.parametrize("name", ["teal", "kivi", "kv_evict", "prune", "quant"])
-def test_simulated_hugging_face_paths_are_reported(name: str) -> None:
-    support = economize.backend_support(name)["transformers"]
+@pytest.mark.parametrize(
+    "name", ["teal", "kivi", "kv_evict", PruneConfig(semi_structured=False), QuantConfig(backend="fake")]
+)
+def test_simulated_hugging_face_paths_are_reported(name: object) -> None:
+    support = economize.backend_support(name)["transformers"]  # type: ignore[arg-type]
     assert support.status is SupportStatus.SIMULATED
     assert support.simulation is not None and "saves no" in support.detail
 
@@ -117,18 +126,23 @@ def test_simulation_names_only_declared_savings() -> None:
 
 
 def test_the_kernel_decides_whether_a_path_is_simulated() -> None:
-    assert _status(QuantConfig(), "transformers") is SupportStatus.SIMULATED  # backend="fake"
+    assert _status(QuantConfig(), "transformers") is SupportStatus.REAL  # backend="auto": the best installed kernel
     assert _status(QuantConfig(backend="torchao"), "transformers") is SupportStatus.REAL
-    assert _status(PruneConfig(), "transformers") is SupportStatus.SIMULATED  # masked dense weights
+    assert _status(QuantConfig(backend="fake"), "transformers") is SupportStatus.SIMULATED  # the reference
+    assert _status(PruneConfig(), "transformers") is SupportStatus.REAL  # 2:4 sparse tensors
+    assert _status(PruneConfig(semi_structured=False), "transformers") is SupportStatus.SIMULATED  # masked dense
+    assert _status(PruneConfig(sparsity=0.5), "transformers") is SupportStatus.UNSUPPORTED  # no unstructured kernel
 
 
 def test_serving_backends_report_dense_and_missing_paths() -> None:
     assert _status("kivi", "vllm") is SupportStatus.SIMULATED
-    assert _status("prune", "vllm") is SupportStatus.SIMULATED
+    assert _status("prune", "vllm") is SupportStatus.UNSUPPORTED  # no 2:4 GEMM in the engine
+    assert _status(PruneConfig(semi_structured=False), "vllm") is SupportStatus.SIMULATED  # served dense
     assert _status("jump", "vllm") is SupportStatus.REAL
     assert _status("calm", "vllm") is SupportStatus.UNSUPPORTED
-    assert _status("quant", "sglang") is SupportStatus.SIMULATED
-    assert _status("prune", "sglang") is SupportStatus.SIMULATED  # the vLLM checkpoint, served dense
+    assert _status("quant", "sglang") is SupportStatus.REAL
+    assert _status(QuantConfig(backend="fake"), "sglang") is SupportStatus.SIMULATED  # the dequantized base
+    assert _status("prune", "sglang") is SupportStatus.UNSUPPORTED
 
 
 def test_sglang_reports_the_simulation_of_the_vllm_checkpoint_it_loads() -> None:
@@ -141,7 +155,7 @@ def test_sglang_reports_the_simulation_of_the_vllm_checkpoint_it_loads() -> None
 
 def test_attaching_a_simulated_path_warns() -> None:
     with pytest.warns(SimulatedPathWarning, match="quant runs on a simulated path") as caught:
-        model = economize.apply(make_tiny_model(), QuantConfig())
+        model = economize.apply(make_tiny_model(), QuantConfig(backend="fake"))
     assert set(model.simulations()) == {"quant"}
     # the warning names only the savings the path loses (a KV-eviction path still decodes at the technique's speed)
     message = str(caught[0].message)

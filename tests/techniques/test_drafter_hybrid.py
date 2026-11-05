@@ -93,7 +93,8 @@ def test_fallback_must_draft() -> None:
     from economize.techniques.prune import PruneConfig
 
     with pytest.raises(ConfigError, match="draft"):
-        economize.apply(make_tiny_model(), HybridConfig(fallback=PruneConfig(method="magnitude", sparsity=0.5)))
+        economize.apply(make_tiny_model(), HybridConfig(fallback=PruneConfig(method="magnitude", sparsity=0.5,
+                                                                             semi_structured=False)))
 
 
 # ---- merging and the per-row choice --------------------------------------------------------------------------------
@@ -240,7 +241,7 @@ def test_hybrid_on_a_pruned_model_equals_its_greedy(calib) -> None:
 
     base = _copying_model()
     model = economize.apply(
-        base, PruneConfig(method="wanda", sparsity="2:4"), HybridConfig(fallback=JUMP),
+        base, PruneConfig(method="wanda", sparsity="2:4", semi_structured=False), HybridConfig(fallback=JUMP),
         decoding=DecodeConfig(cycle_length=4), calibration=calib)
     perturb(model.techniques["hybrid"].fallback, std=0.05, seed=3)
     assert list(model.techniques) == ["prune", "hybrid"]

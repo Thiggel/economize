@@ -66,7 +66,9 @@ def test_every_technique_has_a_llama_cpp_status() -> None:
     assert set(listed_techniques()) <= set(rows)
     assert all(reason for _, _, reason in rows.values())
     assert rows["draft_model"][1] == rows["lookup"][1] == Support.NATIVE.value
-    assert rows["quant"][1] == rows["prune"][1] == Support.DENSIFIED.value
+    assert rows["quant"][1] == Support.NATIVE.value  # the default int4 codes are written as Q4_1 blocks
+    for refused in ("prune", "lowrank", "littlebit"):  # no sparse or factored form: refused, never densified
+        assert rows[refused][1] == Support.UNSUPPORTED.value, refused
     for refused in ("eagle", "eagle3", "medusa", "kv_fp8", "kv_evict", "teal", "calm"):
         assert rows[refused][1] == Support.UNSUPPORTED.value, refused
     assert "jump" not in rows and GGUF.support_table(["jump"])[0][2] == Support.UNSUPPORTED.value  # unlisted
@@ -189,13 +191,16 @@ def test_fake_quant_is_written_dense_with_a_warning(tmp_path: Path, gguf_reader:
     assert tensors["blk.0.attn_q.weight"].tensor_type.name == "F32"
 
 
-def test_groups_that_are_not_blocks_of_32_are_written_dense(tmp_path: Path, gguf_reader: type) -> None:
+def test_groups_that_are_not_blocks_of_32_are_refused(tmp_path: Path) -> None:
+    """Real codes GGUF cannot hold are refused; only the fake reference is written as dense floats."""
     model = economize.apply(make_tiny_model(), QuantConfig(format="int4", group_size=16,
                                                            backend="compressed-tensors"))
+    with pytest.raises(UnsupportedBackendError, match="group_size=16 is not a multiple of GGUF's 32-value blocks"):
+        to_gguf(model, tmp_path / "real", outtype="f32")
+    reference = economize.apply(make_tiny_model(), QuantConfig(format="int4", group_size=16, backend="fake"))
     with pytest.warns(SimulatedPathWarning):
-        export = to_gguf(model, tmp_path, outtype="f32")
+        export = to_gguf(reference, tmp_path / "fake", outtype="f32")
     assert export.supports == {"quant": "densified"}
-    assert "multiples of 32" in export.simulations["quant"]
 
 
 # ---- llama.cpp round trips -----------------------------------------------------------------------------------------

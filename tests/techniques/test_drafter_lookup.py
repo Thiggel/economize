@@ -208,7 +208,7 @@ def test_lookup_on_a_pruned_model_equals_its_greedy(calib) -> None:
     base = _copying_model()
     from economize.techniques.prune import PruneConfig
 
-    model = economize.apply(base, PruneConfig(method="wanda", sparsity="2:4"), LookupConfig(),
+    model = economize.apply(base, PruneConfig(method="wanda", sparsity="2:4", semi_structured=False), LookupConfig(),
                          decoding=DecodeConfig(cycle_length=4), calibration=calib)
     assert list(model.techniques) == ["prune", "lookup"]
     prompts = _prompts()

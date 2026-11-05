@@ -13,11 +13,16 @@ magnitudes, folds them into the preceding norm or linear map, and then searches 
 activation outliers into the weights for W8A8, where the inputs are quantized as well. Nothing is trained, and the
 result is lossy.
 
-The backend decides how the codes are stored and multiplied. The default `fake` backend keeps the dequantized
-weights in the model's dtype: its outputs are those of the quantized model, but it saves neither memory nor time.
-The `torchao` backend stores int8, int4 or fp8 tensors with their kernels, `marlin`, `machete` and `cutlass` use
-vLLM's GPU kernels, and `compressed-tensors` records the codes for an export that vLLM, SGLang and `transformers`
-load. Quantization rewrites the base weights in place, so the technique cannot be detached.
+The backend decides how the codes are stored and multiplied. The default `auto` takes the fastest installed kernel
+that stores the format and group size and runs on the model's device and dtype: vLLM's Machete (int4 and int8 on
+Hopper), Marlin (int4, int8 and fp8 weight-only GEMMs on sm80+), CUTLASS (int8 by int8 with `activations="int8"`) or
+torchao (tinygemm int4, int8, fp8). When none of them fits, it raises a `ConfigError` with each kernel's reason and
+the package to install (`economize[vllm]` or `economize[quant]`). A format that no kernel stores, such as `int3`, is
+refused when the configuration is built. Each kernel can also be named directly. The `fake` backend is the
+simulated reference: it keeps the dequantized weights in the model's dtype, so its outputs are those of the
+quantized model while it saves neither memory nor time, and `model.simulations()` says so. `compressed-tensors`
+records the codes for an export that vLLM, SGLang and `transformers` load. Quantization rewrites the base weights in
+place, so the technique cannot be detached.
 
 ## Setup
 
@@ -52,12 +57,14 @@ model = economize.apply(base, QuantConfig(format="int4", method="rtn", group_siz
 
 summary = model.techniques["quant"].summary
 print(summary["modules"], summary["bits_per_weight"])   # quantized maps, storage bits including scales and zeros
+print(summary["kernel"])                                 # the kernel that backend="auto" chose
 print(dense_ppl, perplexity(model, windows))
-print(model.simulations())                               # the fake backend realizes no saving
 ```
 
 `bits_per_weight` counts the codes, the scales and the zero points, so int4 with groups of 128 stores a little more
-than 4 bits per weight.
+than 4 bits per weight. For a bf16 model with vLLM installed, `auto` chooses Marlin on an A100 and Machete on an H100,
+and without vLLM torchao's tinygemm kernel. (The page's tests run on a CPU, where no int4 kernel exists, with
+`backend="fake"`.)
 
 ## Methods
 
@@ -81,8 +88,8 @@ print(perplexity(model, windows))
 
 ## Kernels and the saving
 
-A real saving needs a kernel backend. torchao's int8 W8A8 path (per-channel symmetric weights, inputs quantized per
-token, int8 by int8 matrix products) runs on the CPU as well as on CUDA GPUs:
+Every backend except `fake` realizes the saving. torchao's int8 W8A8 path (per-channel symmetric weights, inputs
+quantized per token, int8 by int8 matrix products) runs on the CPU as well as on CUDA GPUs:
 
 ```python
 base = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B", dtype=torch.bfloat16, device_map="cuda")

@@ -68,11 +68,11 @@ unsupported (refused with `UnsupportedBackendError` and the reason).
 |---|---|---|---|
 | quant (compressed-tensors, marlin, machete, torchao) | weights | native | compressed-tensors checkpoint (SGLang's wNa16 Marlin / fp8 kernels), written by the vLLM serving layer's writer |
 | quant (fake) | weights | densified | the dequantized weights |
-| prune (unstructured) | weights | native | the masked dense weights |
-| prune (2:4) | weights | densified | masked dense weights (SGLang has no 2:4 sparse checkpoint format) |
+| prune (default 2:4 storage, other patterns) | weights | unsupported | SGLang has no sparse checkpoint format and no 2:4 GEMM, so the pruned model would run at dense cost |
+| prune (`semi_structured=False`, the masked reference) | weights | densified | the masked dense weights |
 | depth_prune | weights | native | the shallower checkpoint, config renumbered |
-| lowrank | weights | densified | the product `up @ down` of every factored map (no plugin point for a custom linear method) |
-| littlebit | weights | densified | the dense weight of the binary factors |
+| lowrank | weights | unsupported | no plugin point for a factored linear method, so the factors would be multiplied out and the saving lost (vLLM serves them factored) |
+| littlebit | weights | unsupported | no format for the binary factors and no LittleBit GEMM |
 | kv_fp8, kv_fp8_fused | kv cache | native | `kv_cache_dtype` fp8_e4m3 / fp8_e5m2, unscaled casts in all layers; calibrated scales, per-token scales and layer subsets are refused |
 | eagle3 | drafter | native | `EAGLE3`, `LlamaForCausalLMEagle3` draft config with `eagle_config` aux ids; a draft head with attention biases is refused (SGLang's Llama head has none) |
 | frspec (around eagle3) | drafter | native | EAGLE3 with `draft_vocab_size`, `d2t` (SGLang's hot token ids) and the head rows of the ids |
@@ -81,7 +81,7 @@ unsupported (refused with `UnsupportedBackendError` and the reason).
 | dflash | drafter | native | `DFLASH` with the z-lab `DFlashDraftModel` checkpoint |
 | vendor_mtp | drafter | native | `NEXTN` with the modules under their vendor names in the target checkpoint (untested on a real checkpoint) |
 | gemma4_assistant | drafter | native | `NEXTN` with the assistant checkpoint |
-| draft_quant | draft option | densified | the drafter's rounded weights |
+| draft_quant | draft option | unsupported | the drafter exports write dense float weights; `backend="fake"` serves the rounded weights dense (densified) |
 | early_exit, free, dmtd, layer_skip | drafter | plugin | economize's draft model class under `EAGLE3` (see above); the draft model holds dense copies of its layers, so on a compressed-tensors base only `adaptation="full"` is served |
 | eagle (EAGLE-1/2) | drafter | unsupported | no exporter: official `yuhuili/EAGLE-*` heads run on SGLang's own `EAGLE` algorithm without economize |
 | medusa, hydra | drafter | unsupported | SGLang 0.5.21 has no Medusa-style proposer |

@@ -10,6 +10,7 @@ their defaults.
 """
 
 from .activations import ACTIVATION_SCHEMES, ActivationScheme, DynamicFp8PerToken, DynamicIntPerToken
+from .auto import AUTO_QUANT_CANDIDATES, AutoCandidate, AutoQuantBackend
 from .awq import AWQ_SCALE_GROUPS, ScaleGroup, awq_clip_thresholds, awq_scale_layer, search_scale
 from .backends import (
     QUANT_BACKENDS,
@@ -37,6 +38,7 @@ from .technique import DraftQuantTechnique, QuantTechnique
 
 __all__ = [
     "ACTIVATION_SCHEMES",
+    "AUTO_QUANT_CANDIDATES",
     "AWQ_SCALE_GROUPS",
     "CODE_READERS",
     "E2M1_VALUES",
@@ -47,6 +49,8 @@ __all__ = [
     "TORCHAO_CONSTRAINTS",
     "TORCHAO_TENSORS",
     "ActivationScheme",
+    "AutoCandidate",
+    "AutoQuantBackend",
     "CodeReader",
     "CutlassBackend",
     "CutlassInt8Weight",

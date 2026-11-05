@@ -323,7 +323,10 @@ def test_kv_quant_with_prune_and_lowrank(calib) -> None:
     from economize.techniques.prune import PruneConfig
 
     prompt = _prompts()[0]
-    for weights in (PruneConfig(method="wanda", sparsity="2:4"), LowRankConfig(method="svd", compression=0.3)):
+    for weights in (
+        PruneConfig(method="wanda", sparsity="2:4", semi_structured=False),
+        LowRankConfig(method="svd", compression=0.3),
+    ):
         compressed = economize.apply(make_tiny_model(), weights, calibration=calib)
         expected = compressed.decode(prompt, 20).tokens
         exact = economize.apply(

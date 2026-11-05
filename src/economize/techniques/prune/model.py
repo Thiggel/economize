@@ -19,7 +19,7 @@ from .._weights.transaction import WeightTransaction
 from .config import DepthPruneConfig, PruneConfig
 from .depth import DEPTH_CRITERIA, remove_layers
 from .methods import PRUNE_METHODS
-from .semi_structured import to_semi_structured
+from .semi_structured import check_storable, to_semi_structured
 
 if TYPE_CHECKING:
     from ...arch import ArchAdapter
@@ -43,11 +43,15 @@ def prune_model(adapter: ArchAdapter, config: PruneConfig, batches: Sequence[Ten
         afterwards, zeros the weights already had included.
 
     All or nothing: if pruning, the calibration or the 2:4 conversion fails, every touched layer gets its original
-    weights back before the error propagates.
+    weights back before the error propagates. A configuration without a real sparse storage (unstructured or N:M
+    other than 2:4 without ``semi_structured=False``) and 2:4 weights the semi-structured kernels cannot hold (no
+    CUDA sm80+ GPU, not fp16 / bf16) are refused before any weight changes (:func:`.check_storable`).
     """
     pruner = PRUNE_METHODS.get(config.method)()
     pattern = config.pattern
     layers = resolve_layers(config.layers, adapter.num_layers)
+    check_storable(config, (module for index in layers
+                            for module in target_linears(adapter, adapter.layer(index), config).values()))
     newly = eligible = zeros = total = 0
     transaction = WeightTransaction()
 
@@ -76,7 +80,7 @@ def prune_model(adapter: ArchAdapter, config: PruneConfig, batches: Sequence[Ten
         if pruner.needs_calibration:
             calibration = require_calibration(batches, f"pruning method {config.method!r}")
         rewrite_layerwise(adapter, layers, prune_layer, batches=calibration, offload=config.offload)
-        if config.semi_structured:
+        if config.sparse_storage:
             for index in layers:
                 for module in target_linears(adapter, adapter.layer(index), config).values():
                     to_semi_structured(module, config.semi_structured_kernel)

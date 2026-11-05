@@ -18,6 +18,7 @@ from .depth import remove_layers
 from .methods import PRUNE_METHODS
 from .model import depth_prune_model, prune_model
 from .semi_kernels import SEMI_STRUCTURED_KERNELS
+from .semi_structured import storage_reason
 
 __all__ = ["DepthPruneTechnique", "PruneTechnique"]
 
@@ -46,22 +47,29 @@ class PruneTechnique(CalibratedWeightTransform):
         """Semi-structured storage leaves sparse tensors that a later weight transform cannot rewrite."""
         if (
             isinstance(config, PruneConfig)
-            and config.semi_structured
+            and config.sparse_storage
             and Capability.WEIGHTS in other.capabilities
             and other.order > cls.order
         ):
             return (
-                f"prune(semi_structured=True) stores sparse tensors that {other.name!r} cannot transform; "
-                "use semi_structured=False when combining pruning with low rank or quantization"
+                f"prune(sparsity='2:4') stores semi-structured sparse tensors that {other.name!r} cannot transform; "
+                "pass semi_structured=False (the masked dense reference, simulated) when combining pruning with "
+                "low rank or quantization"
             )
         return super().conflict(config, other, other_config)
 
     @classmethod
+    def unsupported_for(cls, config: TechniqueConfig | None = None) -> str | None:
+        """Why no sparse storage holds the configured pattern (see :func:`.storage_reason`): only 2:4 runs on
+        sparse tensor cores, so unstructured and other N:M patterns need the explicit ``semi_structured=False``."""
+        return storage_reason(config if isinstance(config, PruneConfig) else PruneConfig())
+
+    @classmethod
     def simulation_for(cls, config: TechniqueConfig | None = None) -> Simulation | None:
-        """Unstructured and N:M pruning keep masked dense weights; 2:4 with ``semi_structured`` runs the
-        :data:`~.semi_kernels.SEMI_STRUCTURED_KERNELS` entry the configuration names."""
+        """``semi_structured=False`` keeps masked dense weights (the simulated reference); 2:4 stored
+        semi-structured runs the :data:`~.semi_kernels.SEMI_STRUCTURED_KERNELS` entry the configuration names."""
         config = config if isinstance(config, PruneConfig) else PruneConfig()
-        if not config.semi_structured:
+        if not config.sparse_storage:
             return _MASKED_DENSE
         kernel = KernelChoice("semi_structured_kernel", SEMI_STRUCTURED_KERNELS).simulation(config)
         return kernel.within(cls.info.saves) if kernel is not None else None

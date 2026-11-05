@@ -12,6 +12,7 @@ from torch import nn
 
 from ...errors import ConfigError
 from ..runtime_export import ExportBuilder, RuntimeExport, dense_state
+from .factored import factor_linears
 from .graph import CACHE_INPUT, matmul_nbits, trace_onnx
 from .runtime import ONNX
 
@@ -50,7 +51,8 @@ def check_onnx(model: nn.Module) -> ExportBuilder:
 
 
 def plain_model(builder: ExportBuilder, dtype: torch.dtype = torch.float32) -> nn.Module:
-    """The base model's plain architecture holding :func:`dense_state` (every technique multiplied out).
+    """The base model's plain architecture holding :func:`dense_state`, with the factored maps of
+    ``builder.factored`` kept as their two factors (:func:`~.factored.factor_linears`).
 
     Parameters
     ----------
@@ -81,6 +83,7 @@ def plain_model(builder: ExportBuilder, dtype: torch.dtype = torch.float32) -> n
     if missing or unexpected:
         raise ConfigError(f"the dense weights do not fit {type(base).__name__}: missing {missing[:3]}, "
                           f"unexpected {unexpected[:3]}")
+    factor_linears(plain, builder, dtype)
     return plain.eval()
 
 
@@ -93,8 +96,8 @@ def to_onnx(
 ) -> RuntimeExport:
     """Write ``model`` and its techniques as one ONNX graph with KV-cache inputs that ONNX Runtime runs.
 
-    The graph is traced from the plain architecture with every technique multiplied out (``torch.onnx.export``,
-    dynamo); the maps whose ``quant`` codes fit ``MatMulNBits`` keep them. Its inputs and outputs are listed in
+    The graph is traced from the plain architecture (``torch.onnx.export``, dynamo); low-rank maps keep their two
+    factors and the maps whose ``quant`` codes fit ``MatMulNBits`` keep them. Its inputs and outputs are listed in
     :mod:`economize.backends.onnx.graph`.
 
     Parameters

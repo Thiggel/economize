@@ -35,11 +35,13 @@ A package adds an adapter by registering a class, either with the decorator of t
 (`@GGUF.register`, `@ONNX.register`, ...) or through the entry-point groups `economize.gguf_techniques`,
 `economize.onnx_techniques`, `economize.mlx_techniques` and `economize.trtllm_techniques`.
 
-The weight techniques share their adapters across runtimes (`economize.backends.export_adapters`): `prune`
-(unstructured masks are already dense weights; 2:4 masks are `densified`), `lowrank` and `littlebit` (multiplied
-out, `densified`), `depth_prune` (a shallower plain model, `native`) and `quant`, whose codes each runtime stores in
-its own format when they fit it and otherwise writes dequantized (`densified`, per map, with the reason in the
-manifest's notes).
+The weight techniques share their adapters across runtimes (`economize.backends.export_adapters`). A weight
+compression whose saving the runtime cannot keep is refused with the reason, never multiplied out silently: `prune`
+(the formats store dense weights and the engines have no 2:4 sparse kernel), `lowrank` (no factored linear, except
+ONNX Runtime, which runs both factors), `littlebit` (no binary-factor format or GEMM) and `quant` codes in a layout
+the format cannot store (the error names the layouts it can). `depth_prune` is a shallower plain model (`native`).
+Only the explicit simulated references are written dense (`densified`, with `SimulatedPathWarning`):
+`prune(semi_structured=False)` and `quant(backend="fake")`.
 
 ## llama.cpp (GGUF)
 
@@ -61,11 +63,13 @@ The file is written with the `gguf` package from the model's tensors. The archit
 
 | Technique | Support | What llama.cpp runs |
 |---|---|---|
-| `quant` | native when the codes fit | `int4` codes as `Q4_0` (symmetric) or `Q4_1`, `int8` codes with zero point 128 as `Q8_0`, bit for bit (scales in float16); other codes are written dequantized |
+| `quant` | native when the codes fit | `int4` codes as `Q4_0` (symmetric) or `Q4_1`, `int8` codes with zero point 128 as `Q8_0`, bit for bit (scales in float16); other codes are refused, and `backend="fake"` is written dequantized |
 | `draft_model`, `placed_draft_model` | native | `draft.gguf` beside `model.gguf`, `llama-server --model-draft draft.gguf --draft-max N` |
 | `lookup` | native | prompt lookup decoding (llama-cpp-python `LlamaPromptLookupDecoding`) |
-| `prune`, `depth_prune` | native | dense or shallower weights |
-| `lowrank`, `littlebit`, 2:4 `prune` | densified | multiplied out |
+| `lowrank` | unsupported | one weight per linear map, no factored form (multiplying the factors out would lose the saving) |
+| `depth_prune` | native | a shallower plain model |
+| `prune` with `semi_structured=False` | densified | the masked reference's dense weights (zeros kept), simulated |
+| `prune` (default 2:4 storage, other patterns), `littlebit` | unsupported | the format stores dense weights and the engine has no 2:4 sparse kernel or binary-factor GEMM, so the saving would be lost |
 | hidden-state drafters (EAGLE, Medusa, ...), dynamic depth, TEAL, fp8 / KIVI caches, KV eviction | unsupported | llama.cpp has no hook for them |
 
 `load_llama(export)` opens the export in llama-cpp-python with the draft model or prompt lookup attached. The
@@ -106,9 +110,11 @@ tensors in `model.onnx.data`. The names follow Optimum's convention, but loading
 
 | Technique | Support | What ONNX Runtime runs |
 |---|---|---|
-| `quant` | native when the codes fit | `int2` / `int4` / `int8` codes in contiguous groups of a power of two of at least 16 as `com.microsoft.MatMulNBits` (codes, float scales and integer zero points as they are, so the node computes economize's dequantized map); other codes, `act_order` groups and `backend="fake"` are written dequantized; fp8 activations are refused |
-| `prune`, `depth_prune` | native | dense or shallower weights |
-| `lowrank`, `littlebit`, 2:4 `prune` | densified | multiplied out |
+| `quant` | native when the codes fit | `int2` / `int4` / `int8` codes in contiguous groups of a power of two of at least 16 as `com.microsoft.MatMulNBits` (codes, float scales and integer zero points as they are, so the node computes economize's dequantized map); other codes and `act_order` groups are refused, `backend="fake"` is written dequantized; fp8 activations are refused |
+| `lowrank` | native | each factored map stays its two factors, two `MatMul` nodes (`MatMulNBits` for a quantized factor), so the graph stores `rank * (in + out)` numbers per map |
+| `depth_prune` | native | a shallower plain model |
+| `prune` with `semi_structured=False` | densified | the masked reference's dense weights (zeros kept), simulated |
+| `prune` (default 2:4 storage, other patterns), `littlebit` | unsupported | the format stores dense weights and the engine has no 2:4 sparse kernel or binary-factor GEMM, so the saving would be lost |
 | every drafter (`draft_model`, `lookup`, EAGLE, Medusa, ...) | unsupported | the export is one graph per call, without a speculative decoding loop; a draft LM can be exported as its own graph |
 | dynamic depth, TEAL, fp8 / KIVI caches, KV eviction | unsupported | the graph runs every layer, and its cache is the graph's float tensors |
 
@@ -139,11 +145,13 @@ first, and `p.scales`, `p.biases` hold `scales * code + biases` with `biases = -
 
 | Technique | Support | What `mlx_lm` runs |
 |---|---|---|
-| `quant` | native when the codes fit | `int2` / `int3` / `int4` / `int8` codes in contiguous groups of 32, 64 or 128 as affine quantization; other codes, `act_order` groups and `backend="fake"` are written dequantized; fp8 activations are refused |
+| `quant` | native when the codes fit | `int2` / `int3` / `int4` / `int8` codes in contiguous groups of 32, 64 or 128 as affine quantization; other codes and `act_order` groups are refused, `backend="fake"` is written dequantized; fp8 activations are refused |
 | `draft_model`, `placed_draft_model` | native | `--draft-model draft --num-draft-tokens N`, the draft LM written in the same layout |
 | `kv_evict(method="streaming")` with 4 sinks | native | `--max-kv-size sinks + recent` (`mlx_lm`'s rotating cache keeps the first 4 entries); other sink counts, per-layer eviction and score-based methods are refused |
-| `prune`, `depth_prune` | native | dense or shallower weights |
-| `lowrank`, `littlebit`, 2:4 `prune` | densified | multiplied out |
+| `lowrank` | unsupported | one weight per linear map, no factored form (multiplying the factors out would lose the saving) |
+| `depth_prune` | native | a shallower plain model |
+| `prune` with `semi_structured=False` | densified | the masked reference's dense weights (zeros kept), simulated |
+| `prune` (default 2:4 storage, other patterns), `littlebit` | unsupported | the format stores dense weights and the engine has no 2:4 sparse kernel or binary-factor GEMM, so the saving would be lost |
 | `lookup`, EAGLE, Medusa, MTP and the other hidden-state drafters | unsupported | `mlx_lm` drafts only with a separate model and has no prompt lookup |
 | dynamic depth, TEAL, fp8 and KIVI caches | unsupported | `mlx_lm` runs every layer; its `--kv-bits` cache quantizes per token |
 
@@ -177,14 +185,16 @@ other parts of a fused map, are written dense and listed in `exclude_modules`.
 
 | Technique | Support | What TensorRT-LLM runs |
 |---|---|---|
-| `quant` | native when the codes fit | symmetric `int4` codes in groups of 64 or 128 as `W4A16_AWQ`; other codes, `act_order` groups and `backend="fake"` are written dequantized (TensorRT-LLM quantizes int8 / per-channel weight-only checkpoints from float weights itself); fp8 activations are refused (use ModelOpt) |
+| `quant` | native when the codes fit | symmetric `int4` codes in groups of 64 or 128 as `W4A16_AWQ`; other codes (the default asymmetric int4 among them) and `act_order` groups are refused, `backend="fake"` is written dequantized (TensorRT-LLM quantizes int8 / per-channel weight-only checkpoints from float weights itself); fp8 activations are refused (use ModelOpt) |
 | `draft_model`, `placed_draft_model` | native | draft-target speculation: the draft LM as a second checkpoint in `draft/`, `--speculative_decoding_mode draft_tokens_external --max_draft_len N` |
 | `medusa` with `head="own"` | native | `MedusaForCausalLM` with the heads in the checkpoint (`medusa_heads.{h}.medusa_layers.{l}.linear`, `medusa_heads.{h}.lm_head`) and the static tree (or the top-1 chain) as `medusa_choices`; `head="shared"` is refused |
 | `lookup(match="earliest", min_ngram=1)` | native | n-gram speculation (`NGramDecodingConfig`, oldest match) |
 | `kv_fp8(format="e4m3", scale="none")` | native | `kv_cache_quant_algo="FP8"` with a unit scale per layer; e5m2, per-token and per-tensor k / v scales are refused (TensorRT-LLM has one scale per layer for keys and values) |
 | `kv_evict(method="streaming")` | native | `KvCacheConfig(sink_token_length=sinks, max_attention_window=[sinks + recent])` |
-| `prune`, `depth_prune` | native | dense or shallower weights |
-| `lowrank`, `littlebit`, 2:4 `prune` | densified | multiplied out |
+| `lowrank` | unsupported | one weight per linear map, no factored form (multiplying the factors out would lose the saving) |
+| `depth_prune` | native | a shallower plain model |
+| `prune` with `semi_structured=False` | densified | the masked reference's dense weights (zeros kept), simulated |
+| `prune` (default 2:4 storage, other patterns), `littlebit` | unsupported | the format stores dense weights and the engine has no 2:4 sparse kernel or binary-factor GEMM, so the saving would be lost |
 | EAGLE, EAGLE-3, ReDrafter, Hydra, lookahead, MTP and the other hidden-state drafters | unsupported | the checkpoint writer has no layout for them (EAGLE-3 runs in TensorRT-LLM's PyTorch backend from the vLLM export's Hugging Face folders) |
 | dynamic depth, TEAL, KIVI and per-token caches, score-based eviction | unsupported | TensorRT-LLM runs every layer and has no such kernels |
 

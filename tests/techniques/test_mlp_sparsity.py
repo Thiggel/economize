@@ -240,7 +240,8 @@ def test_cats_composes_with_weight_quantization(calib, held_out) -> None:
     from economize.techniques.prune import PruneConfig
 
     base = make_tiny_model(num_layers=2)
-    model = economize.apply(base, PruneConfig(sparsity=0.3), CatsConfig(sparsity=0.5, prefill="all"),
+    model = economize.apply(base, PruneConfig(sparsity=0.3, semi_structured=False),
+                            CatsConfig(sparsity=0.5, prefill="all"),
                             calibration=[calib])
     logits = model(held_out).logits
     assert torch.isfinite(logits).all()

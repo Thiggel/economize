@@ -43,8 +43,8 @@ calibration = ids[: 128 * 2048].view(128, 2048)
 
 model = economize.apply(
     hf_model,
-    PruneConfig(method="wanda", sparsity="2:4"),
-    QuantConfig(format="int4", method="gptq", group_size=128),
+    PruneConfig(method="wanda", sparsity="2:4", semi_structured=False),   # masks kept for the quantizer
+    QuantConfig(format="int4", method="gptq", group_size=128),            # best installed int4 kernel
     TealConfig(sparsity=0.4),
     calibration=calibration,
 )
@@ -105,9 +105,10 @@ generative tasks degrade more (r). SLEB compares iterative removal against one-s
 ```python
 from economize.techniques.prune import PruneConfig, prune_model
 
-prune_model(adapter, PruneConfig(method="wanda", sparsity=0.5), batches)        # unstructured, per output row
-prune_model(adapter, PruneConfig(method="sparsegpt", sparsity="2:4"), batches)  # N:M, any "n:m"
-prune_model(adapter, PruneConfig(method="magnitude", sparsity=0.5))             # data-free baseline
+masked = dict(semi_structured=False)  # masked dense weights: the simulated reference
+prune_model(adapter, PruneConfig(method="wanda", sparsity=0.5, **masked), batches)  # unstructured, per output row
+prune_model(adapter, PruneConfig(method="sparsegpt", sparsity="4:8", **masked), batches)  # N:M, any "n:m"
+prune_model(adapter, PruneConfig(method="magnitude", sparsity=0.5, **masked))       # data-free baseline
 ```
 
 * `wanda` scores `|W_ij| * ||X_j||_2` and keeps the largest scores in every output row (or every group of `m`
@@ -117,14 +118,16 @@ prune_model(adapter, PruneConfig(method="magnitude", sparsity=0.5))             
   output error is below magnitude pruning on correlated inputs.
 * `magnitude` keeps the largest `|W|` per row.
 
-What is exact: the pruned weights are stored as zeros in the dense tensor, so the model runs anywhere and its quality
-is the method's quality, but there is no speed-up. Speed needs `semi_structured=True` with `sparsity="2:4"`, which
-converts every pruned map into `torch.sparse.SparseSemiStructuredTensor` (cuSPARSELt / CUTLASS). That needs CUDA
-compute capability 8.0 or newer (A100, A6000, L40, H100) and fp16 or bf16 weights. The sparse tensor-core GEMM is
+Storage (`semi_structured`): the default (`None`) with the default `sparsity="2:4"` converts every pruned map into
+`torch.sparse.SparseSemiStructuredTensor` (cuSPARSELt / CUTLASS). That needs CUDA compute capability 8.0 or newer
+(A100, A6000, L40, H100) and fp16 or bf16 weights, and pruning refuses other devices before it changes a weight.
+Unstructured and other N:M patterns have no sparse kernel, so they are refused unless `semi_structured=False` asks
+for the reference explicitly: the pruned weights stay zeros in the dense tensor, the model runs anywhere with the
+method's quality and no speed-up, and `economize.backend_support` reports it as simulated. The sparse tensor-core GEMM is
 about 1.1-1.6x faster than the dense one at large token counts (prefill, verification of long drafts, batched
 serving) and close to 1x at batch-1 decoding, where the GEMV is bound by the bytes of values plus metadata. Sparse
-tensors cannot be factorized or quantized afterwards, so `check_compatible` rejects `semi_structured=True` together
-with `lowrank` or `quant`.
+tensors cannot be factorized or quantized afterwards, so `check_compatible` rejects sparse storage (the default)
+together with `lowrank` or `quant`; combine those with `semi_structured=False`.
 
 Paper numbers (r) (WikiText-2 perplexity, LLaMA-7B, dense 5.68; Wanda Table 3): magnitude / SparseGPT / Wanda give
 17.29 / 7.22 / 7.26 at 50% unstructured and 42.13 / 11.00 / 11.53 at 2:4. The two calibrated methods are within
@@ -251,7 +254,8 @@ Backends (`backend=`):
 
 | backend | storage | speed | hardware |
 |---|---|---|---|
-| `fake` (default) | dequantized weights in the model dtype | none (quality reference) | any |
+| `auto` (default) | the best installed real kernel: `machete`, `marlin`, `cutlass` (vLLM's kernels), then `torchao`, the first that stores the format on this device; the summary key `kernel` names it, and with none installed the error names the extras to install (`economize[vllm]`, `economize[quant]`) | that kernel's | that kernel's |
+| `fake` | dequantized weights in the model dtype (the explicit simulated reference) | none (quality reference) | any |
 | `torchao`, int8 | `Int8Tensor` | about 2x fewer weight bytes; the scaled GEMM fuses only under `torch.compile` | any CUDA GPU, CPU |
 | `torchao`, int8 + `activations="int8"` | `Int8Tensor` with per-row activation quantization | int8 x int8 `torch._int_mm` (W8A8) | CUDA sm75+, CPU |
 | `torchao`, int4 | `Int4TilePackedTo4dTensor`, tinygemm | about 4x fewer weight bytes; fused int4 GEMV | CUDA sm80+, bf16, group 32/64/128/256 |
@@ -259,7 +263,8 @@ Backends (`backend=`):
 
 The torchao tensors are built from the codes the method chose, so a GPTQ or AWQ model runs on the same kernels as
 RTN, and its outputs equal the `fake` backend to within 1e-4 (tested). A new backend (Marlin, bitsandbytes, a vLLM
-export) is one `QuantBackend` subclass registered in `QUANT_BACKENDS`.
+export) is one `QuantBackend` subclass registered in `QUANT_BACKENDS`; it joins the `auto` choice when it is also
+registered in `AUTO_QUANT_CANDIDATES` with a priority.
 
 SmoothQuant (r) (abstract): up to 1.56x speed-up and 2x memory reduction with negligible accuracy loss for W8A8
 models up to 530B parameters.
@@ -586,7 +591,7 @@ bytes in memory-bound decoding) at a possibly lower acceptance rate.
 * A drafter trained on the original weights sees shifted hidden states on a transformed target. The Hub format
   checks a fingerprint of the base weights when it loads a drafter (`check_base`); for the main tables, retrain or
   at least fine-tune the predictor on the transformed model.
-* `prune(semi_structured=True)` must be the last weight transform. `quant(backend="torchao")` stores tensor
+* `prune` with sparse 2:4 storage (the default) must be the last weight transform. `quant(backend="torchao")` stores tensor
   subclasses, so it comes last among the weight transforms by its order; TEAL hooks the inputs of the quantized maps
   and works with every backend.
 * The functional cores are pure functions of `(adapter, config, batches)`; a new method is one registered class in

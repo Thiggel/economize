@@ -59,9 +59,10 @@ def test_knobs_the_method_does_not_read_are_rejected(kwargs: dict) -> None:
 
 
 def test_knobs_the_method_reads_are_accepted() -> None:
-    QuantConfig(method="gptq", group_size=32, act_order=True, blocksize=64, percdamp=0.05, keep_zeros=False)
-    QuantConfig(method="awq", group_size=32, awq_grid=10, awq_clip=False)
-    QuantConfig(method="rtn", blocksize=128, percdamp=0.01)  # defaults are always fine
+    QuantConfig(method="gptq", group_size=32, act_order=True, blocksize=64, percdamp=0.05, keep_zeros=False,
+                backend="fake")
+    QuantConfig(method="awq", group_size=32, awq_grid=10, awq_clip=False, backend="fake")
+    QuantConfig(method="rtn", blocksize=128, percdamp=0.01, backend="fake")  # defaults are always fine
 
 
 def test_check_options_names_what_the_owner_reads() -> None:
@@ -76,8 +77,9 @@ def test_check_options_names_what_the_owner_reads() -> None:
 
 
 def test_both_configs_satisfy_the_quant_spec() -> None:
-    assert isinstance(QuantConfig(), QuantSpec) and isinstance(DraftQuantConfig(), QuantSpec)
-    assert DraftQuantConfig().fp8_activations is False
+    assert isinstance(QuantConfig(backend="fake"), QuantSpec)
+    assert isinstance(DraftQuantConfig(backend="fake"), QuantSpec)
+    assert DraftQuantConfig(backend="fake").fp8_activations is False
 
 
 # ---- GPTQ groups and zeros ----------------------------------------------------------------------------------------
@@ -104,7 +106,7 @@ def test_dynamic_act_order_groups_return_a_column_to_group_map(correlated_inputs
 
 
 def test_dynamic_groups_need_a_backend_with_g_idx() -> None:
-    QuantConfig(method="gptq", group_size=32, act_order=True, static_groups=False)
+    QuantConfig(method="gptq", group_size=32, act_order=True, static_groups=False, backend="fake")
     for backend in ("torchao", "marlin"):
         if backend in QUANT_BACKENDS and not QUANT_BACKENDS.get(backend).supports_g_idx:
             with pytest.raises(ConfigError, match=r"g_idx|static_groups"):
@@ -115,7 +117,7 @@ def test_dynamic_groups_need_a_backend_with_g_idx() -> None:
 
 
 def test_dynamic_groups_end_to_end_on_the_fake_backend(tiny2, adapter_of, calib) -> None:
-    config = QuantConfig(method="gptq", group_size=32, act_order=True, static_groups=False)
+    config = QuantConfig(method="gptq", group_size=32, act_order=True, static_groups=False, backend="fake")
     summary = quantize_model(adapter_of(tiny2), config, token_batches(calib))
     assert summary["modules"] > 0
 

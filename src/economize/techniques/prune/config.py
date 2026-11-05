@@ -30,15 +30,19 @@ class PruneConfig(TechniqueConfig):
 
     Args:
         method: Registered criterion: ``"wanda"`` (default), ``"sparsegpt"`` or ``"magnitude"``.
-        sparsity: Fraction of weights removed (``0.5``) or an N:M pattern (``"2:4"``: at most 2 nonzeros in every
-            4 consecutive input weights).
+        sparsity: An N:M pattern (``"2:4"``, the default: at most 2 nonzeros in every 4 consecutive input weights)
+            or a fraction of weights removed (``0.5``, unstructured).
         targets: Globs over linear-module names inside a layer (``"self_attn.*"``, ``"mlp.down_proj"``).
         exclude: Globs removed from ``targets``.
         layers: 1-indexed layers to prune; empty means all.
         blocksize: SparseGPT column block (a multiple of M for N:M).
         percdamp: SparseGPT relative Hessian damping.
-        semi_structured: Convert 2:4 weights to ``torch.sparse`` semi-structured tensors after pruning (CUDA sm80+,
-            fp16/bf16). This is the only setting that makes the pruned model faster.
+        semi_structured: How the pruned weights are stored. ``None`` (the default) stores 2:4 weights as
+            ``torch.sparse`` semi-structured tensors (CUDA sm80+, fp16/bf16), which run on sparse tensor cores and
+            hold half the values; ``True`` asks for the same explicitly. ``False`` keeps the masked dense weights:
+            the simulated reference (same function, no memory or speed saving), and the only storage for
+            unstructured and other N:M patterns, which no sparse kernel runs (:meth:`PruneTechnique.unsupported_for
+            <economize.techniques.prune.PruneTechnique.unsupported_for>` refuses them otherwise).
         semi_structured_kernel: Registered storage kernel for the 2:4 weights
             (:data:`~economize.techniques.prune.SEMI_STRUCTURED_KERNELS`): ``"default"`` (PyTorch's choice),
             ``"cusparselt"``, ``"cutlass"``, ``"dense"`` or ``"auto"`` (fastest per weight shape at decode sizes).
@@ -53,13 +57,13 @@ class PruneConfig(TechniqueConfig):
     method_options: ClassVar[tuple[str, ...]] = ("blocksize", "percdamp")
 
     method: str = "wanda"
-    sparsity: float | str = 0.5
+    sparsity: float | str = "2:4"
     targets: tuple[str, ...] = ("*",)
     exclude: tuple[str, ...] = ()
     layers: tuple[int, ...] = ()
     blocksize: int = 128
     percdamp: float = 0.01
-    semi_structured: bool = False
+    semi_structured: bool | None = None
     semi_structured_kernel: str = "default"
     offload: bool = False
 
@@ -76,20 +80,50 @@ class PruneConfig(TechniqueConfig):
         method = PRUNE_METHODS.get(self.method)
         check_options(self, f"method={self.method!r}", method.options, self.method_options)
         method.check_config(self)
-        if self.semi_structured and (pattern.n, pattern.m) != (2, 4):
+        if self.semi_structured and not _is_2_4(pattern):
             raise ConfigError(f"semi_structured needs sparsity '2:4', got {self.sparsity!r}")
         from .semi_kernels import SEMI_STRUCTURED_KERNELS
 
         check_registered("semi-structured kernel", self.semi_structured_kernel, SEMI_STRUCTURED_KERNELS)
-        if self.semi_structured_kernel != "default" and not self.semi_structured:
-            raise ConfigError("semi_structured_kernel needs semi_structured=True")
+        if self.semi_structured_kernel != "default" and not self.sparse_storage:
+            raise ConfigError("semi_structured_kernel needs 2:4 sparsity stored semi-structured "
+                              "(semi_structured=None or True)")
 
     @property
     def pattern(self) -> SparsityPattern:
         return parse_pattern(self.sparsity)
 
+    @property
+    def sparse_storage(self) -> bool:
+        """Whether the pruned weights are stored as semi-structured sparse tensors.
+
+        Returns
+        -------
+        bool
+            ``semi_structured`` when it is set, else whether the pattern is 2:4 (the one pattern a sparse kernel
+            runs).
+        """
+        if self.semi_structured is not None:
+            return self.semi_structured
+        return _is_2_4(self.pattern)
+
+    @property
+    def reference(self) -> bool:
+        """Whether this is the explicit simulated reference (``semi_structured=False``: masked dense weights).
+
+        Returns
+        -------
+        bool
+            ``True`` only for ``semi_structured=False``.
+        """
+        return self.semi_structured is False
+
     def validate(self, adapter: ArchAdapter) -> None:
         check_layers(self.layers, adapter)
+
+
+def _is_2_4(pattern: SparsityPattern) -> bool:
+    return (pattern.n, pattern.m) == (2, 4)
 
 
 @dataclass(frozen=True)

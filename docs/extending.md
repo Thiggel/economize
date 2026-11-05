@@ -75,7 +75,7 @@ entropy = "my_pkg.confidence:EntropyConfidence"
 | `MTP_FAMILIES` | `economize.techniques.vendor_mtp` | `economize.mtp_families` |
 | `CONFIDENCE_MEASURES`, `FLEXI_ROUTERS` | `economize.techniques.dynamic_depth` | `economize.calm_confidence`, `economize.flexi_routers` |
 | `PRUNE_METHODS`, `DEPTH_CRITERIA`, `SEMI_STRUCTURED_KERNELS` | `economize.techniques.prune` | `economize.prune_methods`, `economize.depth_criteria`, `economize.semi_structured_kernels` |
-| `QUANT_METHODS`, `QUANT_BACKENDS`, `QUANT_FORMATS`, `AWQ_SCALE_GROUPS`, `TORCHAO_TENSORS`, `CODE_READERS`, `ACTIVATION_SCHEMES` | `economize.techniques.quant` | `economize.quant_methods`, `economize.quant_backends`, `economize.quant_formats`, `economize.awq_scale_groups`, `economize.torchao_tensors`, `economize.code_readers`, `economize.activation_schemes` |
+| `QUANT_METHODS`, `QUANT_BACKENDS`, `AUTO_QUANT_CANDIDATES`, `QUANT_FORMATS`, `AWQ_SCALE_GROUPS`, `TORCHAO_TENSORS`, `CODE_READERS`, `ACTIVATION_SCHEMES` | `economize.techniques.quant` | `economize.quant_methods`, `economize.quant_backends`, `economize.auto_quant`, `economize.quant_formats`, `economize.awq_scale_groups`, `economize.torchao_tensors`, `economize.code_readers`, `economize.activation_schemes` |
 | `ROTATIONS`, `HADAMARD_KERNELS` | `economize.techniques.rotate` | `economize.rotation_methods`, `economize.hadamard_kernels` |
 | `FACTORIZERS` | `economize.techniques.lowrank` | `economize.factorizers` |
 | `LITTLEBIT_METHODS`, `LITTLEBIT_BACKENDS` | `economize.techniques.littlebit` | `economize.littlebit_methods`, `economize.littlebit_backends` |

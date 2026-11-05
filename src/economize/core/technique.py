@@ -163,6 +163,13 @@ class Technique(nn.Module):
         simulates its saving, ``None`` if it realizes it (see :class:`~economize.Simulation`)."""
         return cls.info.simulation(config if config is not None else cls.config_class)
 
+    @classmethod
+    def unsupported_for(cls, config: TechniqueConfig | None = None) -> str | None:
+        """Why the Hugging Face path cannot run this technique with ``config`` in this environment (a missing
+        kernel package, a configuration only a simulated reference runs), ``None`` if it can. Checked before
+        :meth:`simulation_for` by :func:`~economize.backend_support`. Default: ``None``."""
+        return None
+
     def simulation(self) -> Simulation | None:
         """:meth:`simulation_for` this technique's configuration."""
         return self.simulation_for(self.config)

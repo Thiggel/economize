@@ -84,7 +84,7 @@ def test_draft_modules_skip_a_base_weight_wrapped_in_a_new_parameter(tiny2) -> N
     base = tiny2.model.layers[0].self_attn.q_proj
     drafter = _Wrapper(base)
     assert drafter.alias.weight is not base.weight and drafter.alias.weight.data_ptr() == base.weight.data_ptr()
-    config = DraftQuantConfig(group_size=32)
+    config = DraftQuantConfig(group_size=32, backend="fake")
     assert set(draft_modules(drafter, config, tiny2.parameters())) == {"own"}
 
 
@@ -94,14 +94,14 @@ def test_prune_model_reports_induced_sparsity(tiny2, adapter_of) -> None:
     from economize.techniques.prune import PruneConfig, prune_model
 
     adapter = adapter_of(tiny2)
-    config = PruneConfig(method="magnitude", sparsity=0.5)
+    config = PruneConfig(method="magnitude", sparsity=0.5, semi_structured=False)
     first = prune_model(adapter, config)
     assert first["sparsity"] == pytest.approx(0.5) and first["zeros"] == pytest.approx(0.5)
     assert first["eligible"] == first["weights"]
     second = prune_model(adapter, config)
     assert second["sparsity"] == 0 and second["zeros"] == pytest.approx(0.5)
     assert second["eligible"] == pytest.approx(first["weights"] / 2, rel=0.01)
-    third = prune_model(adapter, PruneConfig(method="magnitude", sparsity=0.75))
+    third = prune_model(adapter, PruneConfig(method="magnitude", sparsity=0.75, semi_structured=False))
     newly = third["zeros"] - second["zeros"]
     assert third["sparsity"] == pytest.approx(newly * third["weights"] / third["eligible"])
     assert third["sparsity"] == pytest.approx(0.5, abs=0.01)  # half of the remaining half

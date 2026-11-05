@@ -137,11 +137,12 @@ def test_wanda_model_masks_follow_sequential_calibration(tiny2, adapter_of, cali
     dense = copy.deepcopy(tiny2)
     expected = _expected_wanda_masks(dense, adapter_of(dense), 1, names, batches, pattern)
     first_only = copy.deepcopy(tiny2)
-    prune_model(adapter_of(first_only), PruneConfig(method="wanda", sparsity=0.5, layers=(1,)), batches)
+    prune_model(adapter_of(first_only), PruneConfig(method="wanda", sparsity=0.5, layers=(1,), semi_structured=False),
+                batches)
     expected |= _expected_wanda_masks(first_only, adapter_of(first_only), 2, names, batches, pattern)
 
     adapter = adapter_of(tiny2)
-    summary = prune_model(adapter, PruneConfig(method="wanda", sparsity=0.5), batches)
+    summary = prune_model(adapter, PruneConfig(method="wanda", sparsity=0.5, semi_structured=False), batches)
     assert summary["sparsity"] == pytest.approx(0.5) and summary["pattern"] == "0.5"
     for (layer, name), mask in expected.items():
         assert torch.equal(_linear(adapter, layer, name).weight == 0, mask), (layer, name)
@@ -156,7 +157,7 @@ def _sparsegpt_block(method: str) -> dict[str, int]:
 def test_two_four_pattern_holds_for_every_method(tiny2, adapter_of, calib, held_out, nll, method) -> None:
     adapter = adapter_of(tiny2)
     dense = nll(tiny2, held_out)
-    config = PruneConfig(method=method, sparsity="2:4", **_sparsegpt_block(method))
+    config = PruneConfig(method=method, sparsity="2:4", semi_structured=False, **_sparsegpt_block(method))
     summary = prune_model(adapter, config, token_batches(calib))
     assert summary["sparsity"] == pytest.approx(0.5) and summary["pattern"] == "2:4"
     for index in (1, 2):
@@ -168,7 +169,9 @@ def test_two_four_pattern_holds_for_every_method(tiny2, adapter_of, calib, held_
 
 def test_targets_exclude_and_layers(tiny2, adapter_of, calib) -> None:
     adapter = adapter_of(tiny2)
-    config = PruneConfig(method="magnitude", sparsity=0.5, targets=("mlp.*",), exclude=("*down*",), layers=(2,))
+    config = PruneConfig(
+        method="magnitude", sparsity=0.5, targets=("mlp.*",), exclude=("*down*",), layers=(2,), semi_structured=False
+    )
     summary = prune_model(adapter, config, token_batches(calib))
     assert summary["weights"] == 2 * 128 * 64
     for index in (1, 2):
@@ -182,7 +185,7 @@ def test_sparsegpt_model_error_below_magnitude(tiny_factory, adapter_of, calib, 
     reference = tiny_factory(num_layers=2)(held_out).logits
     for method in ("magnitude", "wanda", "sparsegpt"):
         model = tiny_factory(num_layers=2)
-        config = PruneConfig(method=method, sparsity=0.5, **_sparsegpt_block(method))
+        config = PruneConfig(method=method, sparsity=0.5, semi_structured=False, **_sparsegpt_block(method))
         prune_model(adapter_of(model), config, token_batches(calib))
         errors[method] = (model(held_out).logits - reference).pow(2).mean().item()
     assert errors["sparsegpt"] < errors["magnitude"], errors
@@ -190,8 +193,8 @@ def test_sparsegpt_model_error_below_magnitude(tiny_factory, adapter_of, calib, 
 
 def test_calibrated_methods_need_data(tiny2, adapter_of) -> None:
     with pytest.raises(ConfigError):
-        prune_model(adapter_of(tiny2), PruneConfig(method="wanda"))
-    prune_model(adapter_of(tiny2), PruneConfig(method="magnitude"))  # data-free
+        prune_model(adapter_of(tiny2), PruneConfig(method="wanda", semi_structured=False))
+    prune_model(adapter_of(tiny2), PruneConfig(method="magnitude", semi_structured=False))  # data-free
 
 
 @pytest.mark.parametrize(
@@ -220,7 +223,7 @@ def test_semi_structured_conversion(tiny2, adapter_of) -> None:
     model = tiny2.to("cuda", torch.float16)
     adapter = adapter_of(model)
     ids = torch.randint(0, 128, (1, 64), device="cuda")
-    prune_model(adapter, PruneConfig(method="magnitude", sparsity="2:4", targets=("mlp.*",)))
+    prune_model(adapter, PruneConfig(method="magnitude", sparsity="2:4", targets=("mlp.*",), semi_structured=False))
     dense = model(ids).logits
     prune_model(adapter, PruneConfig(method="magnitude", sparsity="2:4", targets=("mlp.*",), semi_structured=True))
     assert torch.allclose(model(ids).logits, dense, atol=5e-2)
@@ -323,7 +326,7 @@ def test_prune_technique_attach_and_detach(tiny2, adapter_of, calib, attach_cont
     from economize.techniques.prune import PruneTechnique
 
     adapter = adapter_of(tiny2)
-    technique = PruneTechnique(PruneConfig(method="wanda", sparsity="2:4"), adapter)
+    technique = PruneTechnique(PruneConfig(method="wanda", sparsity="2:4", semi_structured=False), adapter)
     assert technique.capabilities == Capability.WEIGHTS and technique.order == 10 and not technique.lossless
     with pytest.raises(ConfigError, match="calibration"):
         technique.attach(tiny2, adapter, attach_context(None))
@@ -340,8 +343,8 @@ def test_semi_structured_prune_rejects_later_weight_transforms(tiny2, adapter_of
     from economize.techniques.quant import QuantConfig, QuantTechnique
 
     adapter = adapter_of(tiny2)
-    quant = QuantTechnique(QuantConfig(), adapter)
-    PruneTechnique(PruneConfig(sparsity="2:4"), adapter).check_compatible([quant])
+    quant = QuantTechnique(QuantConfig(backend="fake"), adapter)
+    PruneTechnique(PruneConfig(sparsity="2:4", semi_structured=False), adapter).check_compatible([quant])
     with pytest.raises(IncompatibleTechniquesError):
         PruneTechnique(PruneConfig(sparsity="2:4", semi_structured=True), adapter).check_compatible([quant])
 
@@ -403,9 +406,9 @@ def test_prune_rejects_knobs_the_method_does_not_read(kwargs: dict, name: str) -
 
 
 def test_sparsegpt_checks_its_own_block() -> None:
-    PruneConfig(method="sparsegpt", blocksize=32, percdamp=0.1, sparsity="2:4")
+    PruneConfig(method="sparsegpt", blocksize=32, percdamp=0.1, sparsity="2:4", semi_structured=False)
     with pytest.raises(ConfigError, match="multiple of M"):
-        PruneConfig(method="sparsegpt", blocksize=30, sparsity="2:4")
+        PruneConfig(method="sparsegpt", blocksize=30, sparsity="2:4", semi_structured=False)
 
 
 def test_pruner_observer_is_abstract() -> None:

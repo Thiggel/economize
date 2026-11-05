@@ -180,7 +180,7 @@ def test_awq_clip_thresholds_never_increase_the_group_error(correlated_inputs) -
 def test_rtn_model_writes_round_to_nearest_weights(tiny2, adapter_of) -> None:
     original = copy.deepcopy(tiny2)
     adapter = adapter_of(tiny2)
-    summary = quantize_model(adapter, QuantConfig(format="int4", group_size=32))
+    summary = quantize_model(adapter, QuantConfig(format="int4", group_size=32, backend="fake"))
     assert summary["modules"] == 14 and summary["weights"] == 2 * 36864
     assert summary["bits_per_weight"] == pytest.approx(5.0)
     for index in (1, 2):
@@ -194,12 +194,13 @@ def test_rtn_model_writes_round_to_nearest_weights(tiny2, adapter_of) -> None:
 def test_selection_and_indivisible_maps(tiny2, adapter_of, caplog) -> None:
     before = _weights(tiny2)
     adapter = adapter_of(tiny2)
-    summary = quantize_model(adapter, QuantConfig(group_size=32, layers=(2,), targets=("mlp.*",), exclude=("*down*",)))
+    summary = quantize_model(adapter, QuantConfig(group_size=32, layers=(2,), targets=("mlp.*",), exclude=("*down*",),
+                                                  backend="fake"))
     assert summary["modules"] == 2
     changed = {name for name, p in tiny2.named_parameters() if not torch.equal(p, before[name])}
     assert changed == {"model.layers.1.mlp.gate_proj.weight", "model.layers.1.mlp.up_proj.weight"}
     # group size 128 divides only down_proj's 128 inputs; the 64-input maps are skipped with a warning
-    summary = quantize_model(adapter, QuantConfig(group_size=128))
+    summary = quantize_model(adapter, QuantConfig(group_size=128, backend="fake"))
     assert summary["modules"] == 2 and "skipping" in caplog.text
 
 
@@ -211,7 +212,7 @@ def test_calibrated_methods_reduce_error_on_calibration_data(tiny_factory, adapt
     errors = {}
     for method in ("rtn", "gptq", "awq"):
         model = tiny_factory(num_layers=2)
-        config = QuantConfig(format=format, method=method, group_size=32)
+        config = QuantConfig(format=format, method=method, group_size=32, backend="fake")
         quantize_model(adapter_of(model), config, token_batches(calib))
         output = model(calib, output_hidden_states=True)
         errors[method] = [
@@ -228,9 +229,10 @@ def test_quantization_keeps_the_pruning_mask(tiny2, adapter_of, calib, method: s
     from economize.techniques.prune import PruneConfig, prune_model
 
     adapter = adapter_of(tiny2)
-    prune_model(adapter, PruneConfig(method="wanda", sparsity=0.5), token_batches(calib))
+    prune_model(adapter, PruneConfig(method="wanda", sparsity=0.5, semi_structured=False), token_batches(calib))
     zeros = {name: p == 0 for name, p in tiny2.named_parameters() if p.dim() == 2 and "layers" in name}
-    quantize_model(adapter, QuantConfig(format="int4", method=method, group_size=32), token_batches(calib))
+    quantize_model(adapter, QuantConfig(format="int4", method=method, group_size=32, backend="fake"),
+                   token_batches(calib))
     for name, p in tiny2.named_parameters():
         if name in zeros:
             assert (p[zeros[name]] == 0).all(), name
@@ -330,7 +332,8 @@ def test_awq_quantizes_gemma4(gemma4, adapter_of, nll) -> None:
         assert "input_layernorm" in result["scaled"]
     torch.testing.assert_close(float_copy(held_out).logits, reference, atol=1e-4, rtol=1e-4)
     dense = nll(gemma4, held_out)
-    quantize_model(adapter, QuantConfig(method="awq", format="int4", group_size=None), token_batches(ids))
+    quantize_model(adapter, QuantConfig(method="awq", format="int4", group_size=None, backend="fake"),
+                   token_batches(ids))
     logits = gemma4(held_out).logits
     assert torch.isfinite(logits).all() and not torch.equal(logits, reference)
     assert abs(nll(gemma4, held_out) - dense) < 1.0
@@ -348,7 +351,7 @@ def test_awq_quantizes_gemma4(gemma4, adapter_of, nll) -> None:
 )
 def test_quantized_model_end_to_end(tiny2, adapter_of, calib, held_out, nll, kwargs) -> None:
     dense_logits, dense_nll = tiny2(held_out).logits, nll(tiny2, held_out)
-    quantize_model(adapter_of(tiny2), QuantConfig(**kwargs), token_batches(calib))
+    quantize_model(adapter_of(tiny2), QuantConfig(backend="fake", **kwargs), token_batches(calib))
     logits, value = tiny2(held_out).logits, nll(tiny2, held_out)
     assert torch.isfinite(logits).all() and not torch.equal(logits, dense_logits)
     bound = 0.05 if kwargs.get("format") in ("int8", "fp8") else 1.0
@@ -357,7 +360,7 @@ def test_quantized_model_end_to_end(tiny2, adapter_of, calib, held_out, nll, kwa
 
 def test_calibrated_methods_need_data(tiny2, adapter_of) -> None:
     with pytest.raises(ConfigError, match="calibration"):
-        quantize_model(adapter_of(tiny2), QuantConfig(method="gptq"))
+        quantize_model(adapter_of(tiny2), QuantConfig(method="gptq", backend="fake"))
 
 
 @pytest.mark.parametrize(
@@ -384,7 +387,7 @@ def test_quant_config_validation(kwargs: dict, match: str) -> None:
 
 def test_quant_config_validate_checks_layers(tiny2, adapter_of) -> None:
     with pytest.raises(ConfigError):
-        QuantConfig(layers=(3,)).validate(adapter_of(tiny2))
+        QuantConfig(layers=(3,), backend="fake").validate(adapter_of(tiny2))
 
 
 # ---- torchao backend -----------------------------------------------------------------------------------------------
@@ -490,7 +493,7 @@ def drafter(tiny2) -> _StubDrafter:
 
 
 def test_draft_modules_skip_shared_and_lora_maps(tiny2, drafter) -> None:
-    config = DraftQuantConfig(group_size=32)
+    config = DraftQuantConfig(group_size=32, backend="fake")
     assert set(draft_modules(drafter, config, tiny2.parameters())) == {"predictor.0", "predictor.2"}
     assert "shared" in draft_modules(drafter, config)  # without the base parameters it is a candidate
     drafter.draft_modules = lambda: {"head": drafter.predictor[2]}  # a drafter may choose its modules itself
@@ -498,7 +501,7 @@ def test_draft_modules_skip_shared_and_lora_maps(tiny2, drafter) -> None:
 
 
 def test_quantize_draft_and_restore_exactly(tiny2, drafter) -> None:
-    config = DraftQuantConfig(format="int4", group_size=32, symmetric=False)
+    config = DraftQuantConfig(format="int4", group_size=32, symmetric=False, backend="fake")
     before = _weights(drafter)
     trainable = {name: p.requires_grad for name, p in drafter.named_parameters()}
     assert trainable["predictor.0.weight"] and not trainable["shared.weight"]  # the tiny base model is frozen
@@ -518,7 +521,7 @@ def test_quantize_draft_and_restore_exactly(tiny2, drafter) -> None:
 def test_quantized_copy_leaves_the_shared_module_untouched(tiny2) -> None:
     layer = tiny2.model.layers[1]
     before = {name: p.clone() for name, p in layer.named_parameters()}
-    clone, summary = quantized_copy(layer, DraftQuantConfig(group_size=32))
+    clone, summary = quantized_copy(layer, DraftQuantConfig(group_size=32, backend="fake"))
     assert summary["modules"] == 7
     assert all(torch.equal(p, before[name]) for name, p in layer.named_parameters())
     assert not torch.equal(clone.mlp.up_proj.weight, layer.mlp.up_proj.weight)
@@ -526,7 +529,7 @@ def test_quantized_copy_leaves_the_shared_module_untouched(tiny2) -> None:
 
 def test_draft_quant_config_validation() -> None:
     with pytest.raises(ConfigError):
-        DraftQuantConfig(format="int5")
+        DraftQuantConfig(format="int5", backend="fake")
     with pytest.raises(ConfigError):
         DraftQuantConfig(backend="torchao", format="int3")
 
@@ -542,7 +545,7 @@ def test_quant_technique(tiny2, adapter_of, calib, attach_context) -> None:
 
     adapter = adapter_of(tiny2)
     assert PruneTechnique.order < LowRankTechnique.order < QuantTechnique.order == 30
-    gptq = QuantTechnique(QuantConfig(method="gptq", group_size=32), adapter)
+    gptq = QuantTechnique(QuantConfig(method="gptq", group_size=32, backend="fake"), adapter)
     assert gptq.capabilities == Capability.WEIGHTS and not gptq.lossless
     with pytest.raises(ConfigError, match="calibration"):
         gptq.attach(tiny2, adapter, attach_context(None))
@@ -550,7 +553,7 @@ def test_quant_technique(tiny2, adapter_of, calib, attach_context) -> None:
     assert gptq.summary["modules"] == 14 and gptq.summary["method"] == "gptq"
     with pytest.raises(EconomizeError):
         gptq.detach()
-    rtn = QuantTechnique(QuantConfig(format="int8", symmetric=True, group_size=None), adapter)
+    rtn = QuantTechnique(QuantConfig(format="int8", symmetric=True, group_size=None, backend="fake"), adapter)
     rtn.attach(tiny2, adapter, None)  # round to nearest needs no data
     per_layer = {64: 4096 * 2 + 2048 * 2 + 8192 * 2, 128: 8192}  # weights by input size (down_proj reads 128)
     expected = 8 + sum(16 / features * n for features, n in per_layer.items()) / 36864
@@ -562,7 +565,7 @@ def test_draft_quant_technique(tiny2, adapter_of, drafter, attach_context, held_
     from economize.techniques.quant import DraftQuantTechnique
 
     adapter = adapter_of(tiny2)
-    technique = DraftQuantTechnique(DraftQuantConfig(group_size=32), adapter)
+    technique = DraftQuantTechnique(DraftQuantConfig(group_size=32, backend="fake"), adapter)
     assert technique.lossless and technique.order > 30 and technique.capabilities == Capability.NONE
     with pytest.raises(IncompatibleTechniquesError):
         technique.check_compatible([])
@@ -584,7 +587,7 @@ def test_draft_quant_sees_through_wrapping_drafters(tiny2) -> None:
     from economize.techniques.hybrid import HybridConfig
 
     def quantized(drafter: object) -> int:
-        model = economize.apply(tiny2, drafter, DraftQuantConfig(group_size=32))
+        model = economize.apply(tiny2, drafter, DraftQuantConfig(group_size=32, backend="fake"))
         modules = model.techniques["draft_quant"].summary["modules"]
         model.detach()
         return modules

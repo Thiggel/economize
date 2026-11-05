@@ -20,15 +20,19 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .engine import OnnxCausalLM, check_onnx, load_onnx, plain_model, to_onnx
+    from .factored import FactoredLinear, factor_linears
     from .graph import matmul_nbits, nbits_reason, pack_bits, trace_onnx
-    from .runtime import ONNX, ONNX_TECHNIQUES, OnnxQuant
+    from .runtime import ONNX, ONNX_TECHNIQUES, OnnxLowRank, OnnxQuant
 
 __all__ = [
     "ONNX",
     "ONNX_TECHNIQUES",
+    "FactoredLinear",
     "OnnxCausalLM",
+    "OnnxLowRank",
     "OnnxQuant",
     "check_onnx",
+    "factor_linears",
     "load_onnx",
     "matmul_nbits",
     "nbits_reason",
@@ -42,7 +46,8 @@ _HOME = {
     "OnnxCausalLM": "engine", "check_onnx": "engine", "load_onnx": "engine", "plain_model": "engine",
     "to_onnx": "engine",
     "matmul_nbits": "graph", "nbits_reason": "graph", "pack_bits": "graph", "trace_onnx": "graph",
-    "ONNX": "runtime", "ONNX_TECHNIQUES": "runtime", "OnnxQuant": "runtime",
+    "FactoredLinear": "factored", "factor_linears": "factored",
+    "ONNX": "runtime", "ONNX_TECHNIQUES": "runtime", "OnnxLowRank": "runtime", "OnnxQuant": "runtime",
 }
 
 

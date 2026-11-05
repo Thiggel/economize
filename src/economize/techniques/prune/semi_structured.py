@@ -10,13 +10,92 @@ CUTLASS is fastest at decode token counts).
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
+
 import torch
 from torch import nn
 
 from ...errors import ConfigError
 from .masks import check_nm
 
-__all__ = ["semi_structured_available", "to_semi_structured"]
+if TYPE_CHECKING:
+    from .config import PruneConfig
+
+__all__ = [
+    "NO_SPARSE_FORMAT",
+    "REFERENCE_HINT",
+    "check_storable",
+    "semi_structured_available",
+    "storage_reason",
+    "to_semi_structured",
+]
+
+#: How to ask for the simulated masked-dense reference (appended to every refusal).
+REFERENCE_HINT = "pass semi_structured=False for the masked dense reference (simulated: no memory or speed saving)"
+#: Why a pattern other than 2:4 has no real storage (``{pattern}`` is the configured pattern).
+NO_SPARSE_FORMAT = (
+    "no sparse weight format runs {pattern} sparsity faster or in less memory than the dense weights (sparse tensor "
+    "cores run only 2:4); use sparsity='2:4' or " + REFERENCE_HINT
+)
+
+
+def storage_reason(config: PruneConfig) -> str | None:
+    """Why ``config``'s pruned weights cannot be stored in a sparse format here (``None``: they can, or the
+    configuration is the explicit masked-dense reference).
+
+    Only the installed software is checked (the device is checked when the weights are converted, by
+    :func:`check_storable`).
+
+    Parameters
+    ----------
+    config : PruneConfig
+        The pruning configuration.
+
+    Returns
+    -------
+    str or None
+        The reason, with the way out.
+    """
+    if config.reference:
+        return None
+    if not config.sparse_storage:
+        return NO_SPARSE_FORMAT.format(pattern=config.pattern)
+    if not hasattr(torch.sparse, "to_sparse_semi_structured"):
+        return (f"this PyTorch ({torch.__version__}) has no torch.sparse.to_sparse_semi_structured (2.1+ needed); "
+                + REFERENCE_HINT)
+    return None
+
+
+def check_storable(config: PruneConfig, linears: Iterable[nn.Linear]) -> None:
+    """Raise before any weight changes if ``config``'s sparse storage cannot hold the weights of ``linears``.
+
+    Parameters
+    ----------
+    config : PruneConfig
+        The pruning configuration.
+    linears : Iterable[nn.Linear]
+        The maps that will be pruned.
+
+    Raises
+    ------
+    ConfigError
+        :func:`storage_reason` refuses the configuration, or a weight is not an fp16 / bf16 weight on a CUDA GPU of
+        compute capability 8.0 or higher (what the semi-structured kernels need).
+    """
+    reason = storage_reason(config)
+    if reason is not None:
+        raise ConfigError(f"prune(sparsity={config.sparsity!r}): {reason}")
+    if not config.sparse_storage:
+        return
+    for linear in linears:
+        weight = linear.weight
+        if not semi_structured_available(weight.device):
+            raise ConfigError(f"semi-structured 2:4 storage needs a CUDA GPU with compute capability >= 8.0, the "
+                              f"weights are on {weight.device}; move the model to such a GPU or {REFERENCE_HINT}")
+        if weight.dtype not in (torch.float16, torch.bfloat16):
+            raise ConfigError(f"semi-structured 2:4 storage needs fp16 or bf16 weights, got {weight.dtype}; cast "
+                              f"the model or {REFERENCE_HINT}")
 
 
 def semi_structured_available(device: torch.device | str | None = None) -> bool:

@@ -104,7 +104,7 @@ def test_prune_model_restores_every_weight_when_a_layer_fails(tiny_factory, adap
 
     monkeypatch.setattr(method, "prune", flaky)
     with pytest.raises(FloatingPointError):
-        prune_model(adapter_of(model), PruneConfig(method="magnitude", sparsity=0.5))
+        prune_model(adapter_of(model), PruneConfig(method="magnitude", sparsity=0.5, semi_structured=False))
     _assert_same(model, before)
 
 
@@ -122,6 +122,7 @@ def test_prune_model_restores_dense_weights_when_the_2_4_conversion_fails(tiny2,
             raise RuntimeError("no sparse kernels")
 
     monkeypatch.setattr(prune_model_module, "to_semi_structured", convert)
+    monkeypatch.setattr(prune_model_module, "check_storable", lambda config, linears: None)  # no GPU needed here
     config = PruneConfig(method="magnitude", sparsity="2:4", semi_structured=True)
     with pytest.raises(RuntimeError, match="no sparse kernels"):
         prune_model_module.prune_model(adapter_of(tiny2), config)
@@ -159,7 +160,7 @@ def test_restore_draft_restores_parameter_type_and_requires_grad() -> None:
     modules["b"].weight.requires_grad_(False)
     root = nn.ModuleDict(modules)
     before = _state(root)
-    snapshot = quantize_draft(modules, DraftQuantConfig(group_size=32))
+    snapshot = quantize_draft(modules, DraftQuantConfig(group_size=32, backend="fake"))
     assert snapshot.summary["modules"] == 2 and not modules["a"].weight.requires_grad
     modules["a"].weight = nn.Parameter(modules["a"].weight.detach() + 1, requires_grad=False)  # e.g. a kernel swap
     restore_draft(snapshot)
@@ -218,7 +219,7 @@ def test_quantize_model_restores_every_weight_when_a_conversion_fails(
     monkeypatch.setattr(FakeQuantBackend, "apply", failing_apply)
     batches = list(calib[:2].split(1))
     with pytest.raises(RuntimeError, match="kernel conversion failed"):
-        quantize_model(adapter_of(model), QuantConfig(method=method, group_size=32), batches)
+        quantize_model(adapter_of(model), QuantConfig(method=method, group_size=32, backend="fake"), batches)
     assert len(calls) == 9
     _assert_restored(model, before, grads)
 
@@ -240,7 +241,7 @@ def test_quantize_model_restores_weights_when_a_method_fails(tiny_factory, adapt
 
     monkeypatch.setattr(method, "quantize_layer", flaky)
     with pytest.raises(FloatingPointError):
-        quantize_model(adapter_of(model), QuantConfig(method="rtn", group_size=32))
+        quantize_model(adapter_of(model), QuantConfig(method="rtn", group_size=32, backend="fake"))
     _assert_restored(model, before, grads)
 
 

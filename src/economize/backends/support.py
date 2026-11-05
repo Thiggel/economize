@@ -4,7 +4,8 @@ A serving backend (vLLM, SGLang) registers one adapter per technique; the adapte
 whether the engine serves the technique and how. :func:`serving_support` turns that level into a
 :class:`~economize.core.compatibility.BackendSupport`:
 
-* no adapter, or level ``UNSUPPORTED``: :attr:`~SupportStatus.UNSUPPORTED`, with the adapter's reason;
+* no adapter, or level ``UNSUPPORTED``: :attr:`~SupportStatus.UNSUPPORTED`, with the adapter's reason (its
+  ``reason_of`` for the configuration when it defines one, else its ``reason``);
 * level ``DENSIFIED``: :attr:`~SupportStatus.SIMULATED`; the engine runs the technique's weights multiplied out, so
   none of the technique's savings (:attr:`~economize.TechniqueInfo.saves`) is realized;
 * an adapter that declares a ``simulation`` (or returns one from ``simulation_of`` for the configuration: FP4
@@ -51,7 +52,9 @@ def serving_support(
     simulation: Simulation | None = (
         hook(_Configured(config)) if hook is not None and config is not None else getattr(adapter, "simulation", None)
     )
-    return adapter_support(engine, technique, level, adapter.reason, simulation)
+    explain = getattr(adapter, "reason_of", None)
+    reason = explain(_Configured(config)) if explain is not None and config is not None else adapter.reason
+    return adapter_support(engine, technique, level, reason, simulation)
 
 
 def adapter_support(

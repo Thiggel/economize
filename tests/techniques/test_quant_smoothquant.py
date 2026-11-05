@@ -116,7 +116,7 @@ def test_smoothquant_w8a8_beats_round_to_nearest_w8a8(tiny_factory, adapter_of, 
     errors = {}
     for method in ("rtn", "smoothquant"):
         model = copy.deepcopy(base)
-        quantize_model(adapter_of(model), QuantConfig(method=method, **W8A8), token_batches(calib))
+        quantize_model(adapter_of(model), QuantConfig(method=method, backend="fake", **W8A8), token_batches(calib))
         errors[method] = (model(held_out).logits - reference).pow(2).mean().item()
     assert errors["smoothquant"] < 0.5 * errors["rtn"]
 
@@ -124,7 +124,7 @@ def test_smoothquant_w8a8_beats_round_to_nearest_w8a8(tiny_factory, adapter_of, 
 def test_smoothquant_quantizes_the_smoothed_weights(tiny2, adapter_of, calib) -> None:
     smoothed = copy.deepcopy(tiny2)
     _smooth_only(smoothed, adapter_of, calib, alpha=0.5)
-    quantize_model(adapter_of(tiny2), QuantConfig(method="smoothquant", **W8A8), token_batches(calib))
+    quantize_model(adapter_of(tiny2), QuantConfig(method="smoothquant", backend="fake", **W8A8), token_batches(calib))
     for index in (0, 1):
         expected = linear_modules(adapter_of(smoothed), smoothed.model.layers[index])
         for name, module in linear_modules(adapter_of(tiny2), tiny2.model.layers[index]).items():
@@ -152,7 +152,8 @@ def test_activation_schemes_quantize_per_token(name: str) -> None:
 
 
 def test_fake_backend_hook_quantizes_the_inputs(tiny2, adapter_of, held_out) -> None:
-    quantize_model(adapter_of(tiny2), QuantConfig(format="int8", group_size=None, symmetric=True, activations="int8"))
+    quantize_model(adapter_of(tiny2), QuantConfig(format="int8", group_size=None, symmetric=True, activations="int8",
+                                                  backend="fake"))
     module = tiny2.model.layers[0].mlp.down_proj
     x = torch.randn(4, module.in_features)
     expected = F.linear(ACTIVATION_SCHEMES.get("int8").fake(x), module.weight)
@@ -177,7 +178,7 @@ def test_activation_hooks_are_removed_when_quantization_fails(tiny2, adapter_of,
     reference = [p.clone() for p in tiny2.parameters()]
     with pytest.raises(RuntimeError, match="kernel conversion"):
         quantize_model(adapter_of(tiny2), QuantConfig(format="int8", group_size=None, symmetric=True,
-                                                      activations="int8"))
+                                                      activations="int8", backend="fake"))
     for module in tiny2.modules():
         assert not module._forward_pre_hooks and act.activation_scheme_of(module) is None
     assert all(torch.equal(a, b) for a, b in zip(reference, tiny2.parameters(), strict=True))
