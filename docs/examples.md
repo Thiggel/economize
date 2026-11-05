@@ -440,9 +440,11 @@ economize.apply(fresh(), QuantConfig(format="fp8", group_size=None))            
 economize.apply(fresh(), TealConfig(sparsity=0.4), calibration=calibration)                            # TEAL
 ```
 
-The default quantization backend simulates the format in the model's dtype (`backend="fake"`), which reproduces the
-numerics of the integer kernels. Real kernels come from torchao, Marlin or compressed-tensors, and 2:4 sparse
-weights can use the semi-structured kernels of PyTorch (*not run in the tests*):
+The default quantization backend (`backend="auto"`) picks the fastest installed real kernel for the format and
+device, and raises an error naming the packages to install when none fits. `backend="fake"` keeps the dequantized
+weights in the model's dtype, which reproduces the numerics of the integer kernels without their memory or speed
+gain. The kernels can also be named directly, and 2:4 sparse weights can use the semi-structured kernels of PyTorch
+(*not run in the tests*):
 
 <!-- not run: needs CUDA kernels -->
 ```python
