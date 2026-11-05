@@ -246,7 +246,8 @@ def test_compensation_replaces_the_removed_inputs_by_their_mean(adapter_of, atta
     assert pruned.model.layers[0].self_attn.o_proj.bias is not None
     dense = make_tiny_model()
     _replace_removed(dense, technique, compensate=True)
-    torch.testing.assert_close(pruned(TOKENS).logits, dense(TOKENS).logits, atol=1e-5, rtol=1e-5)
+    # the folded bias sums in another float32 order than the explicit mean inputs, 1e-5 apart on some CPUs
+    torch.testing.assert_close(pruned(TOKENS).logits, dense(TOKENS).logits, atol=1e-4, rtol=1e-4)
 
 
 def test_compensation_lowers_the_held_out_loss(adapter_of, attach_context, calib, held_out, nll) -> None:

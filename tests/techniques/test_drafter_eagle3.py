@@ -353,7 +353,10 @@ def test_bfloat16_decoding(variant: str, param_dtype: str, cycle_length: int) ->
         assert all(k <= cycle_length - 1 for k, _ in result.acceptance)
         alone = model.decode(prompt, 16)
         assert torch.equal(result.tokens, alone.tokens) and result.acceptance == alone.acceptance
-        assert result.tokens[0] == reference_greedy(base, prompt, 1)[0]  # the prefill's token is exact
+        # The prefill's token is the base model's greedy token, up to ties within bf16 rounding (two logits can be
+        # equal in bf16, and which one the batched prefill picks depends on the CPU's kernels).
+        logits = base(prompt.view(1, -1)).logits[0, -1].float()
+        assert logits.max() - logits[result.tokens[0]] <= 2**-6 * logits.abs().max()
 
 
 # ---- save, load and combinations -----------------------------------------------------------------------------------

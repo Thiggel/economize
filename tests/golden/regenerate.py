@@ -14,8 +14,11 @@ differs from the dense model at all (a case equal to ``dense`` tests nothing).
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
+
+os.environ.setdefault("MKL_CBWR", "COMPATIBLE")  # as in tests/conftest.py, before MKL first runs
 
 import torch
 

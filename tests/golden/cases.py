@@ -55,6 +55,9 @@ class GoldenCase:
             and 2.14) and no change of a discrete decision (a flipped quantization level moves logits by 1e-2 and
             more).
         rtol: Relative tolerance of floating-point tensors.
+        mean_atol: If set, floating-point tensors are compared by their mean absolute difference instead of
+            elementwise. Cases that round activations at run time need it: a difference of 1e-7 between CPUs flips
+            a few rounding decisions, and each flip moves single logits by up to 0.2 while the mean stays small.
     """
 
     name: str
@@ -62,20 +65,21 @@ class GoldenCase:
     source: str
     atol: float = 1e-3
     rtol: float = 1e-3
+    mean_atol: float | None = None
 
 
 #: Every golden case, by name.
 CASES: dict[str, GoldenCase] = {}
 
 
-def golden(name: str, *, source: str = "economize (verified implementation)", atol: float = 1e-3,
-           rtol: float = 1e-3) -> Callable[[Callable[[], Tensors]], Callable[[], Tensors]]:
+def golden(name: str, *, source: str = "economize (verified implementation)", atol: float = 1e-3, rtol: float = 1e-3,
+           mean_atol: float | None = None) -> Callable[[Callable[[], Tensors]], Callable[[], Tensors]]:
     """Decorator: register ``run`` as the golden case ``name``."""
 
     def decorator(run: Callable[[], Tensors]) -> Callable[[], Tensors]:
         if name in CASES:
             raise ValueError(f"golden case {name!r} is registered twice")
-        CASES[name] = GoldenCase(name, run, source, atol, rtol)
+        CASES[name] = GoldenCase(name, run, source, atol, rtol, mean_atol)
         return run
 
     return decorator
@@ -98,7 +102,11 @@ def assert_matches(case: GoldenCase, new: Tensors, old: Tensors) -> None:
     assert new.keys() == old.keys(), f"{case.name}: tensors {sorted(new)} != committed {sorted(old)}"
     for key in old:
         message = f"{case.name}[{key}] moved from the reference ({case.source})"
-        if old[key].is_floating_point():
+        if old[key].is_floating_point() and case.mean_atol is not None:
+            assert new[key].shape == old[key].shape, f"{message}: shape {tuple(new[key].shape)}"
+            mean = float((new[key].double() - old[key].double()).abs().mean())
+            assert mean <= case.mean_atol, f"{message}: mean |diff| {mean:.3e} > {case.mean_atol:.1e}"
+        elif old[key].is_floating_point():
             torch.testing.assert_close(
                 new[key], old[key], atol=case.atol, rtol=case.rtol, msg=lambda m, message=message: f"{message}\n{m}"
             )
@@ -113,13 +121,16 @@ def golden_model(num_layers: int = LAYERS) -> nn.Module:
     """A tiny float32 Qwen2 with weights drawn from ``torch.Generator().manual_seed(0)`` in parameter order.
 
     Norm weights are ``1 + 0.1 * N(0, 1)``, biases ``0.02 * N(0, 1)`` and matrices ``0.2 * N(0, 1)``, so the model
-    is the same under any ``transformers`` version that keeps the Qwen2 parameter names.
+    is the same under any ``transformers`` version that keeps the Qwen2 parameter names. The noise is drawn in
+    float64 and rounded to float32: the float32 sampler of the CPU takes a different vectorized path on CPUs with
+    and without AVX2 or AVX-512, so its values (and every quantization level that depends on them) differ between
+    machines, while the float64 sampler gives the same values everywhere.
     """
     model = make_tiny_model(num_layers=num_layers)
     generator = torch.Generator().manual_seed(0)
     with torch.no_grad():
         for name, parameter in sorted(model.named_parameters()):
-            noise = torch.randn(parameter.shape, generator=generator)
+            noise = torch.randn(parameter.shape, generator=generator, dtype=torch.float64).float()
             if "norm" in name:
                 parameter.copy_(1 + 0.1 * noise)
             elif name.endswith("bias"):

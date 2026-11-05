@@ -219,17 +219,18 @@ def test_mtp_steps_match_sequential_decoding(family: str | None) -> None:
         states = technique.step_states(model, batch, teacher, starts, 4)
         target = technique.target_state(teacher.hidden[model.adapter.num_layers])
         runner, module = model.runner, technique.layers[0]
+        # the batched step states and the sequential reference reduce in another float32 order (1e-5 on some CPUs)
         for i, s in enumerate(starts.tolist()):
             cache = runner.new_cache(LENGTH, 1, kind="positional")
             prefix = torch.arange(s + 1)[None]
             ctx = runner.context(cache, prefix, trusted=True)
             raw, normed = module(technique.adapter, target[:, : s + 1], technique.embed(ids[:, 1 : s + 2], ctx), ctx)
-            torch.testing.assert_close(states[0][:, i], normed[:, -1], rtol=1e-5, atol=1e-5)
+            torch.testing.assert_close(states[0][:, i], normed[:, -1], rtol=1e-4, atol=1e-4)
             state = normed[:, -1:] if technique.layout.recycle == "normed" else raw[:, -1:]
             for k in range(2, 5):
                 ctx = runner.context(cache, torch.tensor([[s + k - 1]]), trusted=True)
                 raw, normed = module(technique.adapter, state, technique.embed(ids[:, s + k : s + k + 1], ctx), ctx)
-                torch.testing.assert_close(states[k - 1][:, i], normed[:, 0], rtol=1e-5, atol=1e-5)
+                torch.testing.assert_close(states[k - 1][:, i], normed[:, 0], rtol=1e-4, atol=1e-4)
                 state = normed if technique.layout.recycle == "normed" else raw
 
 

@@ -141,7 +141,8 @@ def test_pruning_is_the_original_model_with_the_removed_units_masked(model: str,
     dense = make_gemma4(model)
     assert sum(technique.summary["kv_heads"]) < sum(_kv_heads(dense.config))
     _mask_removed(dense, technique, adapter_of)
-    torch.testing.assert_close(_logits(pruned), _logits(dense), atol=1e-5, rtol=1e-5)
+    # The compacted and the masked matrices sum their products in different orders (1e-5 is too tight on AVX2).
+    torch.testing.assert_close(_logits(pruned), _logits(dense), atol=1e-4, rtol=1e-4)
 
 
 @pytest.mark.parametrize("model", ["dense", "wrapper"])

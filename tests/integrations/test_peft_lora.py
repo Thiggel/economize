@@ -102,7 +102,8 @@ def test_merge_folds_peft_adapters_first(applied_jump: Any) -> None:
     config = economize.JumpConfig(target_layer=2, source_layer=4, adaptation="lora", lora_rank=4)
     model = economize_peft.apply(policy, config, merge=True)
     assert not economize_peft.is_peft_model(model.base_model)
-    torch.testing.assert_close(model(IDS).logits, expected, rtol=1e-5, atol=1e-5)
+    # merging changes the float32 summation order, which moves the logits by 1e-5 on some CPUs
+    torch.testing.assert_close(model(IDS).logits, expected, rtol=1e-4, atol=1e-4)
     assert set(model.techniques["jump"].lora.layers["3"]) >= {"q_proj", "v_proj", "down_proj"}
 
 

@@ -78,7 +78,8 @@ def _hqq() -> Tensors:
     return logits_after(QuantConfig(method="hqq", format="int4", group_size=32))
 
 
-@golden("quant_smoothquant_w8a8")
+# int8 activations: the mean |diff| between CPUs is 1e-2, the method moves the logits by 0.11 on average.
+@golden("quant_smoothquant_w8a8", mean_atol=3e-2)
 def _smoothquant() -> Tensors:
     config = QuantConfig(method="smoothquant", format="int8", group_size=None, symmetric=True, activations="int8")
     return logits_after(config, calibrate=True)

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
+
+# MKL's float32 SVD and matrix products take CPU-specific code paths unless reproducibility mode is on, which moves
+# SVD-based golden cases (LittleBit) by 1e-4 between CPUs. It must be set before MKL first runs.
+os.environ.setdefault("MKL_CBWR", "COMPATIBLE")
 
 import pytest
 import torch
