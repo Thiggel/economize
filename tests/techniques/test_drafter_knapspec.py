@@ -296,20 +296,42 @@ def test_drafter_type() -> None:
     assert technique.layer_span == (1, LAYERS) and "plan=None" in repr(technique)
 
 
-def test_graphed_steps_survive_evictions_and_refreshes(monkeypatch) -> None:
-    """The sequence of xb31_tune_ks (a bench of several decoding configurations, ``refresh()`` between them, a few
-    graphed skip sets kept): decoders that record graphs keep their drafter across generations and evict graphed
-    steps of older skip sets. Every generation stays equal to plain greedy decoding. On the CPU the graph path runs
-    with :class:`~economize.runtime.StaticStep` executing eagerly."""
-    from economize.decoding.loop import CycleDecoder
+def _graph_log(monkeypatch) -> tuple[list[int], list[int], list[int]]:
+    """Record the graphed steps the KnapSpec drafter resets, enables and runs eagerly (ids of the steps)."""
     from economize.techniques._drafting import GraphedStep
+
+    resets: list[int] = []
+    enabled: list[int] = []
+    eager: list[int] = []
+    reset, enable, call = GraphedStep.reset, GraphedStep.enable, GraphedStep.__call__
+    monkeypatch.setattr(GraphedStep, "reset", lambda self: (resets.append(id(self)), reset(self))[1])
+    monkeypatch.setattr(GraphedStep, "enable", lambda self, wrap: (enabled.append(id(self)), enable(self, wrap))[1])
+
+    def traced(self, *args):
+        if not self.enabled:
+            eager.append(id(self))
+        return call(self, *args)
+
+    monkeypatch.setattr(GraphedStep, "__call__", traced)
+    return resets, enabled, eager
+
+
+def test_graphed_steps_are_never_reset_by_the_drafter(monkeypatch) -> None:
+    """The sequence of xb31_tune_ks (several decoding configurations, ``refresh()`` between them, more skip sets
+    than ``max_graphs``), which died on H100 with an illegal memory access in an exact-pass graph replay once the
+    drafter had started evicting: resetting the graphed step of an old skip set destroys its graphs inside the memory
+    pool that the exact-pass graphs share. The drafter graphs the first ``max_graphs`` skip sets per cache and drafts
+    the others eagerly, without resetting anything; every generation stays equal to plain greedy decoding.
+    On the CPU the graph path runs with :class:`~economize.runtime.StaticStep` executing eagerly."""
+    from economize.decoding.loop import CycleDecoder
 
     monkeypatch.setattr(torch.cuda, "graph_pool_handle", lambda: None)
     monkeypatch.setattr(CycleDecoder, "_graphable", lambda self: True)
-
-    evicted: list[int] = []
-    reset = GraphedStep.reset
-    monkeypatch.setattr(GraphedStep, "reset", lambda self: (evicted.append(id(self)), reset(self))[1])
+    resets, enabled, eager = _graph_log(monkeypatch)
+    graphed: list[int] = []
+    select = KnapSpecDrafter._select_graph
+    monkeypatch.setattr(KnapSpecDrafter, "_select_graph",
+                        lambda self, key: (select(self, key), graphed.append(len(self._graphs)))[0])
     base = make_family_model("gemma4_text")
     model = economize.apply(base, KnapSpecConfig(latency=FLAT, interval=4, min_similarity=-1.0, max_draft=4,
                                                  max_graphs=1, prompt_tokens=8))
@@ -320,4 +342,45 @@ def test_graphed_steps_survive_evictions_and_refreshes(monkeypatch) -> None:
         model.refresh()
         for prompt, reference in zip(prompts, references):
             assert torch.equal(model.decode(prompt, 30, decoding=decoding).tokens, reference)
-    assert evicted, "the bench sequence never evicted a graphed step"
+    assert len(graphed) > len(prompts) and max(graphed) == 1, "too few searches, or more graphs than max_graphs"
+    assert not set(resets) & set(enabled), "the drafter reset a graphed step"
+    assert eager, "no skip set beyond max_graphs drafted eagerly"
+
+
+# ---- CUDA ----------------------------------------------------------------------------------------------------------
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA device")
+def test_latency_measurement_records_no_cuda_graph(monkeypatch) -> None:
+    """The measurement runs mid-generation next to the decoder's graphs; a graph capture there (in a pool of its
+    own, released right after) was one suspect of the xb31_tune_ks illegal memory access and is gone."""
+    def no_graph(*args, **kwargs):
+        raise AssertionError("measure_latency recorded a CUDA graph")
+
+    base = make_tiny_model().cuda()
+    adapter = adapter_for(base)
+    runner, skipper = LayerRunner(adapter), SublayerSkipper(adapter)
+    cache, _, _ = _prefill(runner, torch.randint(1, VOCAB, (1, 6), device="cuda"))
+    monkeypatch.setattr(torch.cuda, "CUDAGraph", no_graph)
+    latency = measure_latency(runner, cache, skipper, (2, 8, 64), repeats=3)
+    assert latency.mlp > 0 and latency.attention_base > 0 and latency.attention_slope >= 0
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA device")
+@pytest.mark.parametrize("measured", [False, True])
+def test_graphed_knapspec_with_more_skip_sets_than_graphs_equals_greedy(monkeypatch, measured: bool) -> None:
+    """Real CUDA graphs, a search every 4 tokens and one graphed skip set: the exact-pass graphs keep replaying
+    while later skip sets draft eagerly (and, measured, while the latency is timed mid-generation)."""
+    resets, enabled, eager = _graph_log(monkeypatch)
+    base = make_family_model("gemma4_text").cuda()
+    config = KnapSpecConfig(latency=None if measured else FLAT, interval=4, min_similarity=-1.0, max_draft=4,
+                            max_graphs=1, prompt_tokens=8, calibration_lengths=(8, 32), calibration_repeats=2)
+    model = economize.apply(base, config)
+    prompts = [p.cuda() for p in _prompts(lengths=(40, 9, 25))]
+    for decoding in (DecodeConfig(cycle_length=5, cuda_graphs=True),
+                     DecodeConfig(cycle_length=5, cuda_graphs=True, min_confidence=0.3)):
+        model.refresh()
+        for prompt in prompts:
+            assert torch.equal(model.decode(prompt, 30, decoding=decoding).tokens, reference_greedy(base, prompt, 30))
+    torch.cuda.synchronize()
+    assert not set(resets) & set(enabled) and eager

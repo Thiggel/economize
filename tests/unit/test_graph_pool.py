@@ -89,9 +89,3 @@ def test_capture_turns_the_collector_off_and_syncs(monkeypatch, fail: bool) -> N
     assert log[0] == ("sync",) and ("pool", 7, "global") in log
     assert ("enter", False) in log and ("exit", False) in log
     assert (log[-1] == ("sync",)) == fail
-
-
-def test_latency_timer_and_static_steps_share_one_capture() -> None:
-    from economize.techniques.knapspec import latency
-
-    assert latency.capture is capture
