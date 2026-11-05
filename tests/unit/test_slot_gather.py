@@ -82,6 +82,7 @@ def test_static_cache_gather_matches_indexing_on_cpu():
 
 
 gpu = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA device")
+two_gpus = pytest.mark.skipif(torch.cuda.device_count() < 2, reason="needs two CUDA devices")
 
 
 @pytest.mark.gpu
@@ -144,3 +145,44 @@ def test_disabled_kernel_takes_the_indexing_path(monkeypatch):
     buffers = _buffers("cuda")
     _check(buffers, *_tree_moves("cuda"))
     assert not calls
+
+
+class _LaunchRecorder:
+    """Wraps the Triton kernel and records the current CUDA device at every launch."""
+
+    def __init__(self, kernel):
+        self.kernel = kernel
+        self.devices: list[int] = []
+
+    def __getitem__(self, grid):
+        self.devices.append(torch.cuda.current_device())
+        return self.kernel[grid]
+
+
+@pytest.mark.gpu
+@two_gpus
+def test_fused_kernel_runs_on_the_buffers_device_and_stream(monkeypatch):
+    """With another device current (the target's, in two-GPU speculative decoding), the kernel must still launch on
+    the buffers' device, behind the work its current stream has queued."""
+    recorder = _LaunchRecorder(slot_gather._kernel())
+    monkeypatch.setattr(slot_gather, "_kernel", lambda: recorder)
+    torch.cuda.set_device(0)
+    fresh = _buffers("cuda:1")[:5]
+    rows, src, dst = _tree_moves("cuda:1")
+    expected = [b.clone() for b in fresh]
+    for buffer in expected:
+        gather_slots_reference(buffer, rows, src, dst)
+    buffers = [torch.zeros_like(b) for b in fresh]
+    gather_slots(buffers, rows, src, dst)  # builds the pointer table, so the call below issues no blocking copy
+    torch.cuda.synchronize(1)
+    with torch.cuda.device(1):
+        torch.cuda._sleep(100_000_000)  # the writes below land long after the gather has been issued
+        for buffer, values in zip(buffers, fresh):
+            buffer.copy_(values)
+    gather_slots(buffers, rows, src, dst)
+    torch.cuda.synchronize(0)
+    torch.cuda.synchronize(1)
+    assert torch.cuda.current_device() == 0
+    assert recorder.devices == [1, 1]
+    for got, want in zip(buffers, expected):
+        assert torch.equal(got[:, :, :TRASH], want[:, :, :TRASH])
