@@ -58,7 +58,8 @@ def test_policy_pass_matches_teacher_and_has_gradients() -> None:
 
 
 def test_token_log_probs_chunks_agree() -> None:
-    model = _jump_model()
+    # float64: the chunked pass sums the gradient in another order, which float32 rounding makes CPU-dependent.
+    model = _jump_model().to(torch.float64)
     model.base_model.requires_grad_(True)
     batch = Batch(_ids())
     whole = token_log_probs(policy_pass(model, batch, _request(model)), batch.input_ids, chunk=0)
@@ -69,7 +70,7 @@ def test_token_log_probs_chunks_agree() -> None:
     parts[0].sum().backward()
     torch.testing.assert_close(parts[0], whole[0])
     torch.testing.assert_close(parts[1], whole[1])
-    torch.testing.assert_close(model.adapter.lm_head.weight.grad, grad, atol=1e-5, rtol=1e-4)
+    torch.testing.assert_close(model.adapter.lm_head.weight.grad, grad, atol=1e-10, rtol=1e-10)
 
 
 def test_acceptance_and_expected_tokens() -> None:

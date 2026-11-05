@@ -49,9 +49,9 @@ jobs:
 
   tests:
     runs-on: ubuntu-latest
-    # About 8 minutes of tests on 4 workers plus the install; the limit leaves headroom for
-    # slower runners.
-    timeout-minutes: 20
+    # About 13 minutes of tests on 4 workers on Python 3.12 and 20 on 3.10, plus the install; the
+    # limit leaves headroom for slower runners.
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
