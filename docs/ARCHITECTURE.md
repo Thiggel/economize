@@ -546,7 +546,7 @@ through the helpers `selector_many`, `selector_distribution`, `selector_distribu
 `GreedySelector` implements the first three (one-hot distributions) and `TopPSampler` all four.
 
 Verifiers (`VERIFIERS`), all with a vectorized `verify_batch` for chains: `greedy` (chains and trees), `rejection`
-(lossless speculative sampling, Leviathan et al.; chains and trees, where the children of a node are tried in
+(lossless speculative sampling, @leviathan2023speculative; chains and trees, where the children of a node are tried in
 turn as in SpecInfer's multi-draft scheme and a rejected child's distribution is removed from the residual; needs
 a selector with `distribution`), `typical` (Medusa's typical acceptance, lossy: a draft is kept while its exact
 probability exceeds `min(threshold, alpha * exp(-H))`, chains and trees, options `threshold` and `alpha`) and

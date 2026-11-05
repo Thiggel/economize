@@ -2,7 +2,7 @@
 
 <!-- technique-info: pard -->
 
-PARD (An et al., 2025) adapts a small draft LM so that it proposes several tokens in one forward pass. The draft LM
+PARD [@an2025pard] adapts a small draft LM so that it proposes several tokens in one forward pass. The draft LM
 shares the base model's tokenizer and is fine-tuned on sequences `[x_1 .. x_t, m, m, ..., m]`, where `m` is a mask
 token. The logits at `x_t` give the first draft and the logits at the `i`-th mask give draft `i + 1`. During decoding
 every cycle costs a single call of the draft LM: it reads the committed tokens it has not seen yet followed by mask
@@ -103,8 +103,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: pard -->
-
-## Reference
-
-Zihao An, Huajun Bai, Ziqiong Liu, Dong Li and Emad Barsoum. *PARD: Accelerating LLM Inference with Low-Cost
-PARallel Draft Model Adaptation.* arXiv:2504.18583, 2025.

@@ -2,7 +2,7 @@
 
 <!-- technique-info: hidden_transfer -->
 
-Hidden Transfer (Wu et al., 2024) drafts future tokens from pseudo hidden states at intermediate layers. After a
+Hidden Transfer [@wu2024hiddentransfer] drafts future tokens from pseudo hidden states at intermediate layers. After a
 forward pass that ended at position `n`, a linear map `W_i` (one `d x d` matrix per future step `i = 1..k`) turns the
 base model's hidden state of `n` after layer `t_i` into a pseudo state of the token at `n + i`, which is not known
 yet. The pseudo state continues through layers `t_i + 1..L` and the LM head, attending to the cache, and drafts token
@@ -120,8 +120,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: hidden_transfer -->
-
-## Reference
-
-Pengfei Wu, Jiahao Liu, Zhuocheng Gong, Qifan Wang, Jinpeng Li, Jingang Wang, Xunliang Cai and Dongyan Zhao.
-*Parallel Decoding via Hidden Transfer for Lossless Large Language Model Acceleration.* arXiv:2404.12022, 2024.

@@ -2,7 +2,7 @@
 
 <!-- technique-info: slicegpt -->
 
-SliceGPT (Ashkboos et al., 2024) uses the invariance of a pre-RMSNorm transformer to an orthogonal rotation `Q` of
+SliceGPT [@ashkboos2024slicegpt] uses the invariance of a pre-RMSNorm transformer to an orthogonal rotation `Q` of
 its residual stream. With each norm's scale folded into the maps that read it, every map that reads the stream
 becomes `W Q`, every map that writes it becomes `Q^T W`, and the model computes the same function. Choosing the
 columns of `Q` as the principal components of the stream on calibration data and keeping the first
@@ -110,8 +110,3 @@ implementation derives the head size from `hidden_size // num_attention_heads`.
 ## Configuration
 
 <!-- technique-config: slicegpt -->
-
-## Reference
-
-Saleh Ashkboos, Maximilian L. Croci, Marcelo Gennari do Nascimento, Torsten Hoefler and James Hensman. *SliceGPT:
-Compress Large Language Models by Deleting Rows and Columns.* ICLR, 2024.

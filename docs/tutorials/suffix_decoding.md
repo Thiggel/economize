@@ -2,7 +2,7 @@
 
 <!-- technique-info: suffix_decoding -->
 
-SuffixDecoding (Oliaro et al., 2025) drafts from suffix structures over earlier text, without a draft model. Every
+SuffixDecoding [@oliaro2025suffixdecoding] drafts from suffix structures over earlier text, without a draft model. Every
 cycle it searches two of them: a global one over a datastore of earlier responses and a local one over the row's own
 prompt and output. For each match length `m` of the context's suffix, the matched node is expanded by the empirical
 probability of each continuation, `count(child) / count(node)`, multiplied along the path. A token enters the draft
@@ -128,8 +128,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: suffix_decoding -->
-
-## Reference
-
-Gabriele Oliaro, Zhihao Jia, Daniel Campos and Aurick Qiao. *SuffixDecoding: Extreme Speculative Decoding for
-Emerging AI Applications.* NeurIPS 2025, arXiv:2411.04975.

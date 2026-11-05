@@ -10,6 +10,7 @@ exclude_docs: |
   _build/
   hooks/
   snippets/
+  references.bib
 
 theme:
   name: material
@@ -81,6 +82,7 @@ plugins:
 # Generates the technique table of docs/techniques.md from every registered technique's metadata.
 hooks:
   - docs/hooks/techniques.py
+  - docs/hooks/citations.py
 
 nav:
   - Home: index.md

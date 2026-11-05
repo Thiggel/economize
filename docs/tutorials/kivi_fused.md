@@ -2,7 +2,7 @@
 
 <!-- technique-info: kivi_fused -->
 
-`kivi_fused` is [KIVI](kivi.md) (Liu et al., 2024) with the read path of the paper's kernels. The quantization is the
+`kivi_fused` is [KIVI](kivi.md) [@liu2024kivi] with the read path of the paper's kernels. The quantization is the
 same: keys per channel and values per token in groups of `group_size`, the last `residual_length` tokens in full
 precision, 2, 4 or 8 bits. Besides writing the dequantized entries back into the dense cache, as `kivi` does, the
 technique keeps the packed integer codes with their fp16 scales and zero points and attaches them to the key tensor
@@ -106,8 +106,3 @@ print(economize.backend_support("kivi_fused")["vllm"].detail)
 ## Configuration
 
 <!-- technique-config: kivi_fused -->
-
-## Reference
-
-Zirui Liu, Jiayi Yuan, Hongye Jin, Shaochen Zhong, Zhaozhuo Xu, Vladimir Braverman, Beidi Chen and Xia Hu. *KIVI: A
-Tuning-Free Asymmetric 2bit Quantization for KV Cache.* ICML 2024, arXiv:2402.02750.

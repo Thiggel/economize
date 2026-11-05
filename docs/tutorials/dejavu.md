@@ -4,7 +4,7 @@
 
 <!-- test-substitute: DejaVuConfig\(sparsity=0\.5 => DejaVuConfig(sparsity=0.5, layers=(1,), rank=16, fit_steps=2 -->
 
-Deja Vu (Liu et al., 2023) computes only a subset of the FFN channels of every token. A small predictor per layer,
+Deja Vu [@liu2023dejavu] computes only a subset of the FFN channels of every token. A small predictor per layer,
 `Linear(d, rank)` followed by `Linear(rank, ffn)` as in the reference code, reads the token's hidden state and scores
 every channel. The `1 - sparsity` fraction with the highest scores is computed in the gate, up and down maps, and the
 rest is skipped. The paper labels a channel of the ReLU MLPs of OPT as active when its activation is positive. Gated
@@ -136,8 +136,3 @@ print(perplexity(model, windows))
 ## Configuration
 
 <!-- technique-config: dejavu -->
-
-## Reference
-
-Zichang Liu, Jue Wang, Tri Dao, Tianyi Zhou, Binhang Yuan, Zhao Song, Anshumali Shrivastava, Ce Zhang, Yuandong Tian,
-Christopher Ré and Beidi Chen. *Deja Vu: Contextual Sparsity for Efficient LLMs at Inference Time.* ICML, 2023.

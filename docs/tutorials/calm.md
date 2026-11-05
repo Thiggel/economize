@@ -2,7 +2,7 @@
 
 <!-- technique-info: calm -->
 
-CALM (Schuster et al., 2022) lets every generated token exit the model early. After each layer `l` from `min_layer`
+CALM [@schuster2022calm] lets every generated token exit the model early. After each layer `l` from `min_layer`
 to `L - 1`, a token that is still running computes a confidence `c_l`, and it exits once `c_l` is strictly above the
 threshold `lambda`. An exited token keeps its hidden state for the remaining layers, the model's own final norm and
 head read it out, and its K/V at the skipped layers are computed from that state, which is the paper's state
@@ -145,8 +145,3 @@ print(economize.backend_support(CalmConfig()))
 ## Configuration
 
 <!-- technique-config: calm -->
-
-## Reference
-
-Tal Schuster, Adam Fisch, Jai Gupta, Mostafa Dehghani, Dara Bahri, Vinh Q. Tran, Yi Tay and Donald Metzler.
-*Confident Adaptive Language Modeling.* NeurIPS 2022, arXiv:2207.07061.

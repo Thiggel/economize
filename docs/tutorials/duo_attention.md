@@ -2,7 +2,7 @@
 
 <!-- technique-info: duo_attention -->
 
-DuoAttention (Xiao et al., 2025) observes that only a fraction of the attention heads of a long-context model
+DuoAttention [@xiao2025duoattention] observes that only a fraction of the attention heads of a long-context model
 retrieve information from distant tokens. These retrieval heads need the whole KV cache. The other heads, streaming
 heads, attend mostly to the first tokens and to a recent window, and lose little with the cache of StreamingLLM.
 The split is learned. One gate per KV head mixes full and streaming attention, the base model stays frozen, and the
@@ -129,8 +129,3 @@ print(economize.backend_support("duo_attention")["vllm"].detail)
 ## Configuration
 
 <!-- technique-config: duo_attention -->
-
-## Reference
-
-Guangxuan Xiao, Jiaming Tang, Jingwei Zuo, Junxian Guo, Shang Yang, Haotian Tang, Yao Fu and Song Han.
-*DuoAttention: Efficient Long-Context LLM Inference with Retrieval and Streaming Heads.* ICLR 2025, arXiv:2410.10819.

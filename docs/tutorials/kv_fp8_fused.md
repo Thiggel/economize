@@ -3,7 +3,7 @@
 <!-- technique-info: kv_fp8_fused -->
 
 `kv_fp8_fused` stores the KV cache as 8-bit floats exactly as [`kv_fp8`](kv_fp8.md) does with `scale="none"`, in
-the `e4m3` or `e5m2` format of Micikevicius et al. (2022), and changes only how attention reads it. `kv_fp8` casts
+the `e4m3` or `e5m2` format of @micikevicius2022fp8, and changes only how attention reads it. `kv_fp8` casts
 the stored bytes back to the model's dtype before attention, which makes a full-precision copy of the layer's cache
 at every step. `kv_fp8_fused` hands the fp8 buffers to economize's attention kernel, which decodes them in registers,
 so a decoding step reads one byte per cached element and allocates no upcast copy. The cache holds the same bytes
@@ -115,9 +115,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: kv_fp8_fused -->
-
-## Reference
-
-Paulius Micikevicius, Dusan Stosic, Neil Burgess, Marius Cornea, Pradeep Dubey, Richard Grisenthwaite, Sangwon Ha,
-Alexander Heinecke, Patrick Judd, John Kamalu, Naveen Mellempudi, Stuart Oberman, Mohammad Shoeybi, Michael Siu and
-Hao Wu. *FP8 Formats for Deep Learning.* arXiv:2209.05433, 2022.

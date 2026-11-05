@@ -2,7 +2,7 @@
 
 <!-- technique-info: dflash -->
 
-DFlash (Chen et al., 2026) drafts a whole block of tokens with one forward pass of a few small decoder layers. Every
+DFlash [@chen2026dflash] drafts a whole block of tokens with one forward pass of a few small decoder layers. Every
 committed token `t` gets a context vector `c_t = hidden_norm(fc([h^{l_1}_t; ...; h^{l_n}_t]))` from the base model's
 hidden states at a few layers spread over the depth. Each draft layer projects keys and values from these
 vectors once, when the base model commits the token, and keeps them in a cache of its own. To draft after the last
@@ -111,8 +111,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: dflash -->
-
-## Reference
-
-Jian Chen, Yesheng Liang and Zhijian Liu. *DFlash: Block Diffusion for Flash Speculative Decoding.*
-arXiv:2602.06036, 2026.

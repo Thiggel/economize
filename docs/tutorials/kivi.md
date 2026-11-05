@@ -2,7 +2,7 @@
 
 <!-- technique-info: kivi -->
 
-KIVI (Liu et al., 2024) quantizes the KV cache to 2 or 4 bits without calibration data or training. Keys have a few
+KIVI [@liu2024kivi] quantizes the KV cache to 2 or 4 bits without calibration data or training. Keys have a few
 channels of large magnitude, so they are quantized per channel: every group of `group_size` consecutive tokens gets
 one scale and one zero point per channel. Values are quantized per token, in groups of `group_size` channels. The
 most recent tokens stay in full precision. Keys are quantized in whole blocks of `residual_length` tokens once a
@@ -115,8 +115,3 @@ print(economize.backend_support("kivi")["vllm"])
 ## Configuration
 
 <!-- technique-config: kivi -->
-
-## Reference
-
-Zirui Liu, Jiayi Yuan, Hongye Jin, Shaochen Zhong, Zhaozhuo Xu, Vladimir Braverman, Beidi Chen and Xia Hu. *KIVI: A
-Tuning-Free Asymmetric 2bit Quantization for KV Cache.* ICML 2024, arXiv:2402.02750.

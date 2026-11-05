@@ -2,7 +2,7 @@
 
 <!-- technique-info: cats -->
 
-CATS (Lee et al., 2024) sparsifies the activation of every gated MLP `down(act(gate(x)) * up(x))`. With
+CATS [@lee2024cats] sparsifies the activation of every gated MLP `down(act(gate(x)) * up(x))`. With
 `g = act(gate(x))`, the MLP computes `down((g * 1[|g| > t]) * up(x))`, so the rows of the up map and the columns of
 the down map that belong to dropped channels are never needed. The gate map stays dense. Each layer's threshold `t`
 is the `sparsity` quantile of `|g|` on calibration tokens, computed on the base model's activations, so the
@@ -131,8 +131,3 @@ vLLM and SGLang do not run CATS.
 ## Configuration
 
 <!-- technique-config: cats -->
-
-## Reference
-
-Je-Yong Lee, Donghyun Lee, Genghan Zhang, Mo Tiwari and Azalia Mirhoseini. *CATS: Contextually-Aware Thresholding
-for Sparsity in Large Language Models.* COLM, 2024.

@@ -2,7 +2,7 @@
 
 <!-- technique-info: skipdecode -->
 
-SkipDecode (Del Corro et al., 2023) gives every generated token a layer budget that falls with its position. The
+SkipDecode [@delcorro2023skipdecode] gives every generated token a layer budget that falls with its position. The
 `t`-th generated token runs `max_layers` layers until position `warmup`, then a budget that declines linearly to
 `min_layers` over `decay` positions, and `min_layers` from there on. By default it skips the lowest layers, as the
 paper does, so the last layers always run and feed the head. Since the budget never grows, every layer a token runs
@@ -118,8 +118,3 @@ print(economize.backend_support(SkipDecodeConfig()))
 ## Configuration
 
 <!-- technique-config: skipdecode -->
-
-## Reference
-
-Luciano Del Corro, Allie Del Giorno, Sahaj Agarwal, Bin Yu, Ahmed Awadallah and Subhabrata Mukherjee. *SkipDecode:
-Autoregressive Skip Decoding with Batching and Caching for Efficient LLM Inference.* arXiv:2307.02628, 2023.

@@ -2,7 +2,7 @@
 
 <!-- technique-info: eagle3 -->
 
-EAGLE-3 (Li et al., 2025) is a drafter of one decoder layer that sits next to the model. It fuses the model's hidden
+EAGLE-3 [@li2025eagle3] is a drafter of one decoder layer that sits next to the model. It fuses the model's hidden
 states at a low, a middle and a high layer of the previous token into one vector, reads it together with the
 embedding of the current token, and drafts the next token through its own norm and LM head. Each draft step feeds
 the layer's output back in place of the fused vector, so a chain of drafts costs one small layer per token. The
@@ -145,8 +145,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: eagle3 -->
-
-## Reference
-
-Yuhui Li, Fangyun Wei, Chao Zhang and Hongyang Zhang. *EAGLE-3: Scaling up Inference Acceleration of Large Language
-Models via Training-Time Test.* arXiv:2503.01840, 2025.

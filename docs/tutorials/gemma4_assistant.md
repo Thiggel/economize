@@ -2,7 +2,7 @@
 
 <!-- technique-info: gemma4_assistant -->
 
-Gemma 4 ships its multi-token-prediction drafter as a separate model per checkpoint, the assistant
+Gemma 4 [@google2026gemma4mtp] ships its multi-token-prediction drafter as a separate model per checkpoint, the assistant
 (`google/gemma-4-<size>-it-assistant`, loaded as `Gemma4AssistantForCausalLM` by transformers). The assistant is a
 four-layer decoder, three sliding-window layers and one full-attention layer, whose layers project no keys and values
 of their own. They attend over the base model's cache entries of its last sliding and its last full attention layer.
@@ -127,8 +127,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: gemma4_assistant -->
-
-## Reference
-
-Google. *Gemma 4 Multi-Token Prediction (MTP) using Hugging Face Transformers.*
-https://ai.google.dev/gemma/docs/mtp/mtp, 2026.

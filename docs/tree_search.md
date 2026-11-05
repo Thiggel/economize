@@ -2,9 +2,8 @@
 
 Two more draft policies build the tree of a cycle beyond the EAGLE-2 growth of
 [`dynamic_tree`](dynamic_tree.md). `draft_policy="sequoia"` drafts one fixed tree whose shape a dynamic program picks
-from measured acceptance rates and, optionally, the hardware's latencies (Chen et al., 2024, arXiv 2402.12374).
-`draft_policy="specexec"` grows the tree by best-first search over the drafter's continuations (Svirschevski et al.,
-2024, arXiv 2406.02532). Both are policies and work with every drafter that implements tree steps: EAGLE-3, the early exit /
+from measured acceptance rates and, optionally, the hardware's latencies [@chen2024sequoia].
+`draft_policy="specexec"` grows the tree by best-first search over the drafter's continuations [@svirschevski2024specexec]. Both are policies and work with every drafter that implements tree steps: EAGLE-3, the early exit /
 LayerSkip drafter and FR-Spec around either of them. Both are lossless under the `greedy` and `typical` verifiers, since the exact pass verifies their trees as it
 verifies any draft tree.
 

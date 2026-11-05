@@ -2,10 +2,10 @@
 
 <!-- technique-info: depth_prune -->
 
-`depth_prune` removes whole decoder layers from the model once. ShortGPT (Men et al., 2024) ranks the layers by
+`depth_prune` removes whole decoder layers from the model once. ShortGPT [@men2024shortgpt] ranks the layers by
 their Block Influence, `BI_i = 1 - E[cos(h_{i-1}, h_i)]`, the mean cosine distance between a layer's input and output
 hidden states over the calibration tokens, and removes the `num_blocks` layers with the lowest score in one pass.
-SLEB (Song et al., 2024) removes one layer at a time, each time the one whose removal raises the calibration
+SLEB [@song2024sleb] removes one layer at a time, each time the one whose removal raises the calibration
 perplexity least, and scores the remaining layers again after every removal. A third criterion, `minitron`, removes
 the contiguous window of layers whose removal gives the lowest calibration loss. Nothing is trained, and the result
 is lossy.
@@ -118,11 +118,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: depth_prune -->
-
-## Reference
-
-Xin Men, Mingyu Xu, Qingyu Zhang, Bingning Wang, Hongyu Lin, Yaojie Lu, Xianpei Han and Weipeng Chen. *ShortGPT:
-Layers in Large Language Models are More Redundant Than You Expect.* arXiv:2403.03853, 2024.
-
-Jiwon Song, Kyungseok Oh, Taesu Kim, Hyungjun Kim, Yulhwa Kim and Jae-Joon Kim. *SLEB: Streamlining LLMs through
-Redundancy Verification and Elimination of Transformer Blocks.* ICML, 2024.

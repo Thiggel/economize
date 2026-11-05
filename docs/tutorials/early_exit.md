@@ -11,7 +11,7 @@ What is trained depends on the configuration: the readout adapter, LoRA updates 
 (`adaptation="lora"`), or trainable copies of these layers that only the drafter uses (`adaptation="full"`). The
 model's own weights stay unchanged.
 
-LayerSkip (Elhoushi et al., 2024) is the variant with the shared head. It fine-tunes the model itself with layer
+LayerSkip [@elhoushi2024layerskip] is the variant with the shared head. It fine-tunes the model itself with layer
 dropout and an early-exit loss so that its intermediate layers predict tokens well through the final head, and then
 drafts with an early exit of the fine-tuned model. economize trains this with the `layerskip` objective. Unlike the
 paper, which reuses the draft's K/V of layers `1..r` during verification, economize recomputes every drafted position
@@ -154,9 +154,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: early_exit -->
-
-## Reference
-
-Mostafa Elhoushi, Akshat Shrivastava, Diana Liskovich, Basil Hosmer, Bram Wasti, Liangzhen Lai, Anas Mahmoud, Bilge
-Acun, Saurabh Agarwal, Ahmed Roman, Ahmed A Aly, Beidi Chen and Carole-Jean Wu. *LayerSkip: Enabling Early Exit
-Inference and Self-Speculative Decoding.* ACL 2024, arXiv:2404.16710, 2024.

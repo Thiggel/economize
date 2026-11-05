@@ -3,13 +3,13 @@
 <!-- technique-info: kv_evict -->
 
 `kv_evict` keeps a fixed budget of KV-cache entries per layer and KV head and drops the rest. Five policies choose
-the entries. StreamingLLM (Xiao et al., 2024) keeps the first `sinks` entries, which attract much of the attention
-of every query, and a window of the last `recent` entries. H2O (Zhang et al., 2023) keeps the `recent` window and the
+the entries. StreamingLLM [@xiao2024streamingllm] keeps the first `sinks` entries, which attract much of the attention
+of every query, and a window of the last `recent` entries. H2O [@zhang2023h2o] keeps the `recent` window and the
 `heavy` older entries with the largest attention accumulated over all queries so far, and evicts again after every
 exact pass. `h2o_prefill` applies the H2O rule once to the prompt, as the KVCache-Factory benchmarks run it. SnapKV
-(Li et al., 2024) compresses only the prompt: the last `observation_window` prompt queries score every earlier
+[@li2024snapkv] compresses only the prompt: the last `observation_window` prompt queries score every earlier
 prompt entry, the scores are pooled over neighbouring slots, and the `heavy` best entries of each KV head are kept
-together with the window. PyramidKV (Cai et al., 2024) makes the same selection with a budget that shrinks linearly
+together with the window. PyramidKV [@cai2024pyramidkv] makes the same selection with a budget that shrinks linearly
 from the bottom layer to the top, at the same total. Every policy is lossy and trains nothing.
 
 economize simulates eviction with a keep mask per layer and KV head, which it intersects with the attention mask of
@@ -124,19 +124,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: kv_evict -->
-
-## Reference
-
-Guangxuan Xiao, Yuandong Tian, Beidi Chen, Song Han and Mike Lewis. *Efficient Streaming Language Models with
-Attention Sinks.* ICLR 2024, arXiv:2309.17453.
-
-Zhenyu Zhang, Ying Sheng, Tianyi Zhou, Tianlong Chen, Lianmin Zheng, Ruisi Cai, Zhao Song, Yuandong Tian, Christopher
-Ré, Clark Barrett, Zhangyang Wang and Beidi Chen. *H2O: Heavy-Hitter Oracle for Efficient Generative Inference of
-Large Language Models.* NeurIPS 2023, arXiv:2306.14048.
-
-Yuhong Li, Yingbing Huang, Bowen Yang, Bharat Venkitesh, Acyr Locatelli, Hanchen Ye, Tianle Cai, Patrick Lewis and
-Deming Chen. *SnapKV: LLM Knows What You are Looking for Before Generation.* NeurIPS 2024, arXiv:2404.14469.
-
-Zefan Cai, Yichi Zhang, Bofei Gao, Yuliang Liu, Yucheng Li, Tianyu Liu, Keming Lu, Wayne Xiong, Yue Dong, Junjie Hu
-and Wen Xiao. *PyramidKV: Dynamic KV Cache Compression based on Pyramidal Information Funneling.* arXiv:2406.02069,
-2024.

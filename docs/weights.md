@@ -5,17 +5,17 @@ attach time (Capability `WEIGHTS`), and three hook the activations (Capability `
 
 | name | paper | what it does | order | needs calibration |
 |---|---|---|---|---|
-| `depth_prune` | ShortGPT (Men et al., 2024), SLEB (Song et al., ICML 2024) | removes whole decoder layers | 5 | yes |
-| `slicegpt` | SliceGPT (Ashkboos et al., ICLR 2024) | rotates the residual stream and deletes its smallest principal components | 6 | yes |
-| `width_prune` | FLAP (An et al., AAAI 2024), LLM-Pruner (Ma et al., NeurIPS 2023), Minitron (Muralidharan et al., NeurIPS 2024) | removes head groups, FFN channels and residual channels | 7 | yes |
-| `prune` | Wanda (Sun et al., ICLR 2024), SparseGPT (Frantar & Alistarh, ICML 2023) | unstructured or N:M weight sparsity | 10 | wanda, sparsegpt |
-| `lowrank` | SVD-LLM (Wang et al., ICLR 2025), plain truncated SVD | replaces linear maps by two thin ones | 20 | svd_llm |
-| `littlebit` | LittleBit (Lee et al., NeurIPS 2025) | binary low-rank factors below one bit per weight | 25 | blockwise |
-| `rotate` | QuaRot (Ashkboos et al., NeurIPS 2024) | Hadamard rotations that spread outliers before `quant` | 29 | no |
-| `quant` | GPTQ (Frantar et al., ICLR 2023), AWQ (Lin et al., MLSys 2024), round to nearest | int2-int8 or fp8 weights | 30 | gptq, awq |
-| `teal` | TEAL (Liu et al., ICLR 2025) | zeroes small input activations of every linear map | activations | yes |
-| `cats` | CATS (Lee et al., COLM 2024) | skips the FFN channels whose activated gate is below a threshold | activations | yes |
-| `dejavu` | Deja Vu (Liu et al., ICML 2023) | a trained low-rank predictor per layer chooses the FFN channels to compute | activations | yes (and a predictor fit) |
+| `depth_prune` | ShortGPT [@men2024shortgpt], SLEB [@song2024sleb] | removes whole decoder layers | 5 | yes |
+| `slicegpt` | SliceGPT [@ashkboos2024slicegpt] | rotates the residual stream and deletes its smallest principal components | 6 | yes |
+| `width_prune` | FLAP [@an2024flap], LLM-Pruner [@ma2023llmpruner], Minitron [@muralidharan2024minitron] | removes head groups, FFN channels and residual channels | 7 | yes |
+| `prune` | Wanda [@sun2024wanda], SparseGPT [@frantar2023sparsegpt] | unstructured or N:M weight sparsity | 10 | wanda, sparsegpt |
+| `lowrank` | SVD-LLM [@wang2025svdllm], plain truncated SVD | replaces linear maps by two thin ones | 20 | svd_llm |
+| `littlebit` | LittleBit [@lee2025littlebit] | binary low-rank factors below one bit per weight | 25 | blockwise |
+| `rotate` | QuaRot [@ashkboos2024quarot] | Hadamard rotations that spread outliers before `quant` | 29 | no |
+| `quant` | GPTQ [@frantar2023gptq], AWQ [@lin2024awq], round to nearest | int2-int8 or fp8 weights | 30 | gptq, awq |
+| `teal` | TEAL [@liu2025teal] | zeroes small input activations of every linear map | activations | yes |
+| `cats` | CATS [@lee2024cats] | skips the FFN channels whose activated gate is below a threshold | activations | yes |
+| `dejavu` | Deja Vu [@liu2023dejavu] | a trained low-rank predictor per layer chooses the FFN channels to compute | activations | yes (and a predictor fit) |
 | `draft_quant` | (QSpec-style draft-only precision) | quantizes only the drafter's own weights | 100, after the drafter | no |
 
 A recipe applies the `WEIGHTS` techniques in increasing `order` (layers are removed before anything is
@@ -231,7 +231,7 @@ export_compressed_tensors(model, "out/")      # vllm serve out/ -> CompressedTen
   compressed-tensors and serves on vLLM's Marlin / Machete W4A16 kernels. A method declares real zero points
   through `QuantMethod.float_zeros`, and a backend accepts them through `QuantBackend.stores_float_zeros` (for
   torchao, `KernelConstraints.float_zeros` of the format).
-* `smoothquant` (Xiao et al., ICML 2023) is the W8A8 recipe. It records the per-channel maximum `max|x_j|` of the
+* `smoothquant` [@xiao2023smoothquant] is the W8A8 recipe. It records the per-channel maximum `max|x_j|` of the
   input of each norm-fed group of maps (`input_layernorm -> q/k/v`, `post_attention_layernorm -> gate/up`) on the
   original model, divides the inputs by `s_j = max|x_j|^alpha / max|W_:j|^(1 - alpha)` (`smooth_alpha=0.5`, the
   paper uses 0.8 to 0.85 for the largest models) by folding `1/s` into the norm and `s` into the weight columns,
@@ -434,7 +434,7 @@ model = economize.apply(hf_model, SliceGPTConfig(sparsity=0.25), calibration=cal
 model = economize.apply(hf_model, SliceGPTConfig(sparsity=0.25, rotation="global"), calibration=calibration)
 ```
 
-SliceGPT (Ashkboos et al., ICLR 2024) uses the invariance of a pre-RMSNorm transformer to an orthogonal rotation
+SliceGPT [@ashkboos2024slicegpt] uses the invariance of a pre-RMSNorm transformer to an orthogonal rotation
 `Q` of its residual stream. With each norm's scale folded into the maps that read it, every map that reads the
 stream becomes `W Q` and every map that writes it `Q^T W`, and the model computes the same function. Choosing the
 columns of `Q` as the principal components of the stream and keeping the first `d = (1 - sparsity) D` of them
@@ -495,14 +495,14 @@ A residual channel (Minitron only) is one column of the embedding, one entry of 
 every map that reads the stream and one output row of every map that writes it. All three criteria are entries of
 `WIDTH_CRITERIA`; a new one subclasses `WidthCriterion` and registers itself.
 
-* `flap` (An et al., AAAI 2024) scores an input channel of the attention output map and the down map by the
+* `flap` [@an2024flap] scores an input channel of the attention output map and the down map by the
   fluctuation of its calibration activations times the squared norm of its weight column, `Var[x_j] ||W_:,j||^2`
   (squared again for heads, as in the official code). `structure="adaptive"` (the paper's AL-AM, the default)
   standardizes the scores of each block type and keeps the units above one global threshold chosen so that the
   removed attention and FFN parameters are the fraction `sparsity` of the total; the widths then differ from layer
   to layer. `structure="uniform"` (UL-UM) keeps the same count in every layer. The removed channels' expected
   contribution `W_:,removed E[x_removed]` is folded into a bias of the output map (compensation, on by default).
-* `llm_pruner` (Ma et al., NeurIPS 2023) scores each coupled group by its first-order Taylor importance, the sum
+* `llm_pruner` [@ma2023llmpruner] scores each coupled group by its first-order Taylor importance, the sum
   of `|W * dL/dW|` over every weight of the group (the query, key and value rows and the output columns of a head
   group; the gate and up rows and the down column of a channel), from one backward pass of the calibration
   cross-entropy. Its Llama scripts leave the first 4 and last 2 layers whole, the defaults here. On a large model
@@ -514,7 +514,7 @@ every map that reads the stream and one output row of every map that writes it. 
   attach the trained technique with `merge_lora=True`: the update is multiplied into the pruned weights, the model
   runs at the cost of the pruned model, and later weight transforms (quantization, sparsity) see the merged
   weights.
-* `minitron` (Muralidharan et al., NeurIPS 2024; Sreenivas et al., 2024) scores heads, channels and residual
+* `minitron` [@muralidharan2024minitron; @sreenivas2024minitron] scores heads, channels and residual
   channels by activation magnitude (mean over the sequence, L2 over the batch, the paper's best aggregation) and
   is the only criterion that prunes the residual stream (`hidden_sparsity`). Its depth half is the `depth_prune`
   method `"minitron"`, which removes the contiguous window of layers whose absence gives the lowest calibration

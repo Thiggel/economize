@@ -1,9 +1,8 @@
 # MagicDec and TriForce self-speculation
 
 For long prompts the cost of a decode step is dominated by reading the KV cache, so a drafter that keeps every
-weight of the model and reads only a small part of the cache is both cheap and accurate. MagicDec (Sadhukhan et al.,
-2025, arXiv 2408.11049) drafts with the base model on a StreamingLLM view of its cache: the first few positions (the
-attention sinks) and a recent window. TriForce (Sun et al., 2024, arXiv 2404.11912) drafts with the base model on a
+weight of the model and reads only a small part of the cache is both cheap and accurate. MagicDec [@sadhukhan2025magicdec] drafts with the base model on a StreamingLLM view of its cache: the first few positions (the
+attention sinks) and a recent window. TriForce [@sun2024triforce] drafts with the base model on a
 retrieval view: the prompt is cut into chunks and the drafter reads the chunks whose mean key best matches the
 current query. economize provides both as drafting techniques, `magicdec` and `triforce`. Each draft step runs every
 layer with the base weights, the full-attention layers on the view and all other layers unchanged. The exact pass of

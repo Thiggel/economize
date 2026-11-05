@@ -2,10 +2,10 @@
 
 <!-- technique-info: hybrid -->
 
-The `hybrid` technique combines [prompt lookup](lookup.md) (Saxena, 2023) with a second drafter. Every cycle, each
+The `hybrid` technique combines [prompt lookup](lookup.md) [@saxena2023promptlookup] with a second drafter. Every cycle, each
 row first tries the lookup: if its last `n` committed tokens occurred earlier in the row, for some `n` between
 `max_ngram` and `min_ngram`, the tokens that followed the match become the draft. The rows without a match draft with
-the `fallback` drafter in the same cycle, for example an EAGLE-3 head. A lookup runs no network, so the fallback's
+the `fallback` drafter in the same cycle, for example an EAGLE-3 head [@li2025eagle3]. A lookup runs no network, so the fallback's
 draft steps are spent only where copying fails. Both drafters see every exact pass, so the fallback's state stays in
 step whether or not it drafted. The model verifies every draft in one forward pass and keeps the longest prefix it
 agrees with, which makes greedy decoding lossless. The lookup has no parameters, and the fallback is trained on its
@@ -128,10 +128,3 @@ through their own exports.
 ## Configuration
 
 <!-- technique-config: hybrid -->
-
-## Reference
-
-Apoorv Saxena. *Prompt Lookup Decoding.* GitHub repository (apoorvumang/prompt-lookup-decoding), 2023.
-
-Yuhui Li, Fangyun Wei, Chao Zhang and Hongyang Zhang. *EAGLE-3: Scaling up Inference Acceleration of Large Language
-Models via Training-Time Test.* arXiv:2503.01840, 2025.

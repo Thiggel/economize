@@ -2,7 +2,7 @@
 
 <!-- technique-info: dmtd -->
 
-Direct Multi-Token Decoding (Luo et al., 2025) decodes in cycles of `tau` tokens. The first token of a cycle runs all
+Direct Multi-Token Decoding [@luo2025dmtd] decodes in cycles of `tau` tokens. The first token of a cycle runs all
 `L` layers of the model. The next `tau - 1` tokens run only the last `L_d` layers, which read the token's embedding in
 place of the hidden state the skipped layers would have produced. At the start of the next cycle the early and middle
 layers run over the tokens that skipped them to refill their K/V (cyclical refilling), in the same pass as the new
@@ -128,7 +128,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: dmtd -->
-
-## Reference
-
-Xuan Luo, Weizhi Wang and Xifeng Yan. *Direct Multi-Token Decoding.* arXiv:2510.11958, 2025.

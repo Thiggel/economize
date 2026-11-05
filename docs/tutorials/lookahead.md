@@ -2,7 +2,7 @@
 
 <!-- technique-info: lookahead -->
 
-Lookahead decoding (Fu et al., 2024) drafts without a second network. Every cycle runs one exact pass of the model
+Lookahead decoding [@fu2024lookahead] drafts without a second network. Every cycle runs one exact pass of the model
 over two branches that do not attend to each other. The lookahead branch holds a 2D Jacobi window of `window`
 columns and `ngram - 1` levels of the model's own guesses for future tokens. The pass refines the window by one
 Jacobi iteration, and every column then yields an n-gram of `ngram` tokens for an n-gram pool. The verification
@@ -115,8 +115,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: lookahead -->
-
-## Reference
-
-Yichao Fu, Peter Bailis, Ion Stoica and Hao Zhang. *Break the Sequential Dependency of LLM Inference Using Lookahead
-Decoding.* ICML 2024, arXiv:2402.02057.

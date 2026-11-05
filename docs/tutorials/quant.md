@@ -6,10 +6,10 @@
 `int8` with one scale (and, unless `symmetric=True`, one zero point) per group of `group_size` input columns, `fp8`
 (e4m3), or the 4-bit floating-point formats `nvfp4` and `mxfp4`. The embeddings, the norms and the LM head stay in
 full precision. The method decides how weights are rounded to the grid. `rtn` rounds to the nearest grid point and
-`hqq` refines the zero points by half-quadratic optimization, both without data. GPTQ (Frantar et al., 2023)
+`hqq` refines the zero points by half-quadratic optimization, both without data. GPTQ [@frantar2023gptq]
 quantizes one column at a time and spreads the rounding error over the remaining columns through the inverse
-Hessian of the calibration inputs. AWQ (Lin et al., 2024) searches per-input-channel scales from the activation
-magnitudes, folds them into the preceding norm or linear map, and then searches clipping thresholds. SmoothQuant moves
+Hessian of the calibration inputs. AWQ [@lin2024awq] searches per-input-channel scales from the activation
+magnitudes, folds them into the preceding norm or linear map, and then searches clipping thresholds. SmoothQuant [@xiao2023smoothquant] moves
 activation outliers into the weights for W8A8, where the inputs are quantized as well. Nothing is trained, and the
 result is lossy.
 
@@ -169,14 +169,3 @@ model = economize.apply(base, DepthPruneConfig(method="shortgpt", num_blocks=4),
 ## Configuration
 
 <!-- technique-config: quant -->
-
-## Reference
-
-Elias Frantar, Saleh Ashkboos, Torsten Hoefler and Dan Alistarh. *GPTQ: Accurate Post-Training Quantization for
-Generative Pre-trained Transformers.* ICLR, 2023.
-
-Ji Lin, Jiaming Tang, Haotian Tang, Shang Yang, Wei-Ming Chen, Wei-Chen Wang, Guangxuan Xiao, Xingyu Dang, Chuang Gan
-and Song Han. *AWQ: Activation-aware Weight Quantization for On-Device LLM Compression and Acceleration.* MLSys, 2024.
-
-Guangxuan Xiao, Ji Lin, Mickael Seznec, Hao Wu, Julien Demouth and Song Han. *SmoothQuant: Accurate and Efficient
-Post-Training Quantization for Large Language Models.* ICML, 2023.

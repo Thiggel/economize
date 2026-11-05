@@ -1,6 +1,6 @@
 # Dynamic draft trees
 
-`draft_policy="dynamic_tree"` grows an EAGLE-2 style draft tree (Li et al., 2024, arXiv 2406.16858) in every cycle
+`draft_policy="dynamic_tree"` grows an EAGLE-2 style draft tree [@li2024eagle2] in every cycle
 and verifies it in one pass of the model. It is a draft policy, so it works with every drafter that can run one draft
 step over a set of tree nodes: EAGLE-3, the early exit / LayerSkip drafter and FR-Spec around either of them.
 

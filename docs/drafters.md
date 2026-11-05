@@ -41,7 +41,7 @@ All drafters share these properties, tested per drafter in `tests/techniques/tes
 
 ## EAGLE-1 / EAGLE-2 (`eagle`)
 
-Li et al., 2024 (arXiv 2401.15077, 2406.16858). One draft decoder layer reads `fc(cat(embedding of the next token,
+[@li2024eagle; @li2024eagle2]. One draft decoder layer reads `fc(cat(embedding of the next token,
 feature))`, where the feature is the model's post-norm last hidden state for exact positions and the draft layer's
 own output for drafted ones, and drafts through the model's LM head. EAGLE-1 decodes chains (`cycle_length`); EAGLE-2
 is the same head under the draft policy `dynamic_tree`. A new head trains with `hass` by default.
@@ -72,7 +72,7 @@ Deviations and limits:
 
 ## EAGLE-3 (`eagle3`)
 
-Li et al., 2025 (arXiv 2503.01840). One draft decoder layer reads the fused low, middle and high features of the
+[@li2025eagle3]. One draft decoder layer reads the fused low, middle and high features of the
 model (`aux_layers`, default `(2, L // 2, L - 3)`) and drafts a chain through its own norm and head, optionally over
 a reduced vocabulary (`draft_vocab`, ids from `set_draft_vocab`). `head="shared"` drafts through the model's frozen
 norm and head instead.
@@ -102,7 +102,7 @@ Deviations and limits:
 
 ## Medusa (`medusa`)
 
-Cai et al., 2024. `K` residual heads on the last hidden state draft tokens `t + 2 .. t + K + 1` in one step, as a
+[@cai2024medusa]. `K` residual heads on the last hidden state draft tokens `t + 2 .. t + K + 1` in one step, as a
 chain or a static sparse tree (`tree`, e.g. `"mc_sim_7b_63"`). With `head="own"` (Medusa-1, the default) every
 head reads the post-norm last hidden state and projects with its own matrix, initialized from the LM head.
 `head="shared"` is a variant of economize's own: the residual blocks read the pre-norm last hidden
@@ -115,8 +115,8 @@ trees and works with any drafter, and with a greedy selector it accepts exactly 
 
 ## Early exit and LayerSkip (`early_exit`)
 
-Draft steps run the first `exit_layer` layers and exit through the model's own head (`head="shared"`, LayerSkip,
-Elhoushi et al., 2024) or a trained readout adapter (`head="readout"`, as in the research code that preceded
+Draft steps run the first `exit_layer` layers and exit through the model's own head (`head="shared"`, LayerSkip
+[@elhoushi2024layerskip]) or a trained readout adapter (`head="readout"`, as in the research code that preceded
 economize and in Kangaroo's adapter). The draft path can be frozen, carry LoRA updates or own trainable copies of layers `1..r`.
 LayerSkip reuses the draft path's K/V of layers `1..r` in the verification pass. economize instead recomputes every
 drafted position with the full model in the next exact pass, so no cache is shared between draft and exact path;
@@ -126,7 +126,7 @@ training of LayerSkip (layer dropout plus early-exit loss) is the `layerskip` ob
 
 ## Layer skipping (`layer_skip`)
 
-Draft & Verify (Zhang et al., 2024), SWIFT (Xia et al., 2025) and CLaSp (Chen et al., 2025) draft with the model
+Draft & Verify [@zhang2024draftverify], SWIFT [@xia2025swift] and CLaSp [@chen2025clasp] draft with the model
 minus a set of layers. economize takes a given skip set or searches one offline on calibration data (`greedy` on KL
 or greedy-token mismatch, or `uniform`). Draft & Verify uses Bayesian optimization, SWIFT an online search during
 decoding and CLaSp a per-step dynamic-programming search; these searches are not implemented (new searches
@@ -134,7 +134,7 @@ register in `SKIP_SEARCHES`). Skipped layers write no K/V and the next exact pas
 
 ## Two-model speculative decoding (`draft_model`)
 
-Leviathan et al., 2023; Chen et al., 2023. A smaller LM with the same tokenizer drafts with its own KV cache. Its
+[@leviathan2023speculative; @chen2023speculative]. A smaller LM with the same tokenizer drafts with its own KV cache. Its
 weights are loaded from `model` on attach and are not saved in economize checkpoints. Draft steps are logged with the
 draft LM's layer span (`(1, L_draft)`), which is a span of a different, cheaper model; the catch-up call over owed
 tokens is logged as `draft_catchup`.
@@ -150,7 +150,7 @@ Peak-memory numbers that read `torch.cuda.max_memory_allocated()` of the base de
 
 ## PARD (`pard`)
 
-An et al., 2025 (arXiv 2504.18583). `PardConfig(model=...)` is `draft_model` with a PARD draft LM, a small causal LM
+[@an2025pard]. `PardConfig(model=...)` is `draft_model` with a PARD draft LM, a small causal LM
 of the model's tokenizer fine-tuned so that a run of `mask_token_id` tokens after the context predicts the tokens
 that follow it. The catch-up over owed tokens and all drafts of a cycle (at most `max_parallel`) run as one call of
 the draft LM. The mask positions are not kept in the draft LM's cache, since the next cycle's catch-up overwrites
@@ -158,14 +158,14 @@ them. Tests: `tests/techniques/test_drafter_pard.py`.
 
 ## DFlash (`dflash`)
 
-Chen et al., 2026 (arXiv 2602.06036). A few draft layers conditioned on fused features of the model draft a block of
+[@chen2026dflash]. A few draft layers conditioned on fused features of the model draft a block of
 `block_size - 1` tokens in one forward from `[anchor, mask, ..., mask]`, through the model's own LM head. Official
 z-lab and vLLM speculators checkpoints load with `economize.load`. Method, checkpoint formats and departures from the
 reference are on the [DFlash](dflash.md) page. Tests: `tests/techniques/test_drafter_dflash.py`.
 
 ## Hydra (`hydra`)
 
-Ankner et al., 2024 (arXiv 2402.05109). Medusa-like heads on the model's last hidden state where head `j` also reads
+[@ankner2024hydra]. Medusa-like heads on the model's last hidden state where head `j` also reads
 the embeddings of the tokens that heads `1..j-1` drafted, so the heads draft sequentially. The default is Hydra++,
 which adds a prefix attention layer of the drafter's own. `HydraConfig(num_heads=4, tree="mc_sim_7b_63")` drafts
 Medusa's static trees; without a tree it drafts a chain. The heads train with `step_distill` on a frozen model,
@@ -173,7 +173,7 @@ the teacher distillation of Hydra++. Tests: `tests/techniques/test_drafter_hydra
 
 ## ReDrafter (`redrafter`)
 
-Cheng et al., 2024 (arXiv 2403.09919). A recurrent state `s_k = SiLU(W E[x_{t+k}] + U s_{k-1} + b)`
+[@cheng2024redrafter]. A recurrent state `s_k = SiLU(W E[x_{t+k}] + U s_{k-1} + b)`
 over the embeddings of the drafted tokens and the model's last hidden state `h_t` feed a residual head that drafts
 the next token from `[h_t; s_k]`. `RedrafterConfig(beam_width=8, beam_length=5)` runs beam search in every cycle and
 hands the beams to the verifier as one tree of their distinct prefixes; `beam_width=1` drafts a chain. With
@@ -183,7 +183,7 @@ head equals the narrow one. Tests: `tests/techniques/test_drafter_redrafter.py`.
 
 ## Kangaroo (`kangaroo`)
 
-Liu et al., NeurIPS 2024 (arXiv 2404.18911). A draft step runs the model's first `exit_layer` layers, a trained
+[@liu2024kangaroo]. A draft step runs the model's first `exit_layer` layers, a trained
 one-layer attention adapter with its own KV cache and the model's LM head. The paper's second early exit, which stops
 a cycle once the top-1 probability falls below 0.6, is the decoder's dynamic draft length:
 
@@ -198,7 +198,7 @@ the shallow layers. Tests: `tests/techniques/test_drafter_kangaroo.py`.
 
 ## KnapSpec (`knapspec`)
 
-Cha et al., ICML 2026. Training-free self-speculative drafting. A draft step runs the model with the attention of
+[@cha2026knapspec]. Training-free self-speculative drafting. A draft step runs the model with the attention of
 some layers and the MLP of others skipped. Every `interval` decoded tokens the drafter searches the skip set and the
 draft length again on the hidden states of its recent exact passes, as a knapsack over sublayers weighted by their
 latency on the device (`measure_latency`; attention is fitted linearly in the context length). The defaults are the
@@ -217,7 +217,7 @@ Tests: `tests/techniques/test_drafter_knapspec.py`.
 
 ## Lookahead decoding (`lookahead`)
 
-Fu et al., ICML 2024 (arXiv 2402.02057). One exact pass per cycle runs two branches: a 2D Jacobi window of the
+[@fu2024lookahead]. One exact pass per cycle runs two branches: a 2D Jacobi window of the
 model's own guesses, whose columns become n-grams in a pool, and the pool's n-grams that start with the last
 committed token, which are verified. No other network runs. The window rides in the verify pass as tree nodes that
 the verifier ignores (`Draft.candidates`), and the drafter reads its next window from the pass's logits
@@ -235,15 +235,15 @@ array over token records) built once:
 python -m economize.techniques.retrieval build store/ --tokens train.bin --dtype uint32 --spans spans.npy
 ```
 
-**REST** (He et al., NAACL 2024; `RestConfig(datastore="store/")` with `cycle_length=11`). The continuations of the
+**REST** [@he2024rest], `RestConfig(datastore="store/")` with `cycle_length=11`. The continuations of the
 context's longest suffix found in the datastore are merged into a trie whose most frequent nodes are verified as one
 tree. The defaults are those of the paper and its `draftretriever` library: suffixes of 16 down to 2 tokens, at most
 5000 occurrences, continuations of 10 tokens and trees of 64 nodes. `occurrences="spread"` reads evenly spaced
 occurrences when there are more than `max_occurrences`, where `draftretriever` reads the first ones in suffix-array
 order (`"first"`, the default).
 
-**SuffixDecoding** (Oliaro et al., NeurIPS 2025; `SuffixDecodingConfig(datastore="responses/")` with
-`cycle_length=17`). Drafts grow from the context's best-scoring match in two suffix structures, one over a datastore
+**SuffixDecoding** [@oliaro2025suffixdecoding], `SuffixDecodingConfig(datastore="responses/")` with
+`cycle_length=17`. Drafts grow from the context's best-scoring match in two suffix structures, one over a datastore
 of earlier responses and one over the row's own prompt and output, by the empirical probability of each
 continuation. The speculation length adapts to the match length.
 
@@ -258,7 +258,7 @@ verifier, lookup drafts carry point-mass distributions.
 
 ## FR-Spec (`frspec`)
 
-Zhao et al., 2025. Wraps any chain drafter and restricts its draft tokens to the `vocab_size` most frequent ids;
+[@zhao2025frspec]. Wraps any chain drafter and restricts its draft tokens to the `vocab_size` most frequent ids;
 verification keeps the full vocabulary, so decoding stays lossless.
 
 Deviations and limits:
@@ -283,7 +283,7 @@ not it drafted. Tree fallbacks receive the lookup chains as single-branch trees.
 
 ## Vendor MTP (`vendor_mtp`)
 
-The multi-token-prediction modules that DeepSeek-V3 (arXiv 2412.19437, section 2.2), GLM-4.5, MiMo, Qwen3-Next and
+The multi-token-prediction modules that DeepSeek-V3 [@deepseek2024v3, section 2.2], GLM-4.5, MiMo, Qwen3-Next and
 Qwen3.5 ship with their weights, used as a drafter as vLLM and SGLang do. Module `i` mixes `hnorm(h)` and
 `enorm(E[x])` with `eh_proj`, runs one decoder layer with its own KV cache and its own output norm, and reads the
 logits with the model's LM head. `economize.load(hf_model, model_dir)` reads only the MTP tensors of a model

@@ -2,7 +2,7 @@
 
 <!-- technique-info: littlebit -->
 
-LittleBit (Lee et al., 2025) compresses weights below one bit per weight by combining a low-rank factorization with
+LittleBit [@lee2025littlebit] compresses weights below one bit per weight by combining a low-rank factorization with
 binarization. Every selected linear map of the decoder layers becomes `sum_p diag(h_p) sign(U_p) diag(l_p) sign(V_p)
 diag(g_p)`: two binary factors per path, stored as packed sign bits, with three 16-bit scale vectors. With residual
 compensation (`residual=True`, the paper's default) a second path approximates the error of the first. The rank
@@ -112,8 +112,3 @@ maps.
 ## Configuration
 
 <!-- technique-config: littlebit -->
-
-## Reference
-
-Banseok Lee, Dongkyu Kim, Youngcheon You and Youngmin Kim. *LittleBit: Ultra Low-Bit Quantization via Latent
-Factorization.* NeurIPS, 2025.
