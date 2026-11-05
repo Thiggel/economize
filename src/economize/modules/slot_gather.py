@@ -18,6 +18,7 @@ import functools
 import importlib.util
 import math
 import os
+import weakref
 from collections.abc import Sequence
 from typing import Any
 
@@ -29,10 +30,11 @@ __all__ = ["SLOT_GATHER", "gather_slots", "gather_slots_reference"]
 #: it off.
 SLOT_GATHER = os.environ.get("ECONOMIZE_SLOT_GATHER", "1") != "0"
 
-#: Pointer tables kept on the device, keyed by the buffers' addresses and shapes. Static caches keep their buffers,
-#: so a decoder reuses one table for its whole life; the dict is cleared when it grows past :data:`_MAX_TABLES`.
+#: Pointer tables kept on the device, keyed by the device and the buffers' addresses and shapes. Static caches keep
+#: their buffers, so a decoder reuses one table for its whole life. A CUDA graph that recorded a gather reads its
+#: table at replay without holding a reference to it, so a table lives exactly as long as its buffers: it is dropped
+#: when the first of them is garbage collected, never earlier (a size cap would free tables that live graphs replay).
 _TABLES: dict[tuple[Any, ...], torch.Tensor] = {}
-_MAX_TABLES = 64
 
 
 def gather_slots_reference(buffer: torch.Tensor, rows: torch.Tensor, src: torch.Tensor, dst: torch.Tensor) -> None:
@@ -111,12 +113,18 @@ def _table(buffers: list[torch.Tensor], device: torch.device) -> torch.Tensor | 
         return table
     if torch.cuda.is_current_stream_capturing():
         return None
-    if len(_TABLES) >= _MAX_TABLES:
-        _TABLES.clear()
     rows = [[b.data_ptr(), b.shape[1], b.shape[2], _words(b)] for b in buffers]
     table = torch.tensor(rows, dtype=torch.long).to(device)  # once per buffer set
     _TABLES[key] = table
+    for buffer in buffers:
+        weakref.finalize(buffer, _evict, key, table)
     return table
+
+
+def _evict(key: tuple[Any, ...], table: torch.Tensor) -> None:
+    """Drop ``key``'s table once one of its buffers dies, unless a newer buffer set at the same addresses rebuilt it."""
+    if _TABLES.get(key) is table:
+        del _TABLES[key]
 
 
 @functools.cache

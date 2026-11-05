@@ -7,6 +7,8 @@ subsets, and inside a CUDA graph. The fallback cases run anywhere; the kernel te
 
 from __future__ import annotations
 
+import gc
+
 import pytest
 import torch
 
@@ -130,6 +132,53 @@ def test_fused_kernel_replays_in_a_cuda_graph():
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph):
         gather_slots(buffers, rows, src, dst)
+    graph.replay()
+    torch.cuda.synchronize()
+    for got, want in zip(buffers, expected):
+        assert torch.equal(got[:, :, :TRASH], want[:, :, :TRASH])
+
+
+def test_pointer_table_lives_as_long_as_its_buffers(monkeypatch):
+    """A captured graph reads its pointer table at replay, so creating many other tables must never evict it; the
+    table goes away with its buffers."""
+    monkeypatch.setattr(torch.cuda, "is_current_stream_capturing", lambda: False)  # CPU tensors stand in here
+    device = torch.device("cpu")
+    kept = _buffers("cpu")[:2]
+    table = slot_gather._table(kept, device)
+    others = [_buffers("cpu", batch=1)[:1] for _ in range(100)]
+    for buffers in others:
+        slot_gather._table(buffers, device)
+    assert slot_gather._table(kept, device) is table
+    before = len(slot_gather._TABLES)
+    del others, buffers
+    gc.collect()
+    assert len(slot_gather._TABLES) == before - 100
+    del kept
+    gc.collect()
+    assert all(entry is not table for entry in slot_gather._TABLES.values())
+
+
+@pytest.mark.gpu
+@gpu
+def test_captured_graph_survives_many_other_gathers():
+    """Gathers over many other buffer sets after a capture (other tests, other decoders) must leave the graph's
+    pointer table intact."""
+    buffers = _buffers("cuda")[:3]
+    rows, src, dst = _tree_moves("cuda")
+    gather_slots(buffers, rows, src, dst)
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        gather_slots(buffers, rows, src, dst)
+    others = [_buffers("cuda", batch=1)[:1] for _ in range(100)]
+    one_row = torch.zeros(1, dtype=torch.long, device="cuda")
+    for other in others:
+        gather_slots(other, one_row, src[:1], dst[:1])
+    del others
+    gc.collect()
+    torch.cuda.synchronize()
+    expected = [b.clone() for b in buffers]
+    for buffer in expected:
+        gather_slots_reference(buffer, rows, src, dst)
     graph.replay()
     torch.cuda.synchronize()
     for got, want in zip(buffers, expected):
