@@ -558,7 +558,9 @@ class WindowEvictionCache(EvictionCache):
 
 @register_technique
 class KVEvictTechnique(KVCacheTechnique):
-    """KV-cache eviction (see :class:`KVEvictConfig`). Training-free; no parameters.
+    """KV-cache eviction with StreamingLLM, H2O or SnapKV: committed entries outside the kept set are forgotten.
+
+    See :class:`KVEvictConfig`. Training-free; no parameters.
 
     A :attr:`positional <.policies.EvictionMethod.positional>` method (StreamingLLM) gets a
     :class:`WindowEvictionCache` and runs under CUDA graphs; the others keep per-head keep masks and decode eagerly.

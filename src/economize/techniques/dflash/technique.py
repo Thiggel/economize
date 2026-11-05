@@ -27,7 +27,9 @@ __all__ = ["DFlashTechnique"]
 
 @register_technique
 class DFlashTechnique(Technique):
-    """DFlash (Chen et al., 2026): block drafting with a small decoder conditioned on the model's features.
+    """DFlash: block drafting with a small decoder conditioned on the model's features.
+
+    DFlash (Chen et al., 2026): block drafting with a small decoder conditioned on the model's features.
 
     Every committed token ``t`` gets a context vector ``c_t = hidden_norm(fc([h^{l_1}_t; ...; h^{l_n}_t]))`` from
     the model's states at :attr:`target_layers`. A draft of the block at the positions ``p .. p + B - 1`` runs the

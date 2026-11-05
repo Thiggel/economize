@@ -227,7 +227,9 @@ class CalmPolicy(DepthPolicy):
 
 @register_technique
 class CalmTechnique(DepthTechnique):
-    """CALM (see :class:`CalmConfig`). The ``classifier`` measure is trained by the objective ``calm``."""
+    """CALM: a token exits at the first layer where a confidence measure clears a threshold.
+
+    See :class:`CalmConfig`. The ``classifier`` measure is trained by the objective ``calm``."""
 
     name: ClassVar[str] = CalmConfig.technique
     config_class: ClassVar[type[TechniqueConfig]] = CalmConfig

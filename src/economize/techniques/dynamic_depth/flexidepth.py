@@ -202,7 +202,9 @@ def _ffn_width(adapter: Any, index: int) -> int:
 
 @register_technique
 class FlexiDepthTechnique(DepthTechnique):
-    """FlexiDepth (see :class:`FlexiDepthConfig`); trained by the objective ``flexidepth``."""
+    """FlexiDepth: a router per layer sends low-scoring tokens through a light adapter instead of the layer.
+
+    See :class:`FlexiDepthConfig`; trained by the objective ``flexidepth``."""
 
     name: ClassVar[str] = FlexiDepthConfig.technique
     config_class: ClassVar[type[TechniqueConfig]] = FlexiDepthConfig

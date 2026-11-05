@@ -114,7 +114,9 @@ class GateSkipPolicy(ScoredDepthPolicy):
 
 @register_technique
 class GateSkipTechnique(DepthTechnique):
-    """GateSkip, layer-level variant (see :class:`GateSkipConfig`); trained by the objective ``gateskip``."""
+    """GateSkip: trained residual gates per layer, and the tokens with the lowest gates skip the layer.
+
+    Layer-level variant (see :class:`GateSkipConfig`); trained by the objective ``gateskip``."""
 
     name: ClassVar[str] = GateSkipConfig.technique
     config_class: ClassVar[type[TechniqueConfig]] = GateSkipConfig

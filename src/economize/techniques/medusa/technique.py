@@ -28,7 +28,9 @@ __all__ = ["MedusaTechnique"]
 
 @register_technique
 class MedusaTechnique(StepDrafterDefaults, Technique):
-    """Medusa heads (Cai et al., 2024): after an exact pass, head ``j`` drafts token ``t + 1 + j`` from the last
+    """Medusa: extra heads on the last hidden state draft several future tokens at once.
+
+    Medusa heads (Cai et al., 2024): after an exact pass, head ``j`` drafts token ``t + 1 + j`` from the last
     hidden state at the last processed token ``t``, all heads at once and without running a decoder layer.
 
     Parameters (float32, or the model's dtype with ``param_dtype="model"``; on the device of the LM head):

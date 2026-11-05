@@ -136,7 +136,9 @@ def minference_layers(config: MInferenceConfig, adapter: ArchAdapter) -> tuple[i
 
 @register_technique
 class MInferenceTechnique(Technique):
-    """MInference sparse prefill (see :class:`MInferenceConfig`). Training-free; no parameters.
+    """MInference: long prompts attend over a sparse pattern per head that is fitted at prefill.
+
+    See :class:`MInferenceConfig`. Training-free; no parameters.
 
     It changes neither the weights nor the cache, so it combines with every other family; KV techniques see the
     same prompt keys and values as without it.

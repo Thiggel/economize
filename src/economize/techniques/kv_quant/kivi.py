@@ -214,7 +214,9 @@ class KIVICache(CacheWrapper):
 
 @register_technique
 class KIVITechnique(KVCacheTechnique):
-    """KIVI quantization of the KV cache (see :class:`KIVIConfig`). Training-free; no parameters."""
+    """KIVI: the KV cache in low-bit codes, keys quantized per channel and values per token.
+
+    See :class:`KIVIConfig`. Training-free; no parameters."""
 
     name: ClassVar[str] = KIVIConfig.technique
     config_class: ClassVar[type[KIVIConfig]] = KIVIConfig

@@ -1,22 +1,17 @@
 # Techniques
 
 Every technique registered with economize, generated from the technique classes when the site is built
-(`docs/hooks/techniques.py`). The summary is the first line of the class's docstring. The other columns come
-from the technique's metadata, the class attribute `info` (a `TechniqueInfo`):
+(`docs/hooks/techniques.py`). There is one table per family. A model holds at most one technique of an exclusive
+family (one drafter, one layer policy, one KV-cache quantizer, ...), while weight transforms compose in attach order.
+Each name links to the technique's tutorial, and the summary is the first sentence of the class's docstring. The
+other columns come from the technique's metadata, the class attribute `info` (a `TechniqueInfo`):
 
-- **Family**: the kind of technique and the part of the model it owns. A model holds at most one technique of an
-  exclusive family (one drafter, one layer policy, one KV-cache quantizer, ...), while weight transforms compose in
-  attach order.
-- **Saves**: the resources the technique spends less of when it runs on a real path (weight memory, KV memory,
-  compute, latency).
+- **Saves**: the resources the technique spends less of (weight memory, KV memory, compute, latency).
 - **Lossless**: greedy decoding with the technique reproduces the base model's greedy output exactly.
 - **Trainable**: the components the technique trains, or "no" for a training-free technique.
 
-One column per backend (the Hugging Face path `transformers`, and the serving engines) says how that backend runs
-the technique with its default configuration. "real" realizes the saving. "simulated" reproduces the technique's
-outputs without realizing (all of) its saving, for example by keeping dequantized weights, so it is right for quality
-measurements and wrong for memory or speed measurements. "no" means the backend cannot run it. Hover over a cell for
-the reason.
+The last section shows how each backend, the Hugging Face path `transformers` and the serving engines, runs every
+technique.
 
 <!-- technique-table -->
 

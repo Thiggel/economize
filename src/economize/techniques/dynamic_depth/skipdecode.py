@@ -120,7 +120,9 @@ class SkipDecodePolicy(DepthPolicy):
 
 @register_technique
 class SkipDecodeTechnique(DepthTechnique):
-    """SkipDecode (see :class:`SkipDecodeConfig`), training-free (see the module docstring)."""
+    """SkipDecode: a layer budget that falls with the generated position, skipping the lowest layers.
+
+    Training-free; see :class:`SkipDecodeConfig` and the module docstring."""
 
     name: ClassVar[str] = SkipDecodeConfig.technique
     config_class: ClassVar[type[TechniqueConfig]] = SkipDecodeConfig

@@ -34,7 +34,9 @@ SELECT_EXTRA_SCALE = 0.01
 
 @register_technique
 class RedrafterTechnique(StepDrafterDefaults, Technique):
-    """ReDrafter (Cheng et al., 2024): a recurrent state over the drafted tokens and a residual head on the model's
+    """ReDrafter: a recurrent draft head on the model's last hidden state.
+
+    ReDrafter (Cheng et al., 2024): a recurrent state over the drafted tokens and a residual head on the model's
     last hidden state ``h_t`` and that state (see :class:`RedrafterConfig`).
 
     ``h_t`` is the post-norm last hidden state with ``head="own"`` and the pre-norm one with ``head="shared"``.

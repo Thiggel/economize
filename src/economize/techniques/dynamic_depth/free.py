@@ -119,7 +119,9 @@ class FreeConfig(EarlyExitConfig):
 
 @register_technique
 class FreeTechnique(EarlyExitTechnique):
-    """The shallow model of FREE as a drafter whose drafts are kept (see the module docstring).
+    """FREE: a shallow exit model emits confident tokens, and the deep layers catch up on them in one parallel pass.
+
+    The shallow model acts as a drafter whose drafts are kept (see the module docstring).
 
     Parameters: ``readout`` with ``head="readout"``, none otherwise (the objective ``free`` trains the model's own
     weights).

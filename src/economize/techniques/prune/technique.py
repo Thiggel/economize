@@ -69,7 +69,9 @@ class PruneTechnique(CalibratedWeightTransform):
 
 @register_technique
 class DepthPruneTechnique(CalibratedWeightTransform):
-    """ShortGPT / SLEB layer removal (see :class:`DepthPruneConfig`). Runs before every other weight transform."""
+    """ShortGPT and SLEB: removal of the decoder layers that change the hidden state least.
+
+    See :class:`DepthPruneConfig`. Runs before every other weight transform."""
 
     name: ClassVar[str] = DepthPruneConfig.technique
     config_class: ClassVar[type[DepthPruneConfig]] = DepthPruneConfig

@@ -210,9 +210,11 @@ class DuoAttentionCache(WindowEvictionCache):
 
 @register_technique
 class DuoAttentionTechnique(KVEvictTechnique):
-    """DuoAttention (see :class:`DuoAttentionConfig`). Training-free given a trained pattern; no parameters. The
-    objective ``"duo_attention_gates"`` (:func:`~economize.techniques.duo_attention.train_pattern`) trains a pattern
-    for any model.
+    """DuoAttention: retrieval heads keep the full KV cache, streaming heads keep attention sinks and a recent window.
+
+    See :class:`DuoAttentionConfig`. Training-free given a trained pattern; no parameters. The objective
+    ``"duo_attention_gates"`` (:func:`~economize.techniques.duo_attention.train_pattern`) trains a pattern for any
+    model.
 
     Attributes:
         streaming: Per cache layer with at least one streaming head, ``True`` for each streaming KV head.

@@ -23,7 +23,9 @@ __all__ = ["PlacedDraftModelTechnique"]
 
 @register_technique
 class PlacedDraftModelTechnique(DraftModelTechnique):
-    """:class:`~economize.techniques.draft_model.DraftModelTechnique` with the draft LM on
+    """Speculative decoding with a separate draft model placed on another device.
+
+    :class:`~economize.techniques.draft_model.DraftModelTechnique` with the draft LM on
     :attr:`PlacedDraftModelConfig.device`.
 
     The cost log is the same as the one-device technique's (events of the network ``"draft_model"``); the device

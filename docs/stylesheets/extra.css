@@ -1,0 +1,60 @@
+/* Tables: tighter cells, numbers in tabular figures, the first column on one line. */
+.md-typeset table:not([class]) th,
+.md-typeset table:not([class]) td {
+  padding: 0.45em 0.75em;
+}
+.md-typeset table:not([class]) th,
+.md-typeset table:not([class]) td:first-child {
+  white-space: nowrap;
+}
+/* Material gives every header cell a minimum width of 5rem, which spreads short numeric columns apart. */
+.md-typeset table:not([class]) th {
+  min-width: 0;
+}
+.md-typeset table:not([class]) td {
+  font-variant-numeric: tabular-nums;
+}
+.md-typeset table:not([class]) tbody tr:hover {
+  background-color: var(--md-accent-fg-color--transparent);
+}
+
+/* A table that still scrolls keeps its first column in view. */
+.md-typeset__table table:not([class]) th:first-child,
+.md-typeset__table table:not([class]) td:first-child {
+  position: sticky;
+  left: 0;
+  background-color: var(--md-default-bg-color);
+  z-index: 1;
+}
+
+/* Support matrices: one narrow centered column per backend. */
+.md-typeset .support-matrix td:not(:first-child),
+.md-typeset .support-matrix th:not(:first-child) {
+  text-align: center;
+  padding-left: 0.4em;
+  padding-right: 0.4em;
+}
+.md-typeset .support-matrix .yes {
+  color: var(--md-primary-fg-color);
+  font-weight: 700;
+}
+.md-typeset .support-matrix .sim {
+  color: var(--md-accent-fg-color);
+}
+.md-typeset .support-matrix .no {
+  color: var(--md-default-fg-color--lighter);
+}
+
+/* The bibliography at the end of a page. */
+.md-typeset .bibliography li {
+  margin-bottom: 0.4em;
+  padding-left: 1.5em;
+  text-indent: -1.5em;
+  list-style: none;
+}
+.md-typeset .bibliography {
+  margin-left: 0;
+}
+.md-typeset .bibliography li:target {
+  background-color: var(--md-accent-fg-color--transparent);
+}

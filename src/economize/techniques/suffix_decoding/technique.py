@@ -19,7 +19,9 @@ __all__ = ["SuffixDecodingTechnique"]
 
 @register_technique
 class SuffixDecodingTechnique(NotWrappable, Technique):
-    """SuffixDecoding (Oliaro et al., 2025): drafts grow from the context's matches in a suffix structure over earlier
+    """SuffixDecoding: drafts from a suffix structure over earlier responses and the row's own tokens.
+
+    SuffixDecoding (Oliaro et al., 2025): drafts grow from the context's matches in a suffix structure over earlier
     responses and over the row's own tokens, as long as their empirical probability stays high.
 
     The technique has no parameters and changes nothing in the base model; its state is the optional datastore

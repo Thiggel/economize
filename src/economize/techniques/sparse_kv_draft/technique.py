@@ -60,7 +60,9 @@ class StreamingPath(SparseKVPath):
 
 @register_technique
 class MagicDecTechnique(_SparseDraftTechnique):
-    """MagicDec (Sadhukhan et al., 2025): the base model drafts on a StreamingLLM view of its own KV cache.
+    """MagicDec: the base model drafts on a StreamingLLM view of its own KV cache.
+
+    MagicDec (Sadhukhan et al., 2025): the base model drafts on a StreamingLLM view of its own KV cache.
 
     A draft step runs every layer with the base weights. Each full-attention layer attends to the first
     ``sinks`` positions and the last ``budget - sinks`` positions up to the query (and, in a draft tree, to the
@@ -91,7 +93,9 @@ class MagicDecTechnique(_SparseDraftTechnique):
 
 @register_technique
 class TriForceTechnique(_SparseDraftTechnique):
-    """TriForce's retrieval level (Sun et al., 2024): the base model drafts on the prompt chunks its query attends to.
+    """TriForce: the base model drafts on the prompt chunks its query attends to.
+
+    TriForce's retrieval level (Sun et al., 2024): the base model drafts on the prompt chunks its query attends to.
 
     The first draft step of a generation runs the full model and picks, per full-attention layer and KV head, the
     first prompt chunk and the ``budget // chunk_size - 1`` chunks whose mean keys score highest against the step's

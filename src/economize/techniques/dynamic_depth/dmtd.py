@@ -123,7 +123,9 @@ class DmtdConfig(JumpConfig):
 
 @register_technique
 class DmtdTechnique(JumpTechnique):
-    """DMTD: the late layers draft from the next token's embedding and the drafts are kept (see the module docstring).
+    """DMTD: the late layers decode several tokens per cycle from their embeddings, and the drafts are kept.
+
+    The early and middle layers refill their K/V at the start of the next cycle (see the module docstring).
 
     Parameters: ``blocks`` (``adaptation="full"``) or ``lora`` (``"lora"``); none with ``"frozen"``.
     """

@@ -3,6 +3,7 @@ site_description: Efficient decoding for any Hugging Face causal LM, with any co
 site_url: https://thiggel.github.io/economize/
 repo_url: https://github.com/Thiggel/economize
 repo_name: Thiggel/economize
+copyright: Logo from <a href="https://github.com/googlefonts/noto-emoji">Noto Emoji</a> (Apache License 2.0).
 edit_uri: edit/main/docs/
 docs_dir: docs
 exclude_docs: |
@@ -12,6 +13,8 @@ exclude_docs: |
 
 theme:
   name: material
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
   features:
     - content.code.copy
     - navigation.sections
@@ -32,8 +35,13 @@ theme:
         icon: material/brightness-4
         name: Light mode
 
+extra_css:
+  - stylesheets/extra.css
+
 markdown_extensions:
   - admonition
+  - attr_list
+  - md_in_html
   - tables
   - toc:
       permalink: true

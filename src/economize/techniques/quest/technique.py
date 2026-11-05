@@ -292,7 +292,9 @@ class QuestCache(CacheWrapper):
 
 @register_technique
 class QuestTechnique(KVCacheTechnique):
-    """Quest page selection over the KV cache (see :class:`QuestConfig`). Training-free; no parameters.
+    """Quest: every decoding query reads only the KV-cache pages whose keys can score high.
+
+    See :class:`QuestConfig`. Training-free; no parameters.
 
     It attaches outside every quantizing or evicting cache wrapper (``order`` 40), so that its pages reach the
     attention kernel, and refuses techniques that attach their own packed K/V (``kivi_fused``,

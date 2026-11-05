@@ -19,7 +19,9 @@ __all__ = ["RestTechnique"]
 
 @register_technique
 class RestTechnique(NotWrappable, Technique):
-    """REST, retrieval-based speculative decoding (He et al., 2024): drafts are continuations of the context's
+    """REST: drafts retrieved from a datastore of text by the context's longest matching suffix.
+
+    REST, retrieval-based speculative decoding (He et al., 2024): drafts are continuations of the context's
     longest suffix in a datastore of text, verified as a tree.
 
     The technique has no parameters and changes nothing in the base model; its state is the datastore folder named

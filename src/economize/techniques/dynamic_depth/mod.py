@@ -137,7 +137,9 @@ class MoDPolicy(RoutedDepthPolicy):
 
 @register_technique
 class MoDTechnique(DepthTechnique):
-    """Mixture-of-Depths (see :class:`MoDConfig`); trained by the objective ``mod``."""
+    """Mixture-of-Depths: a router per routed layer sends only a fraction of the tokens through the layer.
+
+    See :class:`MoDConfig`; trained by the objective ``mod``."""
 
     name: ClassVar[str] = MoDConfig.technique
     config_class: ClassVar[type[TechniqueConfig]] = MoDConfig

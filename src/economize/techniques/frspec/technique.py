@@ -25,7 +25,9 @@ __all__ = ["FRSpecTechnique"]
 
 @register_technique
 class FRSpecTechnique(WrappingTechnique):
-    """Restricts the drafts of another drafting technique to a draft vocabulary (FR-Spec, Zhao et al., 2025).
+    """FR-Spec: the drafts of another drafter restricted to a frequent-token vocabulary.
+
+    Restricts the drafts of another drafting technique to a draft vocabulary (FR-Spec, Zhao et al., 2025).
 
     The wrapped technique is built from ``config.drafter`` and held as the submodule :attr:`inner`; attaching,
     detaching and refreshing the wrapper does the same to it. Train the inner drafter on its own (FR-Spec needs no

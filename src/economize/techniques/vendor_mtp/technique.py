@@ -29,7 +29,9 @@ __all__ = ["BLOCK_LR", "VendorMTPTechnique"]
 
 @register_technique
 class VendorMTPTechnique(StepDrafterDefaults, Technique):
-    """Multi-token prediction as DeepSeek-V3, GLM-4.5, MiMo, Qwen3-Next and Qwen3.5 ship it (served as a drafter by
+    """The multi-token-prediction modules that DeepSeek-V3, GLM-4.5, MiMo and Qwen3.5 ship, as a drafter.
+
+    Multi-token prediction as DeepSeek-V3, GLM-4.5, MiMo, Qwen3-Next and Qwen3.5 ship it (served as a drafter by
     vLLM and SGLang).
 
     Module ``i`` (``layers.{i}``) has two input norms ``enorm`` and ``hnorm``, a projection ``eh_proj`` from

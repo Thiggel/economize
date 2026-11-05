@@ -22,7 +22,9 @@ __all__ = ["EagleTechnique"]
 
 @register_technique
 class EagleTechnique(DraftLayerTechnique):
-    """EAGLE-1 (Li et al., 2024) and, with a dynamic draft tree, EAGLE-2: one draft decoder layer with its own
+    """EAGLE-1 and EAGLE-2: one draft decoder layer on the model's features, with a static or dynamic draft tree.
+
+    EAGLE-1 (Li et al., 2024) and, with a dynamic draft tree, EAGLE-2: one draft decoder layer with its own
     attention and KV cache (see :class:`~economize.techniques.eagle.EagleConfig`).
 
     Draft step at position ``p``: the layer reads ``fc([E[x_p]; f])``, where ``f`` is the model's final norm of its

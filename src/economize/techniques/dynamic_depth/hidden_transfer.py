@@ -117,7 +117,10 @@ class HiddenTransferConfig(TechniqueConfig):
 
 @register_technique
 class HiddenTransferTechnique(StepDrafterDefaults, Technique):
-    """The ``k`` transfer maps of Hidden Transfer and their drafter (see the module docstring).
+    """Hidden Transfer: trained linear maps turn an intermediate hidden state into pseudo states of future tokens, which
+    the upper layers decode into drafts.
+
+    The technique holds the ``k`` transfer maps and their drafter (see the module docstring).
 
     Parameters (float32 by default, on the device of the LM head): ``transfers.{i}.weight``, initialized to the
     identity (the paper gives no initialization; the identity makes step ``i`` start as the early exit of layer

@@ -30,7 +30,9 @@ __all__ = ["HydraTechnique"]
 
 @register_technique
 class HydraTechnique(StepDrafterDefaults, Technique):
-    """Hydra heads (Ankner et al., 2024): head ``j`` drafts token ``t + 1 + j`` from the base state ``P_t`` of the last
+    """Hydra: Medusa-style draft heads that also read the tokens drafted before them.
+
+    Hydra heads (Ankner et al., 2024): head ``j`` drafts token ``t + 1 + j`` from the base state ``P_t`` of the last
     processed token ``t`` and the embeddings of tokens ``t + 1..t + j`` (see :class:`HydraConfig`).
 
     The base state is the model's last hidden state at ``t`` (post-norm with ``head="own"``, pre-norm with

@@ -9,7 +9,8 @@ saving) or cannot run it. A new technique therefore appears on every generated p
 
 Placeholders, replaced on every page that contains them:
 
-* :data:`PLACEHOLDER` (``<!-- technique-table -->``): the table of all techniques (:func:`technique_table`);
+* :data:`PLACEHOLDER` (``<!-- technique-table -->``): one table per family and the backend support matrix
+  (:func:`technique_overview`);
 * ``<!-- technique-info: NAME -->``: the summary box at the top of the tutorial of technique ``NAME``
   (:func:`technique_info`);
 * ``<!-- technique-config: NAME -->``: the reference of ``NAME``'s configuration class, rendered by mkdocstrings
@@ -62,6 +63,14 @@ FAMILY_TITLES = {
 
 #: How a backend's support status reads in a cell, by ``SupportStatus.value``.
 STATUS_LABELS = {"real": "real", "simulated": "simulated", "unsupported": "no"}
+#: The same in the compact support matrix: ``(symbol, CSS class)``.
+STATUS_SYMBOLS = {"real": ("✓", "yes"), "simulated": ("sim.", "sim"), "unsupported": ("✗", "no")}
+#: The paragraph above the support matrix.
+BACKEND_LEGEND = (
+    "How each backend runs a technique with its default configuration: ✓ realizes the saving, sim. reproduces the "
+    "technique's outputs without realizing its saving, ✗ means the backend cannot run it. Hover over a symbol for "
+    "the reason. `economize.backend_support(config)` answers the same for any other configuration."
+)
 
 #: The backend column shown first; the others follow by name.
 FIRST_BACKEND = "transformers"
@@ -70,6 +79,10 @@ FIRST_BACKEND = "transformers"
 _ROLE = re.compile(r":[a-z]+:`~?([^`<]*?)\s*(?:<[^`>]+>)?`")
 #: A double-backtick literal.
 _LITERAL = re.compile(r"``([^`]+)``")
+#: A pointer to further documentation inside a summary: ``(see `XConfig`)``, ``, see the module docstring)``.
+_SEE = re.compile(r"\s*\(see [^()]*\)|, see [^()]*(?=\))")
+#: The end of a sentence (not an abbreviation such as "et al. 2025").
+_SENTENCE_END = re.compile(r"(?<=[a-z0-9`)])\.\s+(?=[A-Z`])")
 
 
 @dataclass(frozen=True)
@@ -100,6 +113,12 @@ def summary(obj: Any) -> str:
     """The first paragraph of ``obj``'s docstring on one line, as Markdown (``""`` without one)."""
     doc = inspect.getdoc(obj) or ""
     return markdown_text(" ".join(doc.split("\n\n", 1)[0].split()))
+
+
+def short_summary(text: str) -> str:
+    """The first sentence of a summary without its pointers to further documentation, for the overview tables."""
+    text = _SEE.sub("", text)
+    return _SENTENCE_END.split(text, 1)[0].rstrip(".") + "."
 
 
 def saving_names(savings: Any) -> str:
@@ -176,6 +195,52 @@ def technique_table(table_rows: list[Row] | None = None) -> str:
         cells += [_support_cell(*row.support.get(backend, ("", ""))) for backend in backends]
         lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)
+
+
+def _tutorial_link(name: str, docs_dir: str | Path | None) -> str:
+    """`` `name` `` linked to its tutorial when ``docs_dir`` holds one."""
+    if docs_dir is not None and (Path(docs_dir) / TUTORIALS / f"{name}.md").is_file():
+        return f"[`{name}`]({TUTORIALS}/{name}.md)"
+    return f"`{name}`"
+
+
+def support_matrix(table_rows: list[Row]) -> str:
+    """One row per technique, one narrow column per backend: a symbol per support status, the reason on hover."""
+    backends = list(dict.fromkeys(backend for row in table_rows for backend in row.support))
+    lines = ['<div class="support-matrix" markdown>', "", "| Technique | " + " | ".join(backends) + " |",
+             "|---|" + ":-:|" * len(backends)]
+    for row in table_rows:
+        cells = []
+        for backend in backends:
+            label, detail = row.support.get(backend, ("", ""))
+            status = next((key for key, value in STATUS_LABELS.items() if value == label), label)
+            symbol, css = STATUS_SYMBOLS.get(status, (label, ""))
+            title = html.escape(f"{label}: {detail}".replace("`", "") if detail else label, quote=True)
+            cells.append(f'<abbr class="{css}" title="{title}">{symbol}</abbr>')
+        lines.append(f"| `{row.name}` | " + " | ".join(cells) + " |")
+    return "\n".join([*lines, "", "</div>"])
+
+
+def technique_overview(docs_dir: str | Path | None = None, table_rows: list[Row] | None = None) -> str:
+    """One table per family (technique, summary, saves, lossless, trainable) and the backend support matrix; the
+    single :func:`technique_table` for an economize without technique metadata."""
+    table_rows = rows() if table_rows is None else table_rows
+    if not any(row.metadata for row in table_rows):
+        return technique_table(table_rows)
+    by_name = {row.name: row for row in table_rows}
+    columns = ["Saves", "Lossless", "Trainable"]
+    out = []
+    for family, members in by_family(list(by_name)):
+        out += [f"## {family_title(family)}", "", "| Technique | Summary | " + " | ".join(columns) + " |",
+                "|---|---|" + "---|" * len(columns)]
+        for name in members:
+            row = by_name[name]
+            cells = [_tutorial_link(name, docs_dir), _cell(short_summary(row.summary))]
+            out.append("| " + " | ".join([*cells, *(_cell(row.metadata.get(column, "")) for column in columns)]) + " |")
+        out.append("")
+    if any(row.support for row in table_rows):
+        out += ["## Backend support", "", BACKEND_LEGEND, "", support_matrix(table_rows)]
+    return "\n".join(out)
 
 
 def family_of(name: str) -> str:
@@ -291,7 +356,7 @@ def on_config(config: Any, **kwargs: Any) -> Any:
 def render(markdown: str, docs_dir: str | Path | None = None) -> str:
     """``markdown`` with every placeholder replaced."""
     if PLACEHOLDER in markdown:
-        markdown = markdown.replace(PLACEHOLDER, technique_table())
+        markdown = markdown.replace(PLACEHOLDER, technique_overview(docs_dir))
     if TUTORIAL_INDEX in markdown:
         markdown = markdown.replace(TUTORIAL_INDEX, tutorial_index(docs_dir))
 

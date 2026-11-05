@@ -192,7 +192,10 @@ class LoRADropPolicy(DepthPolicy):
 
 @register_technique
 class LoRADropTechnique(DepthTechnique):
-    """LoRA-Drop (see :class:`LoRADropConfig`); trained by the objective ``loradrop``."""
+    """LoRA-Drop: droppable layers run in full every few tokens, and in between reuse their last output plus a LoRA
+    correction.
+
+    See :class:`LoRADropConfig`; trained by the objective ``loradrop``."""
 
     name: ClassVar[str] = LoRADropConfig.technique
     config_class: ClassVar[type[TechniqueConfig]] = LoRADropConfig

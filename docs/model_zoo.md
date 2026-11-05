@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # Model zoo
 
 The drafters below were trained with economize and are published on the Hugging Face Hub. Each repository holds
@@ -6,18 +11,21 @@ loaded from its own repository. The Hub collection [economize drafters](https://
 
 ## Checkpoints
 
-| Checkpoint | Base model | Technique | All | Chat | Code | Math | Summarization | Long context | Tokens per base-model pass |
-|---|---|---|---|---|---|---|---|---|---|
-| [`flaitenberger/economize-eagle3-Olmo-3-7B-Instruct`](https://huggingface.co/flaitenberger/economize-eagle3-Olmo-3-7B-Instruct) | Olmo-3-7B-Instruct | EAGLE-3 draft head | 1.55x | 1.35x | 1.63x | 1.97x | 1.24x | 1.24x | 2.07 |
-| [`flaitenberger/economize-eagle3-Ministral-3-8B-Instruct-2512`](https://huggingface.co/flaitenberger/economize-eagle3-Ministral-3-8B-Instruct-2512) | Ministral-3-8B-Instruct-2512-BF16 | EAGLE-3 draft head | 1.59x | 1.34x | 1.72x | 2.06x | 1.19x | 1.36x | 2.20 |
-| [`flaitenberger/Llama-3.1-8B-Instruct-economize-eagle3`](https://huggingface.co/flaitenberger/Llama-3.1-8B-Instruct-economize-eagle3) | Llama-3.1-8B-Instruct | EAGLE-3 draft head | 1.74x | 1.52x | 1.96x | 2.10x | 1.40x | 1.34x | 2.42 |
-| [`flaitenberger/economize-eagle3-Qwen3.5-4B`](https://huggingface.co/flaitenberger/economize-eagle3-Qwen3.5-4B) | Qwen3.5-4B | EAGLE-3 draft head | 1.39x | 1.30x | 1.43x | 1.76x | 1.10x | 1.18x | 2.60 |
-| [`flaitenberger/economize-eagle3-Qwen3.5-27B`](https://huggingface.co/flaitenberger/economize-eagle3-Qwen3.5-27B) | Qwen3.5-27B | EAGLE-3 draft head | 1.35x | 1.25x | 1.37x | 1.82x | 1.22x | 1.01x | 2.70 |
-| [`flaitenberger/economize-eagle3-gemma-4-31B-it`](https://huggingface.co/flaitenberger/economize-eagle3-gemma-4-31B-it) | gemma-4-31B-it | EAGLE-3 draft head | 1.94x | 1.67x | 2.05x | 2.44x | 1.41x | 1.61x | 2.24 |
-| [`flaitenberger/economize-medusa-gemma-4-31B-it`](https://huggingface.co/flaitenberger/economize-medusa-gemma-4-31B-it) | gemma-4-31B-it | Medusa heads | 1.85x | 1.63x | 1.96x | 2.29x | 1.43x | 1.39x | 2.03 |
-| [`flaitenberger/economize-early-exit-gemma-4-31B-it`](https://huggingface.co/flaitenberger/economize-early-exit-gemma-4-31B-it) | gemma-4-31B-it | Early-exit drafter | 1.49x | 1.37x | 1.55x | 1.66x | 1.19x | 1.33x | 1.73 |
-| [`flaitenberger/economize-eagle3-Qwen3.5-35B-A3B`](https://huggingface.co/flaitenberger/economize-eagle3-Qwen3.5-35B-A3B) | Qwen3.5-35B-A3B | EAGLE-3 draft head | 1.43x | 1.31x | 1.39x | 1.97x | 1.23x | 1.18x | 2.25 |
-| [`flaitenberger/economize-eagle3-gemma-4-26B-A4B-it`](https://huggingface.co/flaitenberger/economize-eagle3-gemma-4-26B-A4B-it) | gemma-4-26B-A4B-it | EAGLE-3 draft head | 1.34x | 1.39x | 1.32x | 1.48x | 1.04x | 1.03x | 1.68 |
+Each row links to the checkpoint on the Hub. The speedups are over plain decoding of the base model, overall and per
+task group, and the last column is the mean number of tokens accepted per base-model pass (see Measurement below).
+
+| Base model | Drafter | All | Chat | Code | Math | Summarization | Long context | Tokens / pass |
+|---|---|--:|--:|--:|--:|--:|--:|--:|
+| [Olmo-3-7B-Instruct](https://huggingface.co/flaitenberger/economize-eagle3-Olmo-3-7B-Instruct "flaitenberger/economize-eagle3-Olmo-3-7B-Instruct") | EAGLE-3 | 1.55x | 1.35x | 1.63x | 1.97x | 1.24x | 1.24x | 2.07 |
+| [Ministral-3-8B-Instruct-2512](https://huggingface.co/flaitenberger/economize-eagle3-Ministral-3-8B-Instruct-2512 "flaitenberger/economize-eagle3-Ministral-3-8B-Instruct-2512") | EAGLE-3 | 1.59x | 1.34x | 1.72x | 2.06x | 1.19x | 1.36x | 2.20 |
+| [Llama-3.1-8B-Instruct](https://huggingface.co/flaitenberger/Llama-3.1-8B-Instruct-economize-eagle3 "flaitenberger/Llama-3.1-8B-Instruct-economize-eagle3") | EAGLE-3 | 1.74x | 1.52x | 1.96x | 2.10x | 1.40x | 1.34x | 2.42 |
+| [Qwen3.5-4B](https://huggingface.co/flaitenberger/economize-eagle3-Qwen3.5-4B "flaitenberger/economize-eagle3-Qwen3.5-4B") | EAGLE-3 | 1.39x | 1.30x | 1.43x | 1.76x | 1.10x | 1.18x | 2.60 |
+| [Qwen3.5-27B](https://huggingface.co/flaitenberger/economize-eagle3-Qwen3.5-27B "flaitenberger/economize-eagle3-Qwen3.5-27B") | EAGLE-3 | 1.35x | 1.25x | 1.37x | 1.82x | 1.22x | 1.01x | 2.70 |
+| [gemma-4-31B-it](https://huggingface.co/flaitenberger/economize-eagle3-gemma-4-31B-it "flaitenberger/economize-eagle3-gemma-4-31B-it") | EAGLE-3 | 1.94x | 1.67x | 2.05x | 2.44x | 1.41x | 1.61x | 2.24 |
+| [gemma-4-31B-it](https://huggingface.co/flaitenberger/economize-medusa-gemma-4-31B-it "flaitenberger/economize-medusa-gemma-4-31B-it") | Medusa | 1.85x | 1.63x | 1.96x | 2.29x | 1.43x | 1.39x | 2.03 |
+| [gemma-4-31B-it](https://huggingface.co/flaitenberger/economize-early-exit-gemma-4-31B-it "flaitenberger/economize-early-exit-gemma-4-31B-it") | Early exit | 1.49x | 1.37x | 1.55x | 1.66x | 1.19x | 1.33x | 1.73 |
+| [Qwen3.5-35B-A3B](https://huggingface.co/flaitenberger/economize-eagle3-Qwen3.5-35B-A3B "flaitenberger/economize-eagle3-Qwen3.5-35B-A3B") | EAGLE-3 | 1.43x | 1.31x | 1.39x | 1.97x | 1.23x | 1.18x | 2.25 |
+| [gemma-4-26B-A4B-it](https://huggingface.co/flaitenberger/economize-eagle3-gemma-4-26B-A4B-it "flaitenberger/economize-eagle3-gemma-4-26B-A4B-it") | EAGLE-3 | 1.34x | 1.39x | 1.32x | 1.48x | 1.04x | 1.03x | 1.68 |
 
 ## Decoding settings
 

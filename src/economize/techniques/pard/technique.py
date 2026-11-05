@@ -19,7 +19,9 @@ __all__ = ["PardTechnique"]
 
 @register_technique
 class PardTechnique(DraftModelTechnique):
-    """:class:`~economize.techniques.draft_model.DraftModelTechnique` with the parallel drafter of PARD.
+    """PARD: a separate draft model that drafts several tokens in one parallel forward pass.
+
+    :class:`~economize.techniques.draft_model.DraftModelTechnique` with the parallel drafter of PARD.
 
     The cost log is the one of the two-model technique (events of the network ``"draft_model"``): the owed tokens
     beyond the first as a ``"draft_catchup"`` event and one ``"draft"`` event per draft, so the logged tokens are

@@ -67,7 +67,9 @@ def context_layers(adapter: ArchAdapter) -> dict[str, int]:
 
 @register_technique
 class Gemma4AssistantTechnique(Technique):
-    """Speculative decoding with the Gemma-4 assistant (see :class:`Gemma4AssistantDraftConfig`).
+    """Speculative decoding with the assistant model published for Gemma 4.
+
+    See :class:`Gemma4AssistantDraftConfig`.
 
     The assistant is loaded when the technique attaches and is kept outside the module tree of the technique, so
     it is neither saved with the economize checkpoint nor moved or trained with the techniques.
