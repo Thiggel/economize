@@ -43,7 +43,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import torch
 from torch import Tensor, nn
 
-from ..core.metadata import Saving, Simulation
+from ..core.metadata import Saving, Simulation, WeightStorage
 from ..errors import ConfigError
 from ..registry import Registry
 from ..techniques.quant import activations
@@ -192,6 +192,7 @@ class CompressedTensorsBackend(QuantBackend):
     options = frozenset({"activations"})
     simulation = Simulation(Saving.WEIGHT_MEMORY | Saving.LATENCY,
                             "keeps the dequantized weights (the codes are for export_compressed_tensors)")
+    storage = WeightStorage.DENSE
 
     def check_config(self, config: QuantSpec) -> None:
         """Raise :class:`ConfigError` for a format without a compressed-tensors scheme in :data:`CT_SCHEMES`, or an

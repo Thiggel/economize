@@ -27,7 +27,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn.functional as F
 
-from ...core.metadata import Saving, Simulation
+from ...core.metadata import Saving, Simulation, WeightStorage
 from ...registry import Registry
 
 __all__ = [
@@ -53,12 +53,15 @@ class SemiStructuredKernel:
         description: One line for listings.
         simulation: Set when the kernel keeps the dense weight (no memory or compute saving; see
             :class:`~economize.Simulation`).
+        storage: How the stored weight looks to a kernel that reads it itself (:attr:`WeightStorage.DENSE` for a
+            kernel that keeps the masked dense weight).
     """
 
     convert: Callable[[torch.Tensor], torch.Tensor]
     available: Callable[[torch.device], bool]
     description: str = ""
     simulation: Simulation | None = None
+    storage: WeightStorage = WeightStorage.SEMI_STRUCTURED
 
 
 SEMI_STRUCTURED_KERNELS: Registry[SemiStructuredKernel] = Registry(
@@ -120,6 +123,7 @@ SEMI_STRUCTURED_KERNELS.register(
         available=lambda device: device.type == "cuda",
         description="keep the masked dense weight (cuBLAS); same function, dense speed",
         simulation=Simulation(Saving.WEIGHT_MEMORY | Saving.COMPUTE, "keeps the masked dense weight"),
+        storage=WeightStorage.DENSE,
     ),
 )
 

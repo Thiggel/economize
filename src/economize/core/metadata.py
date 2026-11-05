@@ -19,7 +19,10 @@ The declaration is the single source of three things:
 * the documentation's technique table (field names are stable; new fields get defaults).
 
 Families, savings and kernel choices are open: a new family is one ``Family(...)`` value, a kernel registry that
-offers a simulated kernel gives that kernel a ``simulation`` attribute.
+offers a simulated kernel gives that kernel a ``simulation`` attribute. Kernels also declare how they meet the base
+weights: a weight kernel names the :class:`WeightStorage` it leaves (``storage``), a kernel that reads the weights
+of the linear maps names the storages it reads (``weight_access``, a :class:`WeightAccess`), and two techniques whose
+kernels disagree are refused (:meth:`Technique.conflict <economize.Technique.conflict>`).
 """
 
 from __future__ import annotations
@@ -40,9 +43,12 @@ __all__ = [
     "Saving",
     "Simulation",
     "TechniqueInfo",
+    "WeightAccess",
+    "WeightStorage",
     "check_declaration",
     "conflict",
     "saving_names",
+    "storage_conflict",
     "unmet_requirement",
 ]
 
@@ -166,23 +172,105 @@ class Exclusion:
 
 
 @dataclass(frozen=True)
+class WeightStorage:
+    """How a weight transform leaves the weights of the base model's linear maps, as a kernel reading them sees it.
+
+    Attributes:
+        name: Short identifier (``"quantized"``).
+        description: Plural noun phrase for messages (``"packed low-bit weights"``).
+    """
+
+    name: str
+    description: str
+
+    DENSE: ClassVar[WeightStorage]
+    QUANTIZED: ClassVar[WeightStorage]
+    SEMI_STRUCTURED: ClassVar[WeightStorage]
+
+    def __str__(self) -> str:
+        return self.description
+
+
+#: Plain floating-point tensors (also the masked or dequantized weights of a simulated weight kernel).
+WeightStorage.DENSE = WeightStorage("dense", "dense floating-point weights")
+#: Packed low-bit tensors of a quantization kernel (Marlin, Machete, CUTLASS, torchao).
+WeightStorage.QUANTIZED = WeightStorage("quantized", "packed low-bit weights")
+#: 2:4 semi-structured sparse tensors of the sparse tensor cores.
+WeightStorage.SEMI_STRUCTURED = WeightStorage("semi-structured", "2:4 semi-structured sparse weights")
+
+
+@dataclass(frozen=True)
+class WeightAccess:
+    """A kernel that reads the weights of the base model's linear maps itself, and the storages it can read.
+
+    Attributes:
+        reader: The kernel as a noun phrase (``"TEAL's sparse Triton GEMV"``).
+        storages: The :class:`WeightStorage` values it reads.
+        alternative: What a user can do instead, for the refusal message (another backend of the technique).
+    """
+
+    reader: str
+    storages: frozenset[WeightStorage] = frozenset({WeightStorage.DENSE})
+    alternative: str = ""
+
+    def refusal(self, name: str, other_name: str, storage: WeightStorage) -> str | None:
+        """Why technique ``name`` with this kernel cannot run on the weights technique ``other_name`` leaves in
+        ``storage``, ``None`` if it can."""
+        if storage in self.storages:
+            return None
+        readable = " or ".join(sorted(str(s) for s in self.storages)) or "no weights"
+        reason = (
+            f"{name} cannot be combined with {other_name}: {self.reader} reads {readable}, and {other_name} "
+            f"stores {storage}"
+        )
+        return f"{reason}; {self.alternative}" if self.alternative else reason
+
+
+def storage_conflict(
+    name: str, access: WeightAccess | None, other_name: str, storage: WeightStorage | None
+) -> str | None:
+    """Why technique ``name``, whose kernel reads the base weights as ``access`` says, cannot share a model with
+    technique ``other_name``, which leaves them in ``storage``; ``None`` if either declares nothing or they agree."""
+    if access is None or storage is None:
+        return None
+    return access.refusal(name, other_name, storage)
+
+
+@dataclass(frozen=True)
 class KernelChoice:
     """The configuration field that selects a technique's kernel, and the registry it names.
 
     A registry entry whose ``simulation`` attribute is a :class:`Simulation` only simulates the technique (the
-    ``"fake"`` quantization backend); every other entry realizes it.
+    ``"fake"`` quantization backend); every other entry realizes it. An entry's ``storage`` attribute (a
+    :class:`WeightStorage`) says how a weight kernel leaves the base weights, its ``weight_access`` attribute (a
+    :class:`WeightAccess`) which storages a kernel that reads them accepts.
     """
 
     field: str
     registry: Registry[Any]
 
+    def entry(self, config: Any) -> Any:
+        """The registry entry ``config`` selects (``config`` may be a config class: its default), ``None`` if the
+        name is not registered."""
+        name = getattr(config, self.field)
+        return self.registry.get(name) if name in self.registry else None
+
     def simulation(self, config: Any) -> Simulation | None:
         """The simulation of the kernel ``config`` selects (``config`` may be a config class: its default)."""
-        name = getattr(config, self.field)
-        if name not in self.registry:
-            return None
-        simulation = getattr(self.registry.get(name), "simulation", None)
+        simulation = getattr(self.entry(config), "simulation", None)
         return simulation if isinstance(simulation, Simulation) else None
+
+    def storage(self, config: Any) -> WeightStorage | None:
+        """The :class:`WeightStorage` the selected kernel leaves the base weights in (its ``storage`` attribute),
+        ``None`` if it declares none."""
+        storage = getattr(self.entry(config), "storage", None)
+        return storage if isinstance(storage, WeightStorage) else None
+
+    def weight_access(self, config: Any) -> WeightAccess | None:
+        """How the selected kernel reads the base weights (its ``weight_access`` attribute), ``None`` if it reads
+        them through the modules' own forward."""
+        access = getattr(self.entry(config), "weight_access", None)
+        return access if isinstance(access, WeightAccess) else None
 
 
 @dataclass(frozen=True)

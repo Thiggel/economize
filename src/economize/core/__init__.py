@@ -12,7 +12,16 @@ from .compatibility import (
     incompatibility,
 )
 from .config import TechniqueConfig
-from .metadata import Exclusion, Family, KernelChoice, Saving, Simulation, TechniqueInfo
+from .metadata import (
+    Exclusion,
+    Family,
+    KernelChoice,
+    Saving,
+    Simulation,
+    TechniqueInfo,
+    WeightAccess,
+    WeightStorage,
+)
 from .model import GENERATE_IMPLEMENTATIONS, EfficientModel, GenerateFn, apply, build_model
 from .recipe import attach_techniques, build_techniques
 from .serialization import (
@@ -61,6 +70,8 @@ __all__ = [
     "Technique",
     "TechniqueConfig",
     "TechniqueInfo",
+    "WeightAccess",
+    "WeightStorage",
     "apply",
     "attach",
     "attach_rank",

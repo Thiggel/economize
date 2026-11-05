@@ -113,17 +113,20 @@ print(perplexity(model, windows))
 
 ## Combining with other techniques
 
-TEAL sparsifies the inputs of the maps, so it composes with the weight transforms, which change the maps
-themselves. It excludes the other activation-sparsity techniques (`cats`, `dejavu`) and `rotate`, which would change
-the inputs that the thresholds were calibrated on. Here the maps are quantized to int4 with GPTQ before TEAL is
-calibrated:
+TEAL sparsifies the inputs of the maps and calibrates its thresholds after the weight transforms have run. Its
+sparse Triton kernel reads dense floating-point weights, so it combines with transforms that leave the remaining maps
+dense, such as removing whole layers (`depth_prune`). Packed low-bit weights (`quant`) and 2:4 sparse weights
+(`prune`) are refused, and `economize.incompatibility("teal", "quant")` gives the reason; with `backend="dense"`
+TEAL runs as the masked reference next to them, which saves nothing. It also excludes the other activation-sparsity
+techniques (`cats`, `dejavu`) and `rotate`, which would change the inputs that the thresholds were calibrated on.
+Here four layers are removed with ShortGPT before TEAL is calibrated:
 
 ```python
-from economize.techniques.quant import QuantConfig
+from economize.techniques.prune import DepthPruneConfig
 
-print(economize.compatible("teal", "quant"), economize.compatible("teal", "rotate"))
+print(economize.compatible("teal", "depth_prune"), economize.compatible("teal", "quant"))
 base = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B", dtype=torch.bfloat16, device_map="cuda")
-model = economize.apply(base, QuantConfig(format="int4", method="gptq", group_size=128),
+model = economize.apply(base, DepthPruneConfig(method="shortgpt", num_blocks=4),
                         TealConfig(sparsity=0.4, prefill="second_half"), calibration=calibration)
 print(perplexity(model, windows))
 ```

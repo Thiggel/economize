@@ -70,32 +70,36 @@ base model named in the checkpoint and attaches the technique to it.
 `calibration` argument, a `[N, S]` tensor of token ids, an iterable of batches or a callable:
 
 ```python
-from economize.techniques.prune import PruneConfig
-from economize.techniques.quant import QuantConfig
+from economize.techniques.kv_quant import FP8KVConfig
+from economize.techniques.prune import DepthPruneConfig
 from economize.techniques.sparsity import TealConfig
 
 model.detach()
 calibration = ids.repeat(4, 1)
 model = economize.apply(
     base,
-    PruneConfig(method="wanda", sparsity="2:4", semi_structured=False),  # 2:4 masks in dense weights
-    QuantConfig(format="int8", method="rtn"),                   # int8 weights on the best installed kernel
-    TealConfig(sparsity=0.4),                                   # activation sparsity
-    Eagle3Config(),                                             # a drafter
+    DepthPruneConfig(method="shortgpt", num_blocks=2),  # two decoder layers removed
+    TealConfig(sparsity=0.4),                           # activation sparsity
+    FP8KVConfig(),                                      # an fp8 KV cache
+    Eagle3Config(),                                     # a drafter
     calibration=calibration,
 )
 ```
 
-By default `PruneConfig` stores 2:4 weights as sparse tensors for the sparse tensor cores and `QuantConfig`
-picks the best installed low-bit kernel (`backend="auto"`). Sparse tensors cannot be quantized afterwards, so a
-recipe that quantizes pruned weights keeps the masks in dense weights with `semi_structured=False`, which
-`economize.backend_support` reports as simulated for the pruning step.
+Each technique saves memory or time through its own kernel. `TealConfig` skips the weight columns of near-zero
+activations in a sparse Triton kernel that reads dense floating-point weights, `QuantConfig` picks the best installed
+low-bit kernel (`backend="auto"`) and `PruneConfig` stores 2:4 weights as sparse tensors for the sparse tensor cores.
+economize refuses pairs whose kernels do not fit together, so activation sparsity combines with layer pruning, as
+above, and a model with int4 or 2:4 sparse weights takes a drafter and a KV technique instead.
+`economize.incompatibility("teal", "quant")` returns the reason of such a refusal, and
+`economize.backend_support(config)` tells whether a technique saves for real on a backend or only simulates its
+numerics.
 
 The order of the arguments does not matter. economize first applies the weight transforms (depth pruning, pruning,
 low-rank factorization, then quantization), followed by activation hooks, KV-cache techniques, dynamic depth, the
 drafter and any remaining techniques. Each technique calibrates on the model as it is at that point, so quantization,
-for example, sees the already pruned weights. `economize.compatible("eagle3", "kivi")` tells whether two techniques
-can share a model, and [Techniques](techniques.md) lists every technique with its family and backends.
+for example, sees the already pruned weights. `economize.compatible("eagle3", "kv_fp8")` tells whether two
+techniques can share a model, and [Techniques](techniques.md) lists every technique with its family and backends.
 
 `model.detach()` removes every technique and leaves the base model as it was. Techniques that rewrite the base
 weights in place (pruning, quantization, low-rank factorization) cannot be detached, and `detach()` raises an error
