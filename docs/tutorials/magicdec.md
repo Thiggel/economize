@@ -12,9 +12,10 @@ Every cycle's exact pass reads the whole cache and keeps the longest prefix of d
 decoding is lossless. Nothing is trained.
 
 In economize each draft step runs every layer with the base weights. The full-attention layers read the view, and
-sliding-window, chunked and recurrent layers run unchanged since their reads are already bounded. The view is an
-attention mask over the shared cache, so the drafter saves no memory, and only the `economize` attention kernel turns
-it into skipped reads. [Long-context drafting](../long_context_draft.md) describes the views of MagicDec and
+sliding-window, chunked and recurrent layers run unchanged since their reads are already bounded. A draft layer
+gathers the `budget` entries of the view from the shared cache and attends over them alone, so its attention FLOPs
+and KV reads stay fixed as the prompt grows, on every attention implementation. The cache itself is shared with the
+exact pass, so the drafter saves no memory. [Long-context drafting](../long_context_draft.md) describes the views of MagicDec and
 [TriForce](triforce.md) side by side.
 
 ## Setup
@@ -50,26 +51,38 @@ print(result.cost_summary())
 Every draft step runs all layers, so `relative_layer_tokens` in the cost summary is above one. The saving lies in
 the KV reads, which the call log does not count, and timings on a GPU measure it.
 
-## Skipped reads
+## Gathered and masked views
 
-On `sdpa` and `eager` attention the masked slots are still read. `apply` raises a `SimulatedPathWarning`, and
-`simulation()` names the reason. The `economize` attention kernel skips every block of keys that the view hides from
-all queries, which makes the saving real, and `simulation()` then returns `None`:
+By default (`view="gathered"`) a draft layer writes its new keys and values to the cache as usual and then attends
+over a copy of the `sinks + window` entries of the view, gathered with the matching columns of the attention mask.
+`simulation()` returns `None`. A chain step reads the same slots in every layer, so the slots and the gathered mask
+are computed once per step.
+A tree step gathers the sinks and the `window - 1 + T` slots that hold every window its `T` nodes can see.
+
+`view="masked"` is the numerical reference: the layer reads its whole cache and the mask hides the entries outside
+the view. Both views attend over the same entries, so they draft the same tokens up to the summation order. On `sdpa`
+and `eager` attention the masked entries are still read, so `apply` raises a `SimulatedPathWarning` and
+`simulation()` names the reason. The `economize` attention kernel skips every block of keys that the mask hides from
+all queries, which makes the masked view's saving real as well:
 
 ```python
+import dataclasses
+
 import economize.attention
 
-print(model.techniques["magicdec"].simulation())
+masked_config = dataclasses.replace(MagicDecConfig(budget=512, sinks=4), view="masked")
+print(model.techniques["magicdec"].simulation())  # None
 model.detach()
 
 economize.attention.install()
 base.set_attn_implementation("economize")
-model = economize.apply(base, MagicDecConfig(budget=512, sinks=4), decoding=economize.DecodeConfig(cycle_length=5))
+model = economize.apply(base, masked_config, decoding=economize.DecodeConfig(cycle_length=5))
 print(model.techniques["magicdec"].simulation())  # None
 result = model.decode(prompt[0], 64)
 ```
 
-On a CPU the kernel falls back to `sdpa`, so the tokens are the same and nothing is skipped.
+On a CPU the kernel falls back to `sdpa`, so the tokens are the same and nothing is skipped. See
+[long-context drafting](../long_context_draft.md#cost) for the cost of both views.
 
 ## Decoding options
 
@@ -104,8 +117,9 @@ result = model.decode(prompt[0], 64)
 
 ## Differences from the official code
 
-MagicDec's own engine compacts a StreamingLLM cache for the drafter and batches long-context requests. economize
-applies the same drafting rule to the shared cache, through the ordinary cycle loop, which also decodes batches.
+MagicDec's own engine keeps a separate, compacted StreamingLLM cache for the drafter and batches long-context
+requests. economize gathers the view's entries from the shared cache in every draft layer, which reads the same
+number of entries without a second cache, through the ordinary cycle loop, which also decodes batches.
 
 ## Serving
 

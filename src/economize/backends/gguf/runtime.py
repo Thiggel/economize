@@ -143,6 +143,10 @@ _REFUSALS: dict[str, tuple[Role, str]] = {
                                 "differs from economize's Jacobi lookahead"),
     "pard": (Role.DRAFTER, "llama.cpp drafts autoregressively; PARD's parallel mask-token drafts need a custom "
                            "forward"),
+    "magicdec": (Role.DRAFTER, "llama.cpp drafts with a separate draft model or by prompt lookup; it has no hook "
+                              "that drafts with the target itself on a StreamingLLM view of its KV cache"),
+    "triforce": (Role.DRAFTER, "llama.cpp drafts with a separate draft model or by prompt lookup; it has no hook "
+                              "that drafts with the target itself on retrieved chunks of its KV cache"),
     "frspec": (Role.DRAFT_OPTION, "llama.cpp has no reduced draft vocabulary"),
     "draft_quant": (Role.DRAFT_OPTION, "quantize the draft LM's GGUF instead (llama-quantize draft.gguf)"),
     "kv_fp8": (Role.KV_CACHE, "llama.cpp has no fp8 KV cache (its cache types are f16, bf16, q8_0, q4_0, ...)"),

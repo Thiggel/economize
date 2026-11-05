@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING, ClassVar
 
 from ...core.config import TechniqueConfig
 from ...errors import ConfigError
-from ...validation import check_non_negative, check_positive
+from ...validation import check_non_negative, check_positive, check_registered
 from .path import sparse_layers
+from .views import DRAFT_VIEWS
 
 if TYPE_CHECKING:
     from ...arch import ArchAdapter
@@ -38,16 +39,22 @@ class MagicDecConfig(TechniqueConfig):
     Attributes:
         budget: KV entries one draft query reads in a full-attention layer (sinks plus window).
         sinks: Leading positions every draft query reads (StreamingLLM's attention sinks).
+        view: How a full-attention layer reads the budget (:data:`~.views.DRAFT_VIEWS`). ``"gathered"`` gathers the
+            budget's entries, so the draft attention reads ``budget`` entries per query at any context length;
+            ``"masked"`` is the numerical reference, which masks the other entries and saves their reads only on
+            economize attention.
     """
 
     technique: ClassVar[str] = "magicdec"
 
     budget: int = 512
     sinks: int = 4
+    view: str = "gathered"
 
     def __post_init__(self) -> None:
         check_positive("budget", self.budget)
         check_non_negative("sinks", self.sinks)
+        check_registered("draft view", self.view, DRAFT_VIEWS)
         if self.sinks >= self.budget:
             raise ConfigError(f"sinks={self.sinks} leaves no window in budget={self.budget}")
 
@@ -73,19 +80,24 @@ class TriForceConfig(TechniqueConfig):
     Attributes:
         budget: Prompt slots one draft query reads per KV head in a full-attention layer, besides the always-kept
             tail (``budget // chunk_size`` chunks).
-        chunk_size: Slots per retrieval chunk. economize's decode kernel skips a block of keys only when every slot
-            of the block is hidden, so chunks of 64 slots (its largest key block) turn the selection into skipped
-            reads; smaller chunks select more finely.
+        chunk_size: Slots per retrieval chunk.
+        view: How a full-attention layer reads the selection (:data:`~.views.DRAFT_VIEWS`). ``"gathered"`` gathers
+            the selected chunks and the tail, so the draft attention reads ``budget`` prompt entries plus the tail
+            at any prompt length; ``"masked"`` is the numerical reference, which masks the other entries and saves
+            their reads only on economize attention (whose decode kernel skips a 64-slot key block when the mask
+            hides all of it).
     """
 
     technique: ClassVar[str] = "triforce"
 
     budget: int = 4096
     chunk_size: int = 64
+    view: str = "gathered"
 
     def __post_init__(self) -> None:
         check_positive("budget", self.budget)
         check_positive("chunk_size", self.chunk_size)
+        check_registered("draft view", self.view, DRAFT_VIEWS)
         if self.budget < self.chunk_size:
             raise ConfigError(f"budget={self.budget} holds no chunk of chunk_size={self.chunk_size}")
 
