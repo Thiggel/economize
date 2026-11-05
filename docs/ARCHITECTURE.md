@@ -451,6 +451,14 @@ exact passes, with and without compression.
   are never reassigned (rotary is applied before caching). Score-based methods read attention probabilities
   from eager attention or, under SDPA, from `kv_evict.tap.AttentionTap`, a `TorchFunctionMode` that recomputes
   the probabilities of fused calls in fp32 during exact passes. New methods register in `EVICTION_METHODS`.
+- Positional methods store compactly by default (`EVICTION_STORAGES`, `storage="compact"`):
+  `kv_evict.compact.CompactWindowCache` owns the K/V of its covered layers in buffers of
+  `sinks + recent + headroom + 1` physical slots and maps logical slot `s` to `s` below the sinks and to a ring
+  position above them; the last slot takes the writes of padding. The inner cache allocates no buffer for those
+  layers (`KVCacheWrapper.owned_buffers`, and `positional_buffers()` hands CUDA graphs zero-stride stand-ins of
+  logical shape). It keeps the logical keep mask of the masked storage, so both decode the same tokens, and
+  reorder, gather (trees), rollback and restart act on the physical buffers. New storages register an
+  `EvictionStorage`.
 
 ### 3.5 Dynamic depth (`LayerPolicy`)
 

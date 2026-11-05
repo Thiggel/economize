@@ -70,6 +70,14 @@ the simulated paths remain as explicit references that `economize.backend_suppor
 
 ### Decoding
 
+- `kv_evict` with `method="streaming"` frees the evicted entries: the default `storage="compact"` keeps the sinks
+  and a ring of `recent + headroom` entries per covered layer (`CompactWindowCache`), under spec decoding, trees,
+  batching, chunked prefill and CUDA graphs, with the tokens of the masked storage. `storage="masked"` is the
+  simulated reference, which the score-based methods keep; compact storage falls back to it next to another KV
+  technique, under other attention implementations and for shared or copied KV layers. A chunked prompt must fit
+  into `recent + headroom` entries and a verify pass into `headroom`, or a `ConfigError` names the headroom.
+- StreamingLLM trims the cache to the window at the end of the prompt pass, so draft steps after the prompt see
+  only the sinks and the window, as in the reference (outputs at `cycle_length=1` are unchanged).
 - `draft_policy="dynamic_tree"`: EAGLE-2 dynamic draft trees for every drafter that implements tree steps
   (EAGLE-3, early exit, FR-Spec), under CUDA graphs ([docs/dynamic_tree.md](docs/dynamic_tree.md)).
 - `draft_policy="sequoia"` (static trees from Sequoia's dynamic program, with the hardware-aware size and depth and

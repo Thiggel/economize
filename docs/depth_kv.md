@@ -15,7 +15,7 @@ economize ships twelve lossy techniques that act while the model decodes. Six ch
 | `kivi_fused` | as `kivi`, read by an attention kernel that dequantizes the 2/4/8-bit codes in registers | the same values as `kivi` (bit for bit), attention reads packed codes plus fp16 scales instead of dense K/V; needs `attn_implementation="economize"` | nothing |
 | `kv_fp8` | the `fp8` cache dtype of vLLM and TensorRT-LLM; formats from Micikevicius et al. (2022, arXiv 2209.05433) | every K/V entry stored as an 8-bit float | nothing |
 | `kv_fp8_fused` | as `kv_fp8` (`scale="none"`), read by an attention kernel that decodes fp8 in registers | the same bytes as `kv_fp8`, handed to attention without the upcast copy; needs `attn_implementation="economize"` | nothing |
-| `kv_evict`, `method="streaming"` | StreamingLLM (Xiao et al., ICLR 2024; arXiv 2309.17453) | attention sinks plus a recent window | nothing |
+| `kv_evict`, `method="streaming"` | StreamingLLM (Xiao et al., ICLR 2024; arXiv 2309.17453) | attention sinks plus a recent window, by default in buffers of `sinks + recent + headroom + 1` slots that free the evicted entries (`storage="masked"` keeps them, simulated) | nothing |
 | `kv_evict`, `method="h2o"` | H2O (Zhang et al., NeurIPS 2023; arXiv 2306.14048) | a recent window plus the heavy hitters of accumulated attention | nothing |
 | `kv_evict`, `method="h2o_prefill"` | H2O as KVCache-Factory runs it (`H2OKVCluster`) | the heavy hitters of the prompt attention plus the last prompt entries, chosen once at prefill | nothing |
 | `kv_evict`, `method="snapkv"` | SnapKV (Li et al., NeurIPS 2024; arXiv 2404.14469) | compresses the prompt once from an observation window | nothing |

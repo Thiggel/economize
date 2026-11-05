@@ -18,9 +18,12 @@ Positional methods (StreamingLLM) evict the same slots of every head, a range th
 frontier. Their caches (:class:`WindowEvictionCache`) keep one cut per row on the host and on the device
 instead of keep masks: no pass boundary reads the device, and the wrapper is CUDA-graph safe.
 
-Eviction is simulated. The buffers keep every entry, positions are not reassigned, and the byte accounting
-(:class:`~economize.techniques._kv.wrapper.RowStats`) counts the entries that remain visible, as a cache that
-frees evicted slots would hold them.
+How the kept entries are stored is the config's ``storage`` (:data:`~.storage.EVICTION_STORAGES`). Positional
+methods default to ``"compact"`` (:class:`~.compact.CompactWindowCache`): every covered layer keeps the sinks and a
+ring of the recent entries in buffers bounded by the budget, so eviction frees memory. Score-based methods, and
+positional ones with ``storage="masked"``, keep every entry in the dense buffers and only mask the evicted ones,
+which simulates the saving; positions are never reassigned. Either way the byte accounting
+(:class:`~economize.techniques._kv.wrapper.RowStats`) counts the entries that remain visible.
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ from ...runtime.transfer import device_tensor
 from ...validation import check_choice, check_layers, check_non_negative, check_options, check_positive
 from .._kv import CacheWrapper, KVCacheTechnique, SlotStore, check_positional, find_wrapper, innermost, layer_indices
 from .policies import EVICTION_METHODS, EvictionMethod, PassInfo
+from .storage import EVICTION_STORAGES
 from .tap import AttentionTap
 
 if TYPE_CHECKING:
@@ -74,6 +78,14 @@ class KVEvictConfig(TechniqueConfig):
         beta: PyramidKV: ratio of the bottom layer's prompt budget to the top layer's (about ``2 beta - 1``; 20 as
             in the paper and KVCache-Factory).
         layers: 1-indexed layers whose cache is evicted (empty: every layer).
+        storage: Name in :data:`~.storage.EVICTION_STORAGES`: ``"compact"`` (only the kept entries are stored,
+            positional methods only) or ``"masked"`` (every entry stays in the dense cache, evicted ones are masked:
+            simulated). ``None`` picks ``"compact"`` for positional methods and ``"masked"`` otherwise, and falls
+            back to ``"masked"`` where compact storage cannot run (another KV-cache technique in the recipe, shared
+            caches across layers, trainable layer copies, an attention other than ``"sdpa"`` or ``"eager"``).
+        headroom: Compact storage: ring slots beyond ``recent`` for the uncommitted tokens of one cycle (a verify
+            pass and the drafts before it, a rollback, a prefill chunk). A longer cycle raises
+            :class:`~economize.ConfigError`.
 
     The method options (:attr:`method_options`) that the chosen method does not read
     (:attr:`EvictionMethod.options <economize.techniques.kv_evict.EvictionMethod.options>`) must keep their defaults.
@@ -93,6 +105,18 @@ class KVEvictConfig(TechniqueConfig):
     pooling: str = "max"
     beta: int = 20
     layers: tuple[int, ...] = ()
+    storage: str | None = None
+    headroom: int = 256
+    #: Whether the plain eviction caches may store this config's entries compactly (subclasses with caches of
+    #: their own set it to ``False``).
+    compactable: ClassVar[bool] = True
+
+    @property
+    def eviction_storage(self) -> str:
+        """The storage the config asks for: :attr:`storage`, or the default of its method."""
+        if self.storage is not None:
+            return self.storage
+        return "compact" if self.compactable and EVICTION_METHODS.get(self.method).positional else "masked"
 
     def __post_init__(self) -> None:
         check_choice("method", self.method, tuple(EVICTION_METHODS.names()))
@@ -108,6 +132,16 @@ class KVEvictConfig(TechniqueConfig):
         check_positive("beta", self.beta)
         check_layers(self.layers)
         check_options(self, f"method={self.method!r}", EVICTION_METHODS.get(self.method).options, self.method_options)
+        check_positive("headroom", self.headroom)
+        if self.storage is not None:
+            check_choice("storage", self.storage, tuple(EVICTION_STORAGES.names()))
+            if self.storage != "masked" and not self.compactable:
+                raise ConfigError(f"{type(self).__name__} keeps its own storage: storage must be 'masked' or None")
+            if EVICTION_STORAGES.get(self.storage).positional_only and not EVICTION_METHODS.get(self.method).positional:
+                raise ConfigError(
+                    f"storage={self.storage!r} needs a positional eviction method (such as 'streaming'), "
+                    f"got method={self.method!r}"
+                )
 
     def validate(self, adapter: ArchAdapter) -> None:
         check_layers(self.layers, adapter)
@@ -430,11 +464,11 @@ class WindowEvictionCache(EvictionCache):
     """The cache of one generation under a :attr:`positional <.policies.EvictionMethod.positional>` method.
 
     Such a method evicts, in every covered layer and KV head, the slots ``sinks <= slot < cut[b]`` of row ``b``,
-    where ``cut[b]`` is the largest :meth:`~.policies.EvictionMethod.window_cut` of the row's exact-pass frontiers so
-    far. The cache keeps these cuts as a host list and as a ``[B]`` device tensor and builds the hidden range of an
-    attention mask from them, so it needs no keep masks, its pass boundaries read nothing back from the device, and
-    its byte accounting is computed on the host. It decodes exactly as :class:`EvictionCache` with the method's
-    keep masks.
+    where ``cut[b]`` is the largest :meth:`~.policies.EvictionMethod.window_cut` of the row's exact-pass frontiers and
+    prompt-pass ends so far. The cache keeps these cuts as a host list and as a ``[B]`` device tensor and builds the
+    hidden range of an attention mask from them, so it needs no keep masks, its pass boundaries read nothing back
+    from the device, and its byte accounting is computed on the host. It decodes exactly as :class:`EvictionCache`
+    with the method's keep masks.
 
     Over the static cache of CUDA graphs the wrapper lives as long as the cache: one cut tensor per batch size (at a
     fixed address that the recorded mask reads), refilled at every pass boundary, and attention always applies the
@@ -447,6 +481,7 @@ class WindowEvictionCache(EvictionCache):
         self._static = self.wraps_static_cache
         self._cuts: list[int] = [0] * inner.batch_size
         self._cut_sets: dict[int, torch.Tensor] = {}  # per batch size: the device cuts
+        self._prompt_end: list[int] | None = None  # during a prompt pass: its ends, cut when it ends
 
     @property
     def masks_attention(self) -> bool:
@@ -465,9 +500,23 @@ class WindowEvictionCache(EvictionCache):
         self.evicted = self.evicted or any(cut > self.method.sinks for cut in self._cuts)
         self._sync()
         self.account(frontier, self._window_bytes)
+        self._prompt_end = self._pass_ends() if current_phase() == "prefill" else None
 
     def pass_end(self) -> None:
-        pass
+        ends, self._prompt_end = self._prompt_end, None
+        if ends is None:
+            return
+        self._cuts = [cut if end == 0 else max(cut, self.method.window_cut(end)) for cut, end in zip(self._cuts, ends)]
+        self.evicted = self.evicted or any(cut > self.method.sinks for cut in self._cuts)
+        self._sync()
+
+    def _pass_ends(self) -> list[int]:
+        """One past the last slot the pass writes in every row (``0`` for padding rows)."""
+        slots = self.active_slots
+        if slots.dim() == 1:
+            slots = slots[None].expand(self.inner.active_batch_size, -1)
+        real = slots != self.trash_slot
+        return torch.where(real, slots + 1, torch.zeros_like(slots)).amax(1).tolist()
 
     def _device(self) -> torch.device | None:
         keys = getattr(innermost(self.inner), "keys", None)
@@ -563,7 +612,8 @@ class KVEvictTechnique(KVCacheTechnique):
     See :class:`KVEvictConfig`. Training-free; no parameters.
 
     A :attr:`positional <.policies.EvictionMethod.positional>` method (StreamingLLM) gets a
-    :class:`WindowEvictionCache` and runs under CUDA graphs; the others keep per-head keep masks and decode eagerly.
+    :class:`~.compact.CompactWindowCache` (or, with ``storage="masked"``, a :class:`WindowEvictionCache`) and runs
+    under CUDA graphs; the others keep per-head keep masks and decode eagerly. :attr:`storage` is the storage in use.
     """
 
     name: ClassVar[str] = KVEvictConfig.technique
@@ -572,7 +622,6 @@ class KVEvictTechnique(KVCacheTechnique):
         family=Family.KV_EVICTION,
         saves=Saving.KV_MEMORY | Saving.COMPUTE,
         lossless=False,
-        simulated=Simulation(Saving.KV_MEMORY | Saving.COMPUTE, "masks the evicted entries, which stay in the cache"),
     )
     order: ClassVar[int] = 20
     config: KVEvictConfig
@@ -584,11 +633,32 @@ class KVEvictTechnique(KVCacheTechnique):
             self.graph_safe = True  # type: ignore[misc]  # per method, see WindowEvictionCache
         self.running: EvictionCache | None = None  # the cache of the decoder layer that is running
         self._handles: list[Any] = []
+        self.storage = config.eviction_storage
+
+    @classmethod
+    def simulation_for(cls, config: TechniqueConfig | None = None) -> Simulation | None:
+        resolved = config if config is not None else cls.config_class
+        if not getattr(resolved, "compactable", False):  # duo_attention's defaults cannot even be built
+            return super().simulation_for(config)
+        if isinstance(resolved, type):
+            resolved = resolved()
+        assert isinstance(resolved, KVEvictConfig)
+        return cls._storage_simulation(resolved.eviction_storage)
+
+    def simulation(self) -> Simulation | None:
+        if not self.config.compactable:
+            return super().simulation()
+        return self._storage_simulation(self.storage)
+
+    @classmethod
+    def _storage_simulation(cls, storage: str) -> Simulation | None:
+        simulation = EVICTION_STORAGES.get(storage).simulation
+        return simulation.within(cls.info.saves) if simulation is not None else None
 
     def make_wrapper(self, cache: KVCache) -> CacheWrapper:
-        if self.method.positional:
-            return WindowEvictionCache(cache, self)
-        return EvictionCache(cache, self)
+        if isinstance(cache, CacheWrapper) and self.storage != "masked":  # another wrapper owns the buffers
+            return EVICTION_STORAGES.get("masked").factory(cache, self)
+        return EVICTION_STORAGES.get(self.storage).factory(cache, self)
 
     def query_group(self, cache_layer: int) -> int:
         """Query heads that share one KV head in cache layer ``cache_layer`` (0-indexed)."""
@@ -596,7 +666,26 @@ class KVEvictTechnique(KVCacheTechnique):
         return geometry.heads // geometry.kv_heads
 
     def attach(self, model: nn.Module, adapter: ArchAdapter, context: AttachContext | None = None) -> None:
+        if self.storage != "masked":
+            reason = self._compact_blocker(adapter, context or AttachContext())
+            if reason is not None and self.config.storage is not None:
+                raise ConfigError(f"storage={self.storage!r} cannot run here: {reason}; use storage='masked'")
+            if reason is not None:
+                self.storage = "masked"
         self._install()
+
+    def _compact_blocker(self, adapter: ArchAdapter, context: AttachContext) -> str | None:
+        """Why compact storage cannot run on this model and recipe (``None`` if it can)."""
+        others = [t.name for t in context.techniques if t is not self and isinstance(t, KVCacheTechnique)]
+        if others:
+            return f"another KV-cache technique ({', '.join(others)}) wraps the same cache"
+        if adapter.attn_implementation not in ("sdpa", "eager"):
+            return f"it needs attn_implementation 'sdpa' or 'eager', got {adapter.attn_implementation!r}"
+        if any(adapter.kv_source(index) != index for index in range(1, adapter.num_layers + 1)):
+            return "layers share caches"
+        if context.layer_copies():
+            return "the recipe runs trainable layer copies, which the eviction hooks do not reach"
+        return None
 
     def detach(self) -> None:
         for handle in self._handles:

@@ -12,9 +12,21 @@ prompt entry, the scores are pooled over neighbouring slots, and the `heavy` bes
 together with the window. PyramidKV (Cai et al., 2024) makes the same selection with a budget that shrinks linearly
 from the bottom layer to the top, at the same total. Every policy is lossy and trains nothing.
 
-economize simulates eviction with a keep mask per layer and KV head, which it intersects with the attention mask of
-every layer, in exact passes and draft steps alike. The buffers keep every entry and positions are not reassigned.
-The byte accounting counts the entries that stay visible, as a cache that frees the evicted slots would hold them.
+StreamingLLM frees the evicted entries. With the default `storage="compact"` the covered layers keep their K/V in
+buffers of `sinks + recent + headroom + 1` slots instead of the dense cache: the sinks, a ring of recent entries
+that wraps in place, and one slot that absorbs the writes of padding. The `headroom` (default 256) holds the
+uncommitted entries of a pass, so a verify pass of a drafter, a tree or a prompt chunk must fit into it, and the
+whole prompt must fit into `recent + headroom` when it is fed in chunks; a pass that would overwrite entries it
+still attends to raises a `ConfigError` that names the headroom. Positions are not reassigned, so the output equals
+the masked storage token for token (`tests/techniques/test_kv_evict_compact.py` checks greedy tokens and byte counts
+for plain decoding, drafting, trees, batching and chunked prefill, and CUDA graphs reuse the buffers).
+
+The score-based methods keep every entry and simulate eviction with a keep mask per layer and KV head, which is
+intersected with the attention mask of every layer, in exact passes and draft steps alike. `storage="masked"` asks
+for the same reference for StreamingLLM. Compact storage also falls back to it when the recipe holds another KV
+technique (a KV quantizer, which stores the dense buffers), when the attention implementation is not `sdpa` or
+`eager`, or when layers share or copy their KV; an explicit `storage="compact"` is then refused. The byte accounting
+counts the entries that stay visible, as a cache that frees the evicted slots would hold them.
 [Compacted eviction](kv_evict_fused.md) copies the kept prompt entries into compact buffers, so that the attention of a
 decoding step reads only them.
 
@@ -81,7 +93,8 @@ attention implementations are refused for these methods. StreamingLLM needs no s
 
 SnapKV, PyramidKV and `h2o_prefill` select once from the prompt, so their output does not depend on the cycle length
 of a drafter. StreamingLLM and H2O evict at exact-pass boundaries, which a drafter spaces by the number of accepted
-tokens, so their output depends on the cycle. At `cycle_length=1` all of them equal the output above.
+tokens, so their output depends on the cycle. StreamingLLM also trims the cache to the window when the prompt pass
+ends, so the draft steps after the prompt already see only the sinks and the window. At `cycle_length=1` all of them equal the output above.
 
 ## Combining with other techniques
 

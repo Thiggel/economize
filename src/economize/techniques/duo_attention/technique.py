@@ -67,6 +67,7 @@ class DuoAttentionConfig(KVEvictConfig):
     """
 
     technique: ClassVar[str] = "duo_attention"
+    compactable: ClassVar[bool] = False  # its cache keeps the dense buffers, see the technique's simulation
     pattern: str | tuple[tuple[float, ...], ...] = ()
     sparsity: float | None = 0.5
     threshold: float | None = None
@@ -228,8 +229,9 @@ class DuoAttentionTechnique(KVEvictTechnique):
         lossless=False,
         simulated=Simulation(
             Saving.KV_MEMORY,
-            "keeps the streaming heads' evicted entries in the cache (the decode kernel of "
-            "attn_implementation=\"economize\" skips them, other attention implementations mask them)",
+            "keeps the streaming heads' evicted entries in the cache, since a layer's buffer holds all its KV heads "
+            "and its retrieval heads keep every entry (the decode kernel of attn_implementation=\"economize\" skips "
+            "the evicted entries, other attention implementations mask them)",
         ),
     )
     config: DuoAttentionConfig
