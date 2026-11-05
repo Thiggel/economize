@@ -49,14 +49,34 @@ the selection step) and refuses `eager`.
 
 ## Cost
 
-The views are attention masks over the shared cache. economize does not build a second, compacted cache, so the
-drafters save no memory and the masked reads still happen under `sdpa` and `eager`. On these paths the saving is
-only simulated, and `technique.simulation()` says so (a `SimulatedPathWarning` is raised at `apply`). With
-`attn_implementation="economize"` the decode kernel skips every key block whose slots are hidden from all queries of a
-KV-head program, which turns the views into real skipped reads. A key block holds up to 64 slots, so TriForce's
-default `chunk_size=64` aligns its chunks with the kernel's blocks; smaller chunks select more finely and skip less.
-`simulation()` returns `None` on the economize kernel. The call log of the cycle loop counts layer calls and does not
-count KV reads, so timings on hardware are the measure of the saving.
+Each draft layer with a view writes its new keys and values to the shared cache and then, by default
+(`view="gathered"`), attends over a copy of only its view's entries, gathered from the cache together with the
+matching columns of the attention mask. Its attention FLOPs and the KV bytes it reads therefore scale with the
+budget and not with the context, under `sdpa`, `eager` and `economize` attention alike, and `technique.simulation()`
+returns `None`. The exact pass of every cycle reads the whole cache, which is what keeps the decoding lossless. The
+drafters save no memory, since the cache stays whole for the exact pass.
+
+MagicDec gathers the `sinks` and the `budget - sinks` window slots in a chain step, the same slots for every layer, so
+they and the gathered mask are computed once per step; a tree step of `T` nodes gathers the sinks and the
+`window - 1 + T` slots that hold every window its nodes can see. TriForce gathers, per KV head, its `budget` chunk
+slots and a tail: the rest of the prompt after its last whole chunk, the generated positions and the slack of the
+cache up to the generation's capacity. The tail's width is about the number of new tokens plus the spread of the
+batch's prompt lengths, rounded up to a multiple of 64 slots (adding fewer than 64 or a quarter of the width) so that
+similar generations share CUDA graphs, and the selection step pays one host synchronization to fix it. TriForce falls
+back to the masked view when the chunks and the tail would be no fewer entries than the whole cache (a short prompt),
+when a row of the batch is not valid at the selection, and on a cache that shares every entry between the heads.
+DeepSeek-V2/V3's multi-head latent attention caches one latent per position for all heads, so each KV head cannot
+read its own chunks there; `simulation()` says so for such a model. MagicDec's view is the same for every head and
+gathers on these models too.
+
+`view="masked"` keeps the earlier behaviour as the numerical reference: the layer reads the whole cache and the mask
+hides the entries outside the view. Both views attend over the same entries and draft the same tokens up to the
+summation order (`tests/unit/test_sparse_kv_draft.py` compares their drafts and their draft logits). On `sdpa` and
+`eager` the masked entries are still read, so the saving is only simulated, `technique.simulation()` names the reason
+and `apply` raises a `SimulatedPathWarning`. With `attn_implementation="economize"` the decode kernel skips every key
+block whose slots are hidden from all queries of a KV-head program, which turns the masked view's saving into real
+skipped reads as well. A key block holds up to 64 slots, so TriForce's default `chunk_size=64` aligns its chunks with
+the kernel's blocks; smaller chunks select more finely and skip less.
 
 ## Differences from the official code
 
@@ -70,13 +90,18 @@ count KV reads, so timings on hardware are the measure of the saving.
   others) equals the official one for multi-head attention; `tests/unit/test_sparse_kv_draft.py` compares it with a
   transcription of `RetrievalCache.init_graph_cache` (Infini-AI-Lab/TriForce @ 164c8c0, `models/cache.py`).
 - The official code keeps a separate compacted cache of `max_budget` slots and appends the generated tokens to it.
-  economize keeps every generated slot visible in the view, so the draft reads `budget` prompt slots plus the
-  generated ones.
+  economize gathers the chunks and the tail from the shared cache at every draft layer, so the draft reads `budget`
+  prompt slots plus the tail (the generated slots and the prompt rest after the last whole chunk) and no second
+  cache is kept.
 - MagicDec's own engine compacts a StreamingLLM cache and batches long-context requests. economize reproduces the
-  drafting rule on the shared cache, with batch support through the ordinary cycle loop.
+  drafting rule on the shared cache by gathering the sinks and the window at every draft layer, with batch support
+  through the ordinary cycle loop.
 
 ## Serving
 
 vLLM and SGLang do not serve either drafter (`economize.backends.vllm.serving.sparse_kv_draft` and the SGLang
 counterpart hold the reasons). Their proposers draft with a separate model that owns its KV cache, and no proposer
-hook runs the target over a sparse view of its paged cache. The HF decoder runs both.
+hook runs the target over a sparse view of its paged cache. llama.cpp (`gguf`) drafts only with a separate draft
+model or by prompt lookup and mlx_lm (`mlx`) only with a separate draft model. The ONNX export has no drafting loop
+and the TensorRT-LLM export has no model for these drafters, so `economize.backend_support` reports all of them as
+unsupported. The HF decoder runs both.

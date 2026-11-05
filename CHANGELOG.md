@@ -52,9 +52,14 @@
   drafters, under CUDA graphs ([docs/tree_search.md](docs/tree_search.md)). `DecodeConfig.draft_policy_options`
   now stores lists as tuples.
 - `magicdec` and `triforce`: long-context self-speculation, the base model drafting on a StreamingLLM or a
-  chunk-retrieval view of its own KV cache (full-attention layers only), lossless, with tree steps and CUDA graphs;
-  the saving is real on `attn_implementation="economize"` and simulated on sdpa / eager. Not served on vLLM or
-  SGLang ([docs/long_context_draft.md](docs/long_context_draft.md)).
+  chunk-retrieval view of its own KV cache (full-attention layers only), lossless, with tree steps and CUDA graphs.
+  By default (`view="gathered"`) each draft layer attends over a gathered copy of its view's entries (MagicDec's sinks
+  and window, TriForce's chunks and a tail of the prompt rest and the generated slots), so the draft's attention
+  FLOPs and KV reads scale with the budget on every attention implementation; the full cache stays for the exact
+  pass. `view="masked"` is the reference that masks the other entries (real on `attn_implementation="economize"`,
+  simulated on sdpa / eager). TriForce falls back to the masked view on multi-head latent attention caches
+  (DeepSeek-V2/V3), which share every entry between the heads. Not served on vLLM, SGLang, llama.cpp or mlx_lm
+  ([docs/long_context_draft.md](docs/long_context_draft.md)).
 - Tensor parallelism: economize decodes transformers `tp_plan` models (`torch.distributed`). The exact path, the
   early-exit drafters (frozen, LoRA and full copy) and chain verification run on the sharded layers,
   lossless against whole-model greedy decoding (tested in fp32 over two CPU processes). CUDA graphs over NCCL

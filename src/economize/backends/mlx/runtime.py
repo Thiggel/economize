@@ -125,6 +125,10 @@ _REFUSALS: dict[str, tuple[Role, str]] = {
     "eagle3": (Role.DRAFTER, "mlx_lm has no EAGLE-3 draft head (it drafts with a separate model)"),
     "medusa": (Role.DRAFTER, "mlx_lm has no Medusa heads (it drafts with a separate model)"),
     "vendor_mtp": (Role.DRAFTER, "mlx_lm drops multi-token-prediction layers"),
+    "magicdec": (Role.DRAFTER, "mlx_lm drafts with a separate draft model (--draft-model); it has no hook that "
+                              "drafts with the target itself on a StreamingLLM view of its KV cache"),
+    "triforce": (Role.DRAFTER, "mlx_lm drafts with a separate draft model (--draft-model); it has no hook that "
+                              "drafts with the target itself on retrieved chunks of its KV cache"),
     "frspec": (Role.DRAFT_OPTION, "mlx_lm has no reduced draft vocabulary"),
     "draft_quant": (Role.DRAFT_OPTION, "quantize the draft LM itself (economize.apply(draft, QuantConfig(...)))"),
     "kv_fp8": (Role.KV_CACHE, "MLX has no fp8 KV cache (its --kv-bits cache is integer, per token)"),
