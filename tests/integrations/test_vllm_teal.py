@@ -59,7 +59,7 @@ def _base(folder: Path) -> Any:
 
 
 def _teal(folder: Path, *others: Any, **config: Any) -> Any:
-    options = {"sparsity": 0.5, "allocation": "uniform", **config}
+    options = {"sparsity": 0.5, "allocation": "uniform", "backend": "dense", **config}  # float32 HF reference
     return economize.apply(_base(folder), *others, TealConfig(**options), calibration=CALIBRATION)
 
 

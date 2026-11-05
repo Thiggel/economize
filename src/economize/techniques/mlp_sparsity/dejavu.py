@@ -35,7 +35,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 
 from ...core.calibration import LayerwiseCalibration, calibration_source, token_batches
-from ...core.metadata import Family, KernelChoice, Saving, TechniqueInfo
+from ...core.metadata import Family, KernelChoice, Saving, Simulation, TechniqueInfo
 from ...core.technique import Capability, Technique, register_technique
 from ...errors import UnsupportedModelError
 from ...train.objective import (
@@ -47,7 +47,7 @@ from ...train.objective import (
     register_objective,
 )
 from ..sparsity.sparsify import track_layer_tokens
-from .backends import MLP_SPARSITY_BACKENDS, MlpOps
+from .backends import MLP_SPARSITY_BACKENDS, MlpOps, fallback_simulation
 from .config import DejaVuConfig
 from .mlp import GatedMlp, MlpPatch, dense_first_half, ffn_width, gated_mlps, masked, topk_mask
 
@@ -204,6 +204,7 @@ class DejaVuTechnique(Technique):
     def attach(self, model: nn.Module, adapter: Any, context: Any = None) -> None:
         self.config.validate(adapter)
         self.detach()  # the fit reads the dense MLPs
+        MLP_SPARSITY_BACKENDS.get(self.config.backend)().check(gated_mlps(adapter, self.config))
         if self.config.fit_steps > 0 and not bool(self.fitted):
             self.fit(token_batches(calibration_source(context, self.name)))
         self.install()
@@ -221,6 +222,12 @@ class DejaVuTechnique(Technique):
             self._patches.append(MlpPatch(mlp, partial(self._rule, index), backend.ops(mlp), policy))
             self._patches.append(mlp.module.register_forward_pre_hook(partial(self._record, index, mlp)))
         self._patches += track_layer_tokens(self.adapter.layers)
+
+    def simulation(self) -> Simulation | None:
+        """The backend's simulation, or the dense fallback of an installed backend on MLPs its kernels cannot serve
+        (:attr:`.backends.MlpOps.realized`)."""
+        ops = [patch.ops for patch in self._patches if isinstance(patch, MlpPatch)]
+        return super().simulation() or fallback_simulation(ops, self.info.saves)
 
     def detach(self) -> None:
         for patch in self._patches:

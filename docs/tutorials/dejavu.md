@@ -15,9 +15,12 @@ not implemented. The result is lossy.
 
 The predictors are fitted at attach time, layer by layer, on the base model's activations for the calibration
 tokens (`fit_steps` Adam steps per layer), and the objective `dejavu` trains them further. The weights are untouched,
-so `detach()` restores the base model. The `dense` backend masks around the dense maps, which reproduces the quality
-and saves nothing, and the `triton` backend reads only the kept weights for calls of up to 16 rows on 16-bit CUDA
-weights. `prefill` chooses which calls are sparsified, as for TEAL, and by default only decoding and draft steps are.
+so `detach()` restores the base model. The default backend `auto` runs the Triton kernels of CATS, which read only
+the kept rows of the gate and up maps and the kept columns of the down map in batch-1 decoding, with launch
+parameters timed per map shape. It needs CUDA, Triton and bfloat16 or float16 weights, and raises `ConfigError`
+otherwise. `backend="dense"` masks around the dense maps, which reproduces the quality, saves nothing and reports
+itself in `model.simulations()`. On a CPU, pass `DejaVuConfig(..., backend="dense")` to run the examples of this
+page. `prefill` chooses which calls are sparsified, as for TEAL, and by default only decoding and draft steps are.
 
 ## Setup
 
@@ -84,11 +87,21 @@ print(perplexity(model, windows))
 
 ## Kernels
 
+The kernels and their dispatch are those of [CATS](cats.md#kernels): one-row calls run the tuned kernels, larger
+calls run them only when the tuned multi-row kernel beats the dense matmul, and calls of more than 16 rows take the
+dense path.
+
 <!-- not run: needs a CUDA GPU -->
 ```python
-model = economize.apply(base, DejaVuConfig(sparsity=0.5, backend="triton"), calibration=calibration)
+model = economize.apply(base, DejaVuConfig(sparsity=0.5), calibration=calibration)   # backend="auto"
 out = model.generate(ids, max_new_tokens=128)
 ```
+
+The kernels skip half of the weight reads of all three maps, but every decode step also runs the low-rank
+predictor of every layer and selects the top channels. With the default rank of 1000 this costs more than the
+kernels save: a decode step of OLMo-3-7B under a CUDA graph at position 256 takes 10.9 ms dense and 15.1 ms with
+Deja Vu at 50% (0.72x), against 16.6 ms for the masked dense reference. A smaller `rank` lowers the cost of the
+predictors and their recall of the active channels.
 
 ## Saving and loading
 

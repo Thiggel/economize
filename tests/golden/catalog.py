@@ -143,17 +143,18 @@ def _width_prune_minitron() -> Tensors:
 # ---- decode-time techniques without a drafter ----------------------------------------------------------------------
 @golden("teal_50")
 def _teal() -> Tensors:
-    return decode_after(TealConfig(sparsity=0.5, greedy_step=0.1, greedy_batches=2), calibrate=True)
+    return decode_after(TealConfig(sparsity=0.5, greedy_step=0.1, greedy_batches=2, backend="dense"), calibrate=True)
 
 
 @golden("cats_50")
 def _cats() -> Tensors:
-    return decode_after(CatsConfig(sparsity=0.5), calibrate=True)
+    return decode_after(CatsConfig(sparsity=0.5, backend="dense"), calibrate=True)
 
 
 @golden("dejavu_50")
 def _dejavu() -> Tensors:
-    return decode_after(DejaVuConfig(sparsity=0.5, rank=16, fit_steps=20, fit_batch=128), calibrate=True)
+    config = DejaVuConfig(sparsity=0.5, rank=16, fit_steps=20, fit_batch=128, backend="dense")
+    return decode_after(config, calibrate=True)
 
 
 @golden("kv_kivi_2bit")

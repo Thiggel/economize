@@ -10,10 +10,13 @@ thresholds of different layers do not depend on each other. The paper follows th
 fine-tuning, and economize implements the training-free variant. The result is lossy.
 
 The technique patches the MLP forward and leaves the weights untouched, so `detach()` restores the base model. The
-`dense` backend masks the activation in front of the dense maps, which reproduces the quality of CATS and saves
-nothing. The saving comes from the `triton` backend, which reads only the kept rows and columns for calls of up to
-16 rows on 16-bit CUDA weights. `prefill` chooses which calls are sparsified, as for TEAL. By default, prefill and
-the exact passes of speculative decoding stay dense and only decoding and draft steps are sparsified.
+default backend `auto` runs Triton kernels that read only the kept rows of the up map and the kept columns of the
+down map in batch-1 decoding (see [Kernels](#kernels)). It needs CUDA, Triton and bfloat16 or float16 weights, and
+raises `ConfigError` otherwise. `backend="dense"` masks the activation in front of the dense maps, which reproduces
+the quality of CATS, saves nothing and reports itself in `model.simulations()`. On a CPU, pass
+`CatsConfig(..., backend="dense")` to run the examples of this page. `prefill` chooses which calls are sparsified,
+as for TEAL. By default, prefill and the exact passes of speculative decoding stay dense and only decoding and
+draft steps are sparsified.
 
 ## Setup
 
@@ -73,14 +76,24 @@ print(perplexity(base, windows))
 
 ## Kernels
 
+The default `auto` backend times the launch parameters of both kernels once per map shape and device and caches
+them for the process. A call of one row runs the tuned kernels, and calls of 2 to 16 rows run them only when the
+tuned multi-row kernel beats the dense matmul. Calls of more than 16 rows, which include prefill, CPU tensors and
+training take the dense path, which is exact and saves nothing. While the backend is attached it stores the down
+weights transposed, and `detach()` restores them. `triton` runs the same kernels with heuristic launch parameters
+for any call of up to 16 rows.
+
 <!-- not run: needs a CUDA GPU -->
 ```python
-model = economize.apply(base, CatsConfig(sparsity=0.5, backend="triton"), calibration=calibration)
+model = economize.apply(base, CatsConfig(sparsity=0.5), calibration=calibration)   # backend="auto"
 out = model.generate(ids, max_new_tokens=128)
 ```
 
-Calls with more than 16 rows, CPU tensors and training take the dense path. While the `triton` backend is attached it
-stores the down weights transposed, and `detach()` restores them.
+On an H100 NVL at one row and half of the channels kept, the tuned row kernel runs the up map of a
+Llama-3-8B-shaped MLP (14336 by 4096) at 1.72x the speed of the dense cuBLAS matrix-vector product and the
+column-skipping down map at 1.71x. The gate map stays dense, so the MLP saves about a third of its weight reads. A
+full decode step of OLMo-3-7B under a CUDA graph at position 256 takes 10.9 ms dense and 10.7 ms with CATS at 50%
+(1.02x), and the masked dense reference takes 11.6 ms.
 
 ## Saving and loading
 

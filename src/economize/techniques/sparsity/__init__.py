@@ -1,5 +1,6 @@
 """Activation sparsity: TEAL magnitude thresholds on the inputs of the linear maps (Liu et al., ICLR 2025)."""
 
+from .auto_backend import AutoBackend
 from .backends import TEAL_BACKENDS, DenseBackend, Installed, TealBackend
 from .config import TEAL_ALLOCATIONS, TealConfig
 from .model import SparsityMeter, TealCalibration, calibrate_teal, install_teal, measure_sparsity, teal_modules
@@ -25,6 +26,7 @@ __all__ = [
     "PREFILL_MODES",
     "TEAL_ALLOCATIONS",
     "TEAL_BACKENDS",
+    "AutoBackend",
     "AutotuneTritonBackend",
     "DenseBackend",
     "GreedyStep",

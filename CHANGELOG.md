@@ -81,6 +81,14 @@
   on vLLM's FlashAttention (FA3 on Hopper, FA2 on Ampere / Ada) when the mask is causal over a prefix.
 - `quant` backend `machete` (vLLM's Machete int4 / int8 weight-only GEMM on Hopper; affine int8 refused).
 - TEAL backends `triton` (fused-threshold sparse GEMV) and `triton_autotune` (per-shape launch configurations).
+- Activation sparsity runs its sparse kernels by default. `teal`, `cats` and `dejavu` default to `backend="auto"`,
+  which runs the Triton kernels with launch parameters timed per map shape on the device (`RowTuner` for the
+  row-masked GEMV of CATS / Deja Vu, `AutotuneTritonBackend` for the column-skipping GEMV) and raises `ConfigError`
+  without CUDA, Triton or 16-bit weights. A map whose tuned multi-row kernel loses to the dense matmul sends calls
+  of more than one row to the dense path (`KernelPlan`). `backend="dense"` is the explicit masked reference and
+  reports SIMULATED in `simulations()` and `backend_support`. On an H100 NVL at one row and 50% sparsity the tuned
+  TEAL GEMV runs the maps of a Llama-3-8B-shaped model at 1.30-1.71x the dense cuBLAS GEMV and the row kernel its up
+  map at 1.72x.
 - 2:4 pruning storage kernels as a registry (`SEMI_STRUCTURED_KERNELS`) with a per-shape `auto` timing policy.
 
 ### Quantization
@@ -152,6 +160,9 @@
 
 ### Fixes
 
+- The default configs of `teal`, `cats` and `dejavu` no longer save nothing: the former default `backend="dense"`
+  only masked the activations in front of dense maps while the transformers support entry reported REAL. The
+  default is now `"auto"` (see Kernels), and `"dense"` declares itself simulated.
 - `generate` with a draft tree (for example `draft_policy="dynamic_tree"`) no longer fails: the
   selector built from history-free logits processors (temperature, top-k, top-p, min-p, typical, epsilon, eta,
   suppressed tokens) now selects and returns distributions for many rows at once.

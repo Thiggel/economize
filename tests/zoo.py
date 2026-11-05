@@ -112,8 +112,8 @@ def _datastore(assets: Path) -> str:
 
 _SPECIMENS: dict[str, Callable[[Path], TechniqueConfig]] = {
     "calm": lambda _: CalmConfig(),
-    "cats": lambda _: CatsConfig(),
-    "dejavu": lambda _: DejaVuConfig(rank=8, fit_steps=5, fit_batch=32),
+    "cats": lambda _: CatsConfig(backend="dense"),
+    "dejavu": lambda _: DejaVuConfig(rank=8, fit_steps=5, fit_batch=32, backend="dense"),
     "depth_prune": lambda _: DepthPruneConfig(),
     "dflash": lambda _: DFlashConfig(),
     "dmtd": lambda _: DmtdConfig(decoding_layers=2),
@@ -160,7 +160,7 @@ _SPECIMENS: dict[str, Callable[[Path], TechniqueConfig]] = {
     "skipdecode": lambda _: SkipDecodeConfig(),
     "slicegpt": lambda _: SliceGPTConfig(),
     "suffix_decoding": lambda _: SuffixDecodingConfig(),
-    "teal": lambda _: TealConfig(),
+    "teal": lambda _: TealConfig(backend="dense"),
     "triforce": lambda _: TriForceConfig(budget=8, chunk_size=2),
     "vendor_mtp": lambda _: VendorMTPConfig(),
     "width_prune": lambda _: WidthPruneConfig(),

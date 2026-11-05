@@ -54,7 +54,7 @@ def _base(folder: Path) -> Any:
 def _lowrank(folder: Path, *others: Any, **teal: Any) -> Any:
     configs: list[Any] = [LowRankConfig(method="svd", compression=0.5), *others]
     if teal:
-        configs.append(TealConfig(**{"sparsity": 0.5, "allocation": "uniform", **teal}))
+        configs.append(TealConfig(**{"sparsity": 0.5, "allocation": "uniform", "backend": "dense", **teal}))
     return economize.apply(_base(folder), *configs, calibration=CALIBRATION)
 
 

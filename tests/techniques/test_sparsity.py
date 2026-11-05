@@ -119,7 +119,7 @@ def test_config_validation(kwargs: dict) -> None:
 
 def test_config_validate_rejects_missing_layer(tiny2, adapter_of) -> None:
     with pytest.raises(ConfigError):
-        TealConfig(layers=(3,)).validate(adapter_of(tiny2))
+        TealConfig(layers=(3,), backend="dense").validate(adapter_of(tiny2))
 
 
 # ---- model level ---------------------------------------------------------------------------------------------------
@@ -127,9 +127,9 @@ def test_config_validate_rejects_missing_layer(tiny2, adapter_of) -> None:
 
 def test_teal_modules_order_and_selection(tiny2, adapter_of) -> None:
     adapter = adapter_of(tiny2)
-    keys = list(teal_modules(adapter, TealConfig()))
+    keys = list(teal_modules(adapter, TealConfig(backend="dense")))
     assert len(keys) == 2 * 7 and keys[0].startswith("1.") and keys[-1].startswith("2.")
-    selected = teal_modules(adapter, TealConfig(layers=(2,), targets=("mlp.*",), exclude=("*down*",)))
+    selected = teal_modules(adapter, TealConfig(layers=(2,), targets=("mlp.*",), exclude=("*down*",), backend="dense"))
     assert sorted(selected) == ["2.mlp.gate_proj", "2.mlp.up_proj"]
 
 
@@ -137,7 +137,7 @@ def test_teal_modules_order_and_selection(tiny2, adapter_of) -> None:
 @pytest.mark.parametrize("target", [0.25, 0.5])
 def test_calibrated_sparsity_matches_target(tiny2, adapter_of, calib, held_out, allocation: str, target: float) -> None:
     adapter = adapter_of(tiny2)
-    config = TealConfig(sparsity=target, allocation=allocation, prefill="all", **FAST)
+    config = TealConfig(sparsity=target, allocation=allocation, prefill="all", **FAST, backend="dense")
     batches = token_batches(calib)
     calibration = calibrate_teal(adapter, config, batches)
     # Greedy overshoots by at most one move: step * hidden**2 / layer parameters.
@@ -163,7 +163,9 @@ def test_greedy_allocation_beats_uniform(tiny_factory, adapter_of, calib, held_o
         reference = model(held_out).logits
         errors = {}
         for allocation in ("uniform", "greedy"):
-            config = TealConfig(sparsity=0.5, allocation=allocation, prefill="all", greedy_step=0.1, greedy_batches=1)
+            config = TealConfig(
+                sparsity=0.5, allocation=allocation, prefill="all", greedy_step=0.1, greedy_batches=1, backend="dense"
+            )
             calibration = calibrate_teal(adapter, config, token_batches(calib[:4]))
             installed, _ = install_teal(adapter, calibration.thresholds, config)
             errors[allocation] = (model(held_out).logits - reference).pow(2).mean().item()
@@ -173,7 +175,7 @@ def test_greedy_allocation_beats_uniform(tiny_factory, adapter_of, calib, held_o
 
 def test_install_and_remove_restore_logits_exactly(tiny2, adapter_of, calib, held_out) -> None:
     adapter = adapter_of(tiny2)
-    config = TealConfig(sparsity=0.5, allocation="uniform", prefill="all")
+    config = TealConfig(sparsity=0.5, allocation="uniform", prefill="all", backend="dense")
     reference = tiny2(held_out).logits
     installed, live = install_teal(adapter, calibrate_teal(adapter, config, token_batches(calib)).thresholds, config)
     sparse = tiny2(held_out).logits
@@ -188,7 +190,7 @@ def test_install_and_remove_restore_logits_exactly(tiny2, adapter_of, calib, hel
 
 def test_dense_prefill_sparsifies_only_single_token_calls(tiny2, adapter_of, calib, held_out) -> None:
     adapter = adapter_of(tiny2)
-    config = TealConfig(sparsity=0.5, allocation="uniform")  # prefill="dense", the default
+    config = TealConfig(sparsity=0.5, allocation="uniform", backend="dense")  # prefill="dense", the default
     step = held_out[:, :1]
     dense_prompt, dense_step = tiny2(held_out).logits, tiny2(step).logits
     installed, _ = install_teal(adapter, calibrate_teal(adapter, config, token_batches(calib)).thresholds, config)
@@ -201,7 +203,7 @@ def test_dense_prefill_sparsifies_only_single_token_calls(tiny2, adapter_of, cal
 
 def test_install_skips_dense_maps(tiny2, adapter_of) -> None:
     adapter = adapter_of(tiny2)
-    config = TealConfig()
+    config = TealConfig(backend="dense")
     keys = list(teal_modules(adapter, config))
     thresholds = {key: (0.0 if i % 2 else 0.1) for i, key in enumerate(keys)}
     installed, live = install_teal(adapter, thresholds, config)
@@ -217,7 +219,7 @@ def test_technique_attach_detach_and_state_round_trip(tiny2, adapter_of, calib, 
     from economize.techniques.sparsity import TealTechnique
 
     adapter = adapter_of(tiny2)
-    config = TealConfig(sparsity=0.4, allocation="greedy", prefill="all", **FAST)
+    config = TealConfig(sparsity=0.4, allocation="greedy", prefill="all", **FAST, backend="dense")
     reference = tiny2(held_out).logits
     technique = TealTechnique(config, adapter)
     assert not technique.calibrated
@@ -243,7 +245,7 @@ def test_technique_needs_calibration_data(tiny2, adapter_of, attach_context) -> 
     from economize.techniques.sparsity import TealTechnique
 
     adapter = adapter_of(tiny2)
-    technique = TealTechnique(TealConfig(), adapter)
+    technique = TealTechnique(TealConfig(backend="dense"), adapter)
     with pytest.raises(ConfigError, match="calibration"):
         technique.attach(tiny2, adapter, attach_context(None))
     assert technique.capabilities == Capability.ACTIVATIONS and not technique.lossless
@@ -254,13 +256,13 @@ def test_loading_state_after_attach_reinstalls_hooks(tiny2, adapter_of, calib, h
     from economize.techniques.sparsity import TealTechnique
 
     adapter = adapter_of(tiny2)
-    config = TealConfig(sparsity=0.5, allocation="uniform", prefill="all")
+    config = TealConfig(sparsity=0.5, allocation="uniform", prefill="all", backend="dense")
     first = TealTechnique(config, adapter)
     first.attach(tiny2, adapter, attach_context(calib))
     target = tiny2(held_out).logits
     state = first.state_dict()
     first.detach()
-    second = TealTechnique(TealConfig(sparsity=0.25, allocation="uniform", prefill="all"), adapter)
+    second = TealTechnique(TealConfig(sparsity=0.25, allocation="uniform", prefill="all", backend="dense"), adapter)
     second.attach(tiny2, adapter, attach_context(calib))
     second.load_state_dict(state)
     assert torch.equal(tiny2(held_out).logits, target)
@@ -282,7 +284,7 @@ def test_weight_and_activation_stack_end_to_end(tiny2, adapter_of, calib, held_o
     prune_model(adapter, PruneConfig(method="wanda", sparsity=0.3), batches)
     lowrank_model(adapter, LowRankConfig(compression=0.1, targets=("mlp.*",)), batches)
     quantize_model(adapter, QuantConfig(format="int4", method="gptq", group_size=32), batches)
-    config = TealConfig(sparsity=0.25, allocation="uniform", prefill="all")
+    config = TealConfig(sparsity=0.25, allocation="uniform", prefill="all", backend="dense")
     installed, _ = install_teal(adapter, calibrate_teal(adapter, config, batches).thresholds, config)
     stacked = nll(tiny2, held_out)
     installed.remove()
@@ -324,7 +326,7 @@ def test_lossless_decoding_with_empty_drafts_matches_dense_greedy() -> None:
         model = economize.apply(
             base,
             LookupConfig(max_ngram=3),
-            TealConfig(sparsity=0.9, allocation="uniform"),
+            TealConfig(sparsity=0.9, allocation="uniform", backend="dense"),
             decoding=DecodeConfig(cycle_length=4),
             calibration=calib,
         )
@@ -339,7 +341,7 @@ def test_lossless_decoding_with_empty_drafts_matches_dense_greedy() -> None:
 def _moe_with_teal(prefill: str) -> tuple[nn.Module, object, TealConfig, object]:
     model = make_family_model("qwen2_moe")
     adapter = adapter_for(model)
-    config = TealConfig(sparsity=0.5, allocation="uniform", prefill=prefill)
+    config = TealConfig(sparsity=0.5, allocation="uniform", prefill=prefill, backend="dense")
     calib = torch.randint(3, VOCAB, (4, 16), generator=torch.Generator().manual_seed(0))
     installed, _ = install_teal(adapter, calibrate_teal(adapter, config, token_batches(calib)).thresholds, config)
     return model, adapter, config, installed
@@ -353,16 +355,16 @@ def test_flattened_inputs_of_decoding_steps_are_sparsified(name: str) -> None:
 
 
 def test_policy_from_config_strings() -> None:
-    assert TealConfig().policy == PhasePolicy()
-    assert TealConfig(prefill="all").policy == PhasePolicy(prefill="all", refresh="all", outside="all")
+    assert TealConfig(backend="dense").policy == PhasePolicy()
+    assert TealConfig(prefill="all", backend="dense").policy == PhasePolicy(prefill="all", refresh="all", outside="all")
     custom = PhasePolicy(draft="dense")
-    assert TealConfig(prefill=custom).policy is custom
-    assert TealConfig(prefill={"refresh": "second_half"}).policy == PhasePolicy(refresh="second_half")
-    assert TealConfig.from_dict(TealConfig(prefill=custom).to_dict()).policy == custom
+    assert TealConfig(prefill=custom, backend="dense").policy is custom
+    assert TealConfig(prefill={"refresh": "second_half"}, backend="dense").policy == PhasePolicy(refresh="second_half")
+    assert TealConfig.from_dict(TealConfig(prefill=custom, backend="dense").to_dict()).policy == custom
     with pytest.raises(ConfigError):
         PhasePolicy(decode="half")
     with pytest.raises(ConfigError):
-        TealConfig(prefill="half")
+        TealConfig(prefill="half", backend="dense")
 
 
 def test_policy_modes_by_phase() -> None:
@@ -413,7 +415,7 @@ def test_summary_uses_block_sparsity(tiny2, calib, attach_context) -> None:
     from economize.techniques.sparsity import TealTechnique
 
     adapter = adapter_for(tiny2)
-    technique = TealTechnique(TealConfig(sparsity=0.4), adapter)
+    technique = TealTechnique(TealConfig(sparsity=0.4, backend="dense"), adapter)
     technique.attach(tiny2, adapter, attach_context(calibration=calib))
     try:
         sizes = {k: m.weight.numel() for k, m in teal_modules(adapter, technique.config).items()}
@@ -428,7 +430,7 @@ def test_loaded_thresholds_update_the_installed_hooks_in_place(tiny2, calib, att
     from economize.techniques.sparsity import TealTechnique
 
     adapter = adapter_for(tiny2)
-    technique = TealTechnique(TealConfig(sparsity=0.4), adapter)
+    technique = TealTechnique(TealConfig(sparsity=0.4, backend="dense"), adapter)
     technique.attach(tiny2, adapter, attach_context(calibration=calib))
     try:
         installed, live = technique._installed, dict(technique._live)

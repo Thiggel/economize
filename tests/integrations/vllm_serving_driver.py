@@ -224,7 +224,7 @@ def _recipes() -> dict[str, Callable[[Any, Any, argparse.Namespace], Any]]:
 
     def teal(*extra: Any, **config: Any) -> Callable[[Any, Any, argparse.Namespace], Any]:
         def build(base: Any, tok: Any, args: argparse.Namespace) -> Any:
-            options = {"sparsity": 0.5, "allocation": "uniform", **config}
+            options = {"sparsity": 0.5, "allocation": "uniform", "backend": "dense", **config}  # calibration only
             return economize.apply(base, *extra, TealConfig(**options), calibration=_calibration(tok))
 
         return build

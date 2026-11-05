@@ -12,7 +12,9 @@ shape; the storage is replaced, never duplicated) and replaces the map's ``forwa
 
 Both paths give the numbers of the ``"dense"`` backend up to bfloat16 rounding of the accumulation order. Maps the
 kernel cannot serve (a quantized or tensor-subclass weight, float32, a CPU map) get the masking pre-hook of the
-``"dense"`` backend. :meth:`Installed.remove` restores the row-major storage and the original ``forward``.
+``"dense"`` backend and are listed in :attr:`Installed.masked`, so the technique reports their saving as simulated;
+the default backend ``"auto"`` (:mod:`.auto_backend`) refuses such maps instead. :meth:`Installed.remove` restores
+the row-major storage and the original ``forward``.
 
 With several rows a weight row is read when any row keeps its channel. Independent rows at 40-50% sparsity keep
 nearly every channel from four rows on, and the kernel then runs at the speed of the dense matmul; rows with a common
@@ -35,22 +37,29 @@ from .backends import TEAL_BACKENDS, DenseBackend, Installed, TealBackend
 from .sparsify import PhasePolicy, layer_tokens, sparsify, sparsify_tokens
 from .teal_gemv import MAX_ROWS, GemvConfig, teal_gemv, triton_available
 
-__all__ = ["TritonBackend", "kernel_eligible"]
+__all__ = ["TritonBackend", "kernel_eligible", "kernel_ineligibility"]
 
 _KERNEL_DTYPES = (torch.bfloat16, torch.float16)
 
 
-def kernel_eligible(module: nn.Module) -> bool:
-    """Whether the kernel can serve ``module``: an ``nn.Linear`` with a plain 16-bit CUDA weight."""
+def kernel_ineligibility(module: nn.Module) -> str | None:
+    """Why the kernel cannot serve ``module`` (a few words), or ``None`` when it can: an ``nn.Linear`` with a plain
+    two-dimensional bfloat16 or float16 weight on a CUDA device."""
     weight = getattr(module, "weight", None)
-    return (
-        isinstance(module, nn.Linear)
-        and isinstance(weight, Tensor)
-        and type(weight.data) is Tensor
-        and weight.dim() == 2
-        and weight.is_cuda
-        and weight.dtype in _KERNEL_DTYPES
-    )
+    if not isinstance(module, nn.Linear):
+        return f"a {type(module).__name__}, not an nn.Linear"
+    if not isinstance(weight, Tensor) or type(weight.data) is not Tensor or weight.dim() != 2:
+        return f"a {type(weight.data if isinstance(weight, Tensor) else weight).__name__} weight (quantized or packed)"
+    if not weight.is_cuda:
+        return f"a weight on {weight.device.type}"
+    if weight.dtype not in _KERNEL_DTYPES:
+        return f"a {str(weight.dtype).removeprefix('torch.')} weight (the kernel takes bfloat16 or float16)"
+    return None
+
+
+def kernel_eligible(module: nn.Module) -> bool:
+    """Whether the kernel can serve ``module`` (:func:`kernel_ineligibility` finds no reason against it)."""
+    return kernel_ineligibility(module) is None
 
 
 def _call_mode(x: Tensor, policy: PhasePolicy) -> str:
@@ -133,7 +142,7 @@ class TritonBackend(TealBackend):
             handles.append(patch)
         if rest:
             handles += DenseBackend().install(rest, thresholds, policy).handles
-        return Installed(cast(list[RemovableHandle], handles))
+        return Installed(cast(list[RemovableHandle], handles), masked=tuple(rest))
 
     def configure(self, patch: _KernelPatch) -> None:
         """Choose the launch parameters of one installed map (:attr:`_KernelPatch.configs`,

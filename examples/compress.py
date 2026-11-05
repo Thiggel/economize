@@ -35,7 +35,8 @@ METHODS = {
     "gptq-int4": lambda: QuantConfig(format="int4", method="gptq", group_size=128, act_order=True),
     "awq-int4": lambda: QuantConfig(format="int4", method="awq", group_size=128),
     "fp8": lambda: QuantConfig(format="fp8", group_size=None),
-    "teal-40": lambda: TealConfig(sparsity=0.4),
+    # The sparse TEAL kernel needs a 16-bit CUDA model; on a CPU the masked dense reference gives the same perplexity.
+    "teal-40": lambda: TealConfig(sparsity=0.4, backend="auto" if torch.cuda.is_available() else "dense"),
 }
 
 

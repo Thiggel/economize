@@ -43,8 +43,12 @@ class MlpSparsityConfig(TechniqueConfig):
         prefill: Which tokens each kind of call sparsifies, as for TEAL (:class:`~..sparsity.sparsify.PhasePolicy`, the
             mapping of its fields, or ``"dense"``, ``"second_half"`` or ``"all"`` for the exact passes and the
             multi-token calls outside decoding; decoding and drafting steps are always sparsified with a string).
-        backend: Registered kernel backend (``"dense"``: masks around the unchanged dense maps, the numerical
-            reference; ``"triton"``: row- and column-sparse GEMV kernels for calls of up to 16 rows).
+        backend: Registered kernel backend. ``"auto"`` (default): row- and column-sparse Triton GEMV kernels for
+            decoding calls of up to 16 rows, the exact dense masked maps for larger calls (prefill), and a
+            :class:`~economize.errors.ConfigError` at attach time when the kernels cannot serve an MLP (no CUDA or
+            Triton, float32 or quantized weights), :mod:`.auto_backend`. ``"dense"``: masks around the unchanged
+            dense maps, the numerical reference on any device, which only simulates the saving. ``"triton"``: the
+            kernels of ``"auto"`` with a dense masked fallback on maps they cannot serve.
         layers: 1-indexed layers to sparsify; empty means all.
         mlp: Attribute of a decoder layer that holds the gated MLP.
         gate: Attribute of the MLP holding the gate map.
@@ -57,7 +61,7 @@ class MlpSparsityConfig(TechniqueConfig):
 
     sparsity: float = 0.5
     prefill: str | PhasePolicy = "dense"
-    backend: str = "dense"
+    backend: str = "auto"
     layers: tuple[int, ...] = ()
     mlp: str = "mlp"
     gate: str = "gate_proj"

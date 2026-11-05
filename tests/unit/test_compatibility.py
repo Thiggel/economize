@@ -22,6 +22,7 @@ from economize.techniques.jump import JumpConfig
 from economize.techniques.kv_quant import KIVIConfig
 from economize.techniques.prune import PruneConfig
 from economize.techniques.quant import DraftQuantConfig, QuantConfig
+from economize.techniques.sparsity import TealConfig
 from helpers import make_tiny_model
 
 JUMP = JumpConfig(target_layer=2, source_layer=4)
@@ -101,9 +102,14 @@ def test_backends_are_reported() -> None:
     assert {"transformers", "vllm", "sglang"} <= set(economize.backend_support("jump"))
 
 
-@pytest.mark.parametrize("name", ["teal", "kivi", "kv_evict", "prune", "quant"])
-def test_simulated_hugging_face_paths_are_reported(name: str) -> None:
-    support = economize.backend_support(name)["transformers"]
+SIMULATED_BY_DEFAULT = ["kivi", "kv_evict", "prune", "quant"]
+
+
+@pytest.mark.parametrize(
+    "name", [TealConfig(backend="dense"), *SIMULATED_BY_DEFAULT], ids=["teal-dense", *SIMULATED_BY_DEFAULT]
+)
+def test_simulated_hugging_face_paths_are_reported(name: object) -> None:
+    support = economize.backend_support(name)["transformers"]  # type: ignore[arg-type]
     assert support.status is SupportStatus.SIMULATED
     assert support.simulation is not None and "saves no" in support.detail
 
