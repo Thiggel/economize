@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections import OrderedDict, deque
+from collections import deque
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -38,8 +38,10 @@ class KnapSpecDrafter(SelfDrafter):
     current set; the step proposes ``plan.draft_length`` tokens per cycle at most (the loop's ``cycle_length`` and
     ``min_confidence`` may stop it earlier).
 
-    With CUDA graphs every skip set gets its own graphed step (a graph records the kernels of one set); the
-    ``max_graphs`` most recently used are kept.
+    With CUDA graphs every skip set gets its own graphed step (a graph records the kernels of one set). The first
+    ``max_graphs`` skip sets searched over a cache are graphed; later ones draft eagerly. No graph is dropped while
+    the decoder's other graphs live: all of them share one memory pool, and the decoder drops them together when it
+    rebuilds its cache, after which the next skip sets are graphed again.
 
     Attributes:
         last_search: What the latest search computed (``None`` before the first).
@@ -52,7 +54,8 @@ class KnapSpecDrafter(SelfDrafter):
         super().__init__(technique, runner)
         self._history: deque[SearchTokens] = deque(maxlen=technique.config.history)
         self._wrap: Callable[[Callable[..., Any]], Callable[..., Any]] | None = None
-        self._graphs: OrderedDict[tuple[tuple[int, ...], tuple[int, ...]], GraphedStep] = OrderedDict()
+        self._graphs: dict[tuple[tuple[int, ...], tuple[int, ...]], GraphedStep] = {}
+        self._eager_step = GraphedStep(self._step)  # skip sets beyond ``max_graphs``
         self._searched_at: int | None = None
         self.last_search: SearchStats | None = None
         self.searches = 0
@@ -62,6 +65,8 @@ class KnapSpecDrafter(SelfDrafter):
         return (0,)
 
     def begin(self, runner: LayerRunner, cache: KVCache, batch_size: int) -> None:
+        if cache is not self._cache:  # the decoder dropped the graphs of the old cache (or has none yet)
+            self._graphs.clear()
         super().begin(runner, cache, batch_size)
         self._history.clear()
         self._searched_at = None
@@ -132,22 +137,19 @@ class KnapSpecDrafter(SelfDrafter):
         request.footprint = draft_footprint(self)
 
     def _select_graph(self, key: tuple[tuple[int, ...], tuple[int, ...]]) -> None:
-        """Route the draft steps through the graphed step of skip set ``key`` (recorded on first use)."""
+        """Route the draft steps through the graphed step of skip set ``key`` (recorded on first use), or through
+        the eager step once ``max_graphs`` skip sets have graphed steps.
+
+        A graphed step is never reset here: that would destroy its graphs inside the memory pool which the
+        decoder's exact-pass graphs share and keep replaying. The decoder resets all of them together.
+        """
         if self._wrap is None:
             return
-        if key in self._graphs:
-            self._graphs.move_to_end(key)
-        else:
-            step = GraphedStep(self._step)
+        step = self._graphs.get(key)
+        if step is None and len(self._graphs) < self.technique.config.max_graphs:
+            step = self._graphs[key] = GraphedStep(self._step)
             step.enable(self._wrap)
-            self._graphs[key] = step
-            while len(self._graphs) > self.technique.config.max_graphs:
-                _, old = self._graphs.popitem(last=False)
-                device = torch.device(self.technique.adapter.device)
-                if device.type == "cuda":  # no replay of the evicted graphs may still be in flight
-                    torch.cuda.synchronize(device)
-                old.reset()
-        self._step_fn = self._graphs[key]
+        self._step_fn = step if step is not None else self._eager_step
 
 
 def _gather(tensor: torch.Tensor, index: torch.Tensor) -> torch.Tensor:

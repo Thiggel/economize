@@ -3,9 +3,10 @@
 KnapSpec weighs every sublayer by its latency in a one-token draft step. The paper measures the MLP once and the
 attention at several context lengths per hardware and fits the attention linearly in the context length.
 :func:`measure_latency` does the same on the model as it decodes: it times layer calls with only the attention (or
-only the MLP) of a ``[B, 1, d]`` query, replayed from a CUDA graph when it can be captured (the draft steps replay
-graphs too), else eagerly between CUDA events (``time.perf_counter`` on the CPU). The query writes its K/V to the
-cache's trash slot, so the cache keeps its contents. The fit averages the attention over the distinct attention
+only the MLP) of a ``[B, 1, d]`` query, queued back to back between CUDA events (``time.perf_counter`` on the CPU).
+No CUDA graph is recorded: the measurement runs in the middle of a generation, next to the decoder's graphs, and a
+capture there (with a memory pool of its own that is released right after) is avoided. The query writes its K/V
+to the cache's trash slot, so the cache keeps its contents. The fit averages the attention over the distinct attention
 patterns of the model (Gemma's sliding and global layers) weighted by how many layers use each.
 """
 
@@ -20,7 +21,6 @@ from typing import TYPE_CHECKING
 import torch
 
 from ...runtime.context import ContextLayout
-from ...runtime.graphs import capture
 
 if TYPE_CHECKING:
     from ...runtime import KVCache, LayerCall, LayerRunner
@@ -53,42 +53,26 @@ class SublayerLatency:
 
 
 def _timer(fn: Callable[[], object], repeats: int, device: torch.device) -> float:
-    """Seconds per call of ``fn`` (already warmed up).
+    """Seconds per call of ``fn`` (already warmed up), over ``repeats`` calls.
 
-    On CUDA the calls are recorded into one graph through :func:`economize.runtime.graphs.capture` (the safeguards
-    of the decoder's own captures: no garbage collection while recording, a quiet device before and after) in a
-    private pool, which is destroyed before returning once the device is idle.
+    On CUDA the calls are queued without synchronization between CUDA events, so the host runs ahead of the device
+    whenever a call's kernels take longer than their launches (the decoding regime of large models) and the events
+    time the device's work.
     """
     if device.type != "cuda":
         start = time.perf_counter()
         for _ in range(repeats):
             fn()
         return (time.perf_counter() - start) / repeats
-    stream = torch.cuda.Stream(device)
-    stream.wait_stream(torch.cuda.current_stream(device))
-    with torch.cuda.stream(stream):
+    fn()
+    begin, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+    torch.cuda.synchronize(device)
+    begin.record()
+    for _ in range(repeats):
         fn()
-    torch.cuda.current_stream(device).wait_stream(stream)
-    graph = torch.cuda.CUDAGraph()
-    run: Callable[[], object]
-    try:
-        capture(graph, lambda: [fn() for _ in range(repeats)], device)
-        run, calls = graph.replay, repeats
-    except RuntimeError:  # a layer that cannot be captured: time it eagerly
-        run, calls = fn, 1
-    try:
-        run()
-        begin, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
-        torch.cuda.synchronize(device)
-        begin.record()
-        for _ in range(repeats if calls == 1 else 3):
-            run()
-        end.record()
-        torch.cuda.synchronize(device)
-        return begin.elapsed_time(end) / 1e3 / (repeats if calls == 1 else 3 * repeats)
-    finally:
-        del run, graph
-        torch.cuda.synchronize(device)
+    end.record()
+    torch.cuda.synchronize(device)
+    return begin.elapsed_time(end) / 1e3 / repeats
 
 
 def measure_latency(

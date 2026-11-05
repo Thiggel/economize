@@ -47,7 +47,8 @@ class KnapSpecConfig(TechniqueConfig):
             model's device the first time the drafter starts.
         calibration_lengths: Context lengths of the latency measurement.
         calibration_repeats: Timed calls per context length.
-        max_graphs: CUDA graphs of draft steps kept at once, one per skip set (least recently used dropped).
+        max_graphs: Skip sets whose draft steps run from CUDA graphs, per cache of the decoder (the first ones
+            searched; later skip sets draft eagerly).
     """
 
     technique: ClassVar[str] = "knapspec"
