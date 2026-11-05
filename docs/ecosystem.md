@@ -28,6 +28,7 @@ hard dependencies. This page lists what works today, what is tested and what is 
 | llama.cpp (GGUF) | `economize.backends.gguf.to_gguf`, `load_llama` (runtime `"gguf"` in `economize.backend_support`) | done: base model, `quant` codes as Q4_0 / Q4_1 / Q8_0, draft model (`--model-draft`), prompt lookup; other techniques densified or refused ([exports.md](exports.md)) | `test_gguf.py` |
 | ONNX Runtime | `economize.backends.onnx.to_onnx`, `load_onnx` (runtime `"onnx"`) | done: one graph with KV-cache inputs, `quant` codes as `MatMulNBits`; drafters refused ([exports.md](exports.md)) | `test_onnx.py` |
 | MLX (Apple silicon) | `economize.backends.mlx.to_mlx` (runtime `"mlx"`) | done, export only: `mlx_lm` folder, `quant` codes as affine quantization, draft model (`--draft-model`), StreamingLLM eviction (`--max-kv-size`); other drafters refused ([exports.md](exports.md)) | `test_mlx.py` (format level) |
+| Unsloth `FastLanguageModel` | the loaded model, after clearing `_unsloth_fast_path` ([Unsloth](#unsloth)) | works on the `transformers` forward (bfloat16 and 4-bit Qwen2.5-0.5B): lossless decoding, drafter training, Unsloth LoRA policies; Unsloth's patched forward fails | `test_unsloth.py` |
 | TensorRT-LLM | `economize.backends.trtllm.to_trtllm` (runtime `"trtllm"`) | done, export only: checkpoint for `trtllm-build`, `quant` int4 codes as `W4A16_AWQ`, draft-target, Medusa and n-gram speculation, fp8 KV cache, sink-plus-window cache; EAGLE / EAGLE-3 / ReDrafter refused ([exports.md](exports.md)) | `test_trtllm.py` (format level) |
 
 Tests that need an optional library skip when it is missing, and tests marked `gpu` (vLLM, SGLang, SSD and
@@ -415,6 +416,53 @@ algorithm for (early exit, FREE, DMTD, layer skipping) are served through the sa
 class that economize registers through the `sglang.srt.plugins` entry point `economize`, so every SGLang process
 has it. The target captures the hidden states these drafters read as EAGLE-3 auxiliary states, the draft step runs
 inside SGLang's CUDA graphs, and SGLang verifies every draft greedily.
+
+## Unsloth
+
+A model loaded with Unsloth's `FastLanguageModel` works with economize once its modules run the `transformers`
+forward again. This was tested with unsloth 2026.11.2, `transformers` 5.17.0, PyTorch 2.14.1, PEFT 0.21.2 and
+bitsandbytes 0.50.2 on one L40, with `Qwen/Qwen2.5-0.5B` loaded in bfloat16 (Unsloth substitutes
+`unsloth/Qwen2.5-0.5B`) and with `load_in_4bit=True` (`unsloth/Qwen2.5-0.5B-unsloth-bnb-4bit`). No other model
+family has been tried.
+
+Unsloth replaces the forward methods of the `transformers` classes with its own and runs them on every module that
+carries the attribute `_unsloth_fast_path`. Its attention ignores the key/value cache that economize hands to each
+layer, so on the model as `FastLanguageModel.from_pretrained` returns it every economize call fails with a shape
+mismatch in `scaled_dot_product_attention`, even with no technique attached. Clearing the attribute routes the
+modules back to the `transformers` code:
+
+```python
+from unsloth import FastLanguageModel  # before transformers, as Unsloth requires
+
+import economize
+from economize.techniques.early_exit import EarlyExitConfig
+
+base, tokenizer = FastLanguageModel.from_pretrained("Qwen/Qwen2.5-0.5B", load_in_4bit=True)
+FastLanguageModel.for_inference(base)
+for module in base.modules():
+    module._unsloth_fast_path = False
+model = economize.apply(base, EarlyExitConfig(exit_layer=12, adaptation="lora"))
+```
+
+With the attribute cleared, the following ran on both loads:
+
+- Plain decoding, prompt lookup, an untrained early-exit drafter, an early-exit drafter with LoRA and EAGLE-3
+  reproduced the 64 greedy tokens of the model's own `generate` through both `EfficientModel.decode` and
+  `EfficientModel.generate`. In bfloat16 these are also the tokens of `generate` with Unsloth's patched forward.
+  In 4-bit the patched `generate` departs from them after 26 tokens, while a patched forward over the whole
+  sequence gives the same 64 tokens, so the difference lies in rounding inside Unsloth's cached decoding kernels.
+- The early-exit LoRA drafter and EAGLE-3 trained with `economize.train.fit` for 300 steps on 131k tokens of
+  FineWeb-Edu. The loss of the early-exit drafter fell from 10.9 to 1.1 (bfloat16) and from 10.7 to 1.1 (4-bit),
+  that of EAGLE-3 from 14.7 to 3.6 and from 13.6 to 3.5. Decoding stayed lossless after training.
+- A LoRA policy from `FastLanguageModel.get_peft_model` took an early-exit drafter through
+  `economize.integrations.peft.apply`. `get_peft_model` sets the attribute again, so it has to be cleared after
+  that call as well.
+
+Unsloth's kernels are therefore not used while economize decodes or trains a drafter. `_unsloth_fast_path` is a
+private attribute of Unsloth and may change without notice. Fine-tuning the policy with Unsloth's own trainers and
+then attaching a technique, or restoring the attribute after `detach` to continue Unsloth training, has not been
+tested. `tests/integrations/test_unsloth.py` (GPU, skipped without `unsloth`) checks both the failure on the patched
+forward and the lossless decoding and training after the attribute is cleared.
 
 ## Not planned
 
