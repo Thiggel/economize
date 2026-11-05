@@ -32,6 +32,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.utils.hooks import RemovableHandle
 
+from ...core.metadata import WeightAccess
 from ...runtime.phase import current_phase
 from .backends import TEAL_BACKENDS, DenseBackend, Installed, TealBackend
 from .sparsify import PhasePolicy, layer_tokens, sparsify, sparsify_tokens
@@ -126,6 +127,10 @@ class TritonBackend(TealBackend):
     """
 
     max_rows: int = MAX_ROWS
+    weight_access = WeightAccess(
+        "TEAL's sparse Triton GEMV",
+        alternative="backend='dense' runs the masked dense reference instead (simulated, no speedup)",
+    )
 
     def install(
         self, modules: Mapping[str, nn.Module], thresholds: Mapping[str, Tensor], policy: PhasePolicy | str

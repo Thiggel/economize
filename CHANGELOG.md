@@ -18,6 +18,13 @@ the simulated paths remain as explicit references that `economize.backend_suppor
   Unstructured and other N:M patterns are refused unless `semi_structured=False` asks for the masked dense
   reference. Sparse storage cannot be quantized or factorized, so the default `prune` no longer combines with `quant`
   or `lowrank` (`economize.compatible("prune", "quant")` is `False`); use `semi_structured=False` for that recipe.
+- `teal`, `cats` and `dejavu` with their Triton kernels refuse `quant` with a real kernel and `prune` with sparse
+  2:4 storage, since the sparse GEMVs read dense floating-point weights (`economize.compatible("teal", "quant")` is
+  `False`, and the reason names `backend="dense"`). `quant(backend="fake")`, compressed-tensors and the masked
+  `prune(semi_structured=False)` keep dense weights and still combine. The rule is declared by the kernels: a weight
+  kernel names what it stores (`storage`, a `WeightStorage`) and an activation kernel what it reads
+  (`weight_access`, a `WeightAccess`), and `Technique.conflict` compares the two, so a new kernel takes part by
+  declaring them.
 - vLLM and SGLang refuse `prune` (no 2:4 GEMM), `littlebit` and `draft_quant` with kernel backends; SGLang also
   refuses `lowrank` (vLLM serves the factors). The references `prune(semi_structured=False)` and
   `draft_quant(backend="fake")` are served dense and reported as densified.
@@ -239,6 +246,10 @@ the simulated paths remain as explicit references that `economize.backend_suppor
 - README, ARCHITECTURE and ecosystem.md describe the 0.4 scope; `docs/drafters.md` documents Hydra, ReDrafter,
   Kangaroo, KnapSpec, Lookahead, REST and suffix decoding; `docs/weights.md` documents LittleBit; `docs/training.md`
   lists every registered objective.
+- The combination examples of the README, Getting started and Examples pages use only stacks whose techniques all
+  save for real and pass `economize.compatible` (`tests/docs/test_doc_combinations.py`). The tutorials of `teal`,
+  `cats`, `dejavu` and `quant` and the usage example of `docs/weights.md` no longer stack activation sparsity on
+  quantized weights, and the test checks that every combination of the tutorials and the weights page is compatible.
 
 ### Removed
 

@@ -153,15 +153,17 @@ llm = plan.llm()
 
 `quant` runs last among the weight transforms, so it quantizes the weights that pruning, low rank or a Hadamard
 rotation produced. A rotation before GPTQ removes outlier channels from the inputs it quantizes
-([Hadamard rotations](rotate.md)), and activation sparsity composes with any backend:
+([Hadamard rotations](rotate.md)). The sparse kernels of TEAL, CATS and Deja Vu read dense floating-point weights,
+so they are refused next to the packed weights of a real backend; `backend="fake"` keeps dense weights and combines
+with them, without saving weight memory. Removing whole layers first leaves fewer maps to quantize:
 
 ```python
-from economize.techniques.sparsity import TealConfig
+from economize.techniques.prune import DepthPruneConfig
 
-print(economize.compatible("quant", "teal"))
+print(economize.compatible("quant", "depth_prune"), economize.compatible("quant", "teal"))
 base = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B", dtype=torch.bfloat16, device_map="cuda")
-model = economize.apply(base, QuantConfig(format="int4", method="gptq", group_size=128), TealConfig(sparsity=0.4),
-                        calibration=calibration)
+model = economize.apply(base, DepthPruneConfig(method="shortgpt", num_blocks=4),
+                        QuantConfig(format="int4", method="gptq", group_size=128), calibration=calibration)
 ```
 
 ## Configuration

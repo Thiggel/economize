@@ -13,13 +13,16 @@ from economize import (
     Saving,
     SimulatedPathWarning,
     SupportStatus,
+    TechniqueConfig,
     TechniqueInfo,
+    WeightStorage,
 )
 from economize.backends.sglang.serving.base import SGLANG_TECHNIQUES
 from economize.backends.sglang.serving.weights import DelegatedSglang
 from economize.core.metadata import saving_names
 from economize.techniques.jump import JumpConfig
 from economize.techniques.kv_quant import KIVIConfig
+from economize.techniques.mlp_sparsity import CatsConfig, DejaVuConfig
 from economize.techniques.prune import PruneConfig
 from economize.techniques.quant import DraftQuantConfig, QuantConfig
 from economize.techniques.sparsity import TealConfig
@@ -61,7 +64,12 @@ def test_one_technique_per_exclusive_family(a: str, b: str, reason: str) -> None
 
 @pytest.mark.parametrize(
     ("a", "b"),
-    [("teal", "quant"), (PruneConfig(semi_structured=False), "quant"), ("jump", "kivi"), ("eagle3", "teal")],
+    [
+        (TealConfig(backend="dense"), "quant"),
+        (PruneConfig(semi_structured=False), "quant"),
+        ("jump", "kivi"),
+        ("eagle3", "teal"),
+    ],
 )
 def test_orthogonal_techniques_combine(a: object, b: str) -> None:
     assert economize.compatible(a, b)  # type: ignore[arg-type]
@@ -84,6 +92,79 @@ def test_a_configuration_is_checked_as_configured() -> None:
     sparse = PruneConfig(sparsity="2:4", semi_structured=True)
     assert "semi_structured=False" in str(economize.incompatibility(sparse, QuantConfig()))
     assert economize.incompatibility(QuantConfig(), sparse) == economize.incompatibility(sparse, QuantConfig())
+
+
+# ---- weight storage ------------------------------------------------------------------------------------------------
+SPARSE_ACTIVATION_KERNELS = [
+    TealConfig(),
+    TealConfig(backend="triton"),
+    TealConfig(backend="triton_autotune"),
+    CatsConfig(),
+    CatsConfig(backend="triton"),
+    DejaVuConfig(),
+]
+PACKED_WEIGHTS = [
+    QuantConfig(),
+    QuantConfig(backend="torchao"),
+    QuantConfig(backend="marlin"),
+    PruneConfig(),
+    PruneConfig(semi_structured_kernel="cutlass"),
+]
+DENSE_WEIGHTS = [
+    QuantConfig(backend="fake"),
+    QuantConfig(format="int8", backend="compressed-tensors"),
+    PruneConfig(semi_structured=False),
+    PruneConfig(semi_structured_kernel="dense"),
+    PruneConfig(sparsity=0.5),
+]
+
+
+@pytest.mark.parametrize("sparse", SPARSE_ACTIVATION_KERNELS, ids=lambda c: f"{c.technique}-{c.backend}")
+@pytest.mark.parametrize("weights", PACKED_WEIGHTS, ids=["quant-auto", "torchao", "marlin", "prune-2:4", "cutlass"])
+def test_sparse_activation_kernels_refuse_packed_weights(sparse: TechniqueConfig, weights: TechniqueConfig) -> None:
+    """TEAL's GEMV and the row-masked MLP GEMV read dense 16-bit weights; no kernel reads packed quantized or 2:4
+    sparse ones, so the pair is refused in both orders with the reason and the simulated alternative."""
+    reason = economize.incompatibility(sparse, weights)
+    assert reason is not None and reason == economize.incompatibility(weights, sparse)
+    assert "reads dense floating-point weights" in reason and "backend='dense'" in reason
+    assert ("packed low-bit" if isinstance(weights, QuantConfig) else "2:4 semi-structured") in reason
+
+
+@pytest.mark.parametrize("sparse", SPARSE_ACTIVATION_KERNELS, ids=lambda c: f"{c.technique}-{c.backend}")
+@pytest.mark.parametrize(
+    "weights", DENSE_WEIGHTS, ids=["fake", "compressed-tensors", "masked", "dense", "unstructured"]
+)
+def test_sparse_activation_kernels_read_dense_weights(sparse: TechniqueConfig, weights: TechniqueConfig) -> None:
+    assert economize.compatible(sparse, weights)
+
+
+@pytest.mark.parametrize(
+    "masked", [TealConfig(backend="dense"), CatsConfig(backend="dense"), DejaVuConfig(backend="dense")]
+)
+def test_the_masked_references_run_on_any_weights(masked: TechniqueConfig) -> None:
+    for weights in PACKED_WEIGHTS[:3]:
+        assert economize.compatible(masked, weights)
+
+
+def test_draft_only_quantization_leaves_the_base_weights_dense() -> None:
+    assert economize.compatible("teal", "draft_quant") and economize.compatible("cats", DraftQuantConfig())
+    assert TECHNIQUES.get("draft_quant").weight_storage_for(DraftQuantConfig()) is None
+
+
+def test_weight_storage_is_declared_by_the_kernels() -> None:
+    quant, prune, teal = (TECHNIQUES.get(name) for name in ("quant", "prune", "teal"))
+    assert quant.weight_storage_for(QuantConfig()) is WeightStorage.QUANTIZED
+    assert quant.weight_storage_for(QuantConfig(backend="fake")) is WeightStorage.DENSE
+    assert prune.weight_storage_for(PruneConfig()) is WeightStorage.SEMI_STRUCTURED
+    assert prune.weight_storage_for(PruneConfig(semi_structured=False)) is WeightStorage.DENSE
+    assert teal.weight_access_for(TealConfig(backend="dense")) is None
+    access = teal.weight_access_for(TealConfig())
+    assert access is not None and access.storages == frozenset({WeightStorage.DENSE})
+
+
+def test_a_recipe_refuses_sparse_activation_kernels_on_packed_weights() -> None:
+    with pytest.raises(IncompatibleTechniquesError, match="TEAL's sparse Triton GEMV"):
+        economize.apply(make_tiny_model(), PruneConfig(), TealConfig())
 
 
 def test_recipes_apply_the_same_rules() -> None:

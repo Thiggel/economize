@@ -46,7 +46,7 @@ from typing import TYPE_CHECKING, ClassVar, TypeVar
 import torch
 from torch import Tensor, nn
 
-from ...core.metadata import Saving, Simulation
+from ...core.metadata import Saving, Simulation, WeightStorage
 from ...errors import ConfigError
 from ...registry import Registry
 from . import activations
@@ -88,6 +88,9 @@ class QuantBackend(ABC):
     options: ClassVar[frozenset[str]] = frozenset()
     #: Whether the backend stores weights whose groups are not contiguous (:attr:`QuantizedWeight.g_idx`).
     supports_g_idx: ClassVar[bool] = False
+    #: How the stored weights look to a kernel that reads them itself (packed low-bit tensors by default; a backend
+    #: that keeps the dequantized weights declares :attr:`WeightStorage.DENSE`).
+    storage: ClassVar[WeightStorage] = WeightStorage.QUANTIZED
 
     def check_config(self, config: QuantSpec) -> None:
         """Raise :class:`ConfigError` for formats or group sizes the backend cannot store."""
@@ -155,6 +158,7 @@ class FakeQuantBackend(QuantBackend):
     options = frozenset({"activations"})
     supports_g_idx = True
     simulation = Simulation(Saving.WEIGHT_MEMORY | Saving.LATENCY, "keeps the dequantized weights")
+    storage = WeightStorage.DENSE
 
     def stores_float_zeros(self, config: QuantSpec) -> bool:
         return True

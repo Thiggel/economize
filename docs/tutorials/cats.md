@@ -110,16 +110,18 @@ print(perplexity(model, windows))
 
 ## Combining with other techniques
 
-CATS composes with the weight transforms, which change the maps it reads, and calibrates its thresholds on the
-transformed model. It excludes the other activation-sparsity techniques (`teal`, `dejavu`) and `rotate`. Here the
-weights are quantized to int4 with GPTQ first:
+CATS calibrates its thresholds on the model that the weight transforms produced. Its sparse Triton kernel reads
+dense floating-point weights, so it combines with transforms that leave the remaining maps dense, such as removing
+whole layers (`depth_prune`), and refuses packed low-bit weights (`quant`) and 2:4 sparse weights (`prune`). It also
+excludes the other activation-sparsity techniques (`teal`, `dejavu`) and `rotate`. Here four layers are removed with
+ShortGPT first:
 
 ```python
-from economize.techniques.quant import QuantConfig
+from economize.techniques.prune import DepthPruneConfig
 
-print(economize.compatible("cats", "quant"), economize.compatible("cats", "teal"))
+print(economize.compatible("cats", "depth_prune"), economize.compatible("cats", "quant"))
 base = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B", dtype=torch.bfloat16, device_map="cuda")
-model = economize.apply(base, QuantConfig(format="int4", method="gptq", group_size=128),
+model = economize.apply(base, DepthPruneConfig(method="shortgpt", num_blocks=4),
                         CatsConfig(sparsity=0.5, prefill="second_half"), calibration=calibration)
 print(perplexity(model, windows))
 ```

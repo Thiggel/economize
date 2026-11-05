@@ -535,10 +535,11 @@ for config in configs:
     model.detach()
 ```
 
-KIVI composes with eviction. Two techniques that quantize the same entries are refused:
+A KV technique composes with a drafter. Two techniques that quantize the same entries are refused:
 
 ```python
-model = economize.apply(base_sdpa, KIVIConfig(bits=4), KVEvictConfig(method="h2o", recent=64, heavy=64))
+model = economize.apply(base_sdpa, FP8KVConfig(), eagle3)
+model.decode(ids[0], 32)
 model.detach()
 try:
     economize.apply(base_sdpa, KIVIConfig(bits=2), FP8KVConfig())
@@ -549,16 +550,17 @@ except economize.IncompatibleTechniquesError as error:
 ## Combining techniques
 
 Any set of techniques goes into one `apply` call, at most one drafter, with weight transforms applied first.
+A pair is refused when one technique's kernel cannot read what the other stores: 2:4 sparse weights are not
+quantized again, and the sparse kernels of TEAL, CATS and Deja Vu read dense floating-point weights only.
 `DraftQuantConfig` finds the drafter's weights only when the drafter is attached directly, so it is left out of a
 stack that wraps the drafter in FR-Spec or the hybrid fallback:
 
 ```python
 model = economize.apply(
     fresh(),
-    PruneConfig(method="wanda", sparsity="2:4"),
+    DepthPruneConfig(method="shortgpt", num_blocks=4),
     QuantConfig(format="int4", method="gptq", group_size=128),
-    TealConfig(sparsity=0.4),
-    KIVIConfig(bits=4),
+    FP8KVConfig(),
     HybridConfig(fallback=FRSpecConfig(drafter=eagle3, vocab_size=32768)),
     calibration=calibration,
     decoding=economize.DecodeConfig(cycle_length=6, min_confidence=0.3),
@@ -576,7 +578,7 @@ copy instead:
 ```python
 model = economize.apply(
     fresh(),
-    PruneConfig(method="wanda", sparsity="2:4"),
+    DepthPruneConfig(method="shortgpt", num_blocks=4),
     QuantConfig(format="int4", method="gptq", group_size=128),
     eagle3,
     calibration=calibration,

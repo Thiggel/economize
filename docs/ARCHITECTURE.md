@@ -330,6 +330,18 @@ class Technique(nn.Module):
 Techniques are found through `TECHNIQUES` (`@register_technique`), which `economize.techniques` fills by importing
 every subpackage with `economize.registry.import_submodules`; third-party packages use the `economize.techniques` entry-point group.
 
+Pairwise rules come from the classmethod `Technique.conflict(config, other, other_config)`, which
+`economize.compatible`, `economize.incompatibility` and `check_compatible` share (a technique name stands for its
+default configuration). The default applies the two `TechniqueInfo` declarations (exclusive families, `excludes`)
+and one kernel rule. The kernel a configuration selects (`TechniqueInfo.kernel`, a `KernelChoice` over a backend
+registry) may declare how it leaves the base weights (`storage`, a `WeightStorage`: `DENSE`, `QUANTIZED`,
+`SEMI_STRUCTURED`) or which storages it reads itself (`weight_access`, a `WeightAccess` with the reader, the readable
+storages and the alternative named in the refusal). A reader next to a WEIGHTS technique whose storage it cannot
+read is refused: the quant kernels store `QUANTIZED` (the `fake` and compressed-tensors references `DENSE`), the 2:4
+storage kernels `SEMI_STRUCTURED`, and the Triton GEMVs of TEAL, CATS and Deja Vu read `DENSE` only. A new kernel
+takes part by declaring these attributes; `weight_storage_for` and `weight_access_for` are the hooks for a technique
+whose storage depends on more than its kernel (`prune` with `semi_structured=False` stays dense).
+
 The recipe (`core/recipe.py`, `attach_techniques`) builds every technique, loads saved state into it (before
 anything attaches, so a loaded TEAL skips calibration), checks compatibility (at most one DRAFTER, no technique
 twice, then each technique's own `check_compatible`) and attaches in `CAPABILITY_ORDER`. When WEIGHTS techniques

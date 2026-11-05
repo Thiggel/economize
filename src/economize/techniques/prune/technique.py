@@ -9,7 +9,7 @@ from typing import Any, ClassVar
 from torch import Tensor
 
 from ...core.config import TechniqueConfig
-from ...core.metadata import Family, KernelChoice, Saving, Simulation, TechniqueInfo
+from ...core.metadata import Family, KernelChoice, Saving, Simulation, TechniqueInfo, WeightStorage
 from ...core.technique import Capability, Technique, register_technique
 from ...registry import Registry
 from .._weights.technique import CalibratedWeightTransform
@@ -23,6 +23,7 @@ from .semi_structured import storage_reason
 __all__ = ["DepthPruneTechnique", "PruneTechnique"]
 
 _MASKED_DENSE = Simulation(Saving.WEIGHT_MEMORY | Saving.COMPUTE, "keeps the masked dense weights")
+_KERNEL = KernelChoice("semi_structured_kernel", SEMI_STRUCTURED_KERNELS)
 
 
 @register_technique
@@ -71,8 +72,17 @@ class PruneTechnique(CalibratedWeightTransform):
         config = config if isinstance(config, PruneConfig) else PruneConfig()
         if not config.sparse_storage:
             return _MASKED_DENSE
-        kernel = KernelChoice("semi_structured_kernel", SEMI_STRUCTURED_KERNELS).simulation(config)
+        kernel = _KERNEL.simulation(config)
         return kernel.within(cls.info.saves) if kernel is not None else None
+
+    @classmethod
+    def weight_storage_for(cls, config: TechniqueConfig | None = None) -> WeightStorage | None:
+        """Masked dense weights with ``semi_structured=False`` (or a pattern without sparse storage), else the
+        storage of the :data:`~.semi_kernels.SEMI_STRUCTURED_KERNELS` entry the configuration names."""
+        config = config if isinstance(config, PruneConfig) else PruneConfig()
+        if not config.sparse_storage:
+            return WeightStorage.DENSE
+        return _KERNEL.storage(config)
 
 
 @register_technique

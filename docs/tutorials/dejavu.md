@@ -118,15 +118,17 @@ print(model.techniques["dejavu"].summary["fitted"], perplexity(model, windows))
 
 ## Combining with other techniques
 
-Deja Vu composes with the weight transforms and fits its predictors on the transformed model. It excludes the other
-activation-sparsity techniques (`teal`, `cats`) and `rotate`. vLLM and SGLang do not run it:
+Deja Vu fits its predictors on the model that the weight transforms produced. Its sparse Triton kernel reads dense
+floating-point weights, so it combines with transforms that leave the remaining maps dense, such as removing whole
+layers (`depth_prune`), and refuses packed low-bit weights (`quant`) and 2:4 sparse weights (`prune`). It also
+excludes the other activation-sparsity techniques (`teal`, `cats`) and `rotate`. vLLM and SGLang do not run it:
 
 ```python
-from economize.techniques.quant import QuantConfig
+from economize.techniques.prune import DepthPruneConfig
 
-print(economize.compatible("dejavu", "quant"), economize.compatible("dejavu", "cats"))
+print(economize.compatible("dejavu", "depth_prune"), economize.compatible("dejavu", "quant"))
 base = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B", dtype=torch.bfloat16, device_map="cuda")
-model = economize.apply(base, QuantConfig(format="int8", group_size=None, symmetric=True),
+model = economize.apply(base, DepthPruneConfig(method="shortgpt", num_blocks=4),
                         DejaVuConfig(sparsity=0.5, prefill="second_half"), calibration=calibration)
 print(perplexity(model, windows))
 ```

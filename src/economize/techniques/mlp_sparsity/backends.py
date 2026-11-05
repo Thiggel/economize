@@ -20,7 +20,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
-from ...core.metadata import Saving, Simulation
+from ...core.metadata import Saving, Simulation, WeightAccess
 from ...registry import Registry
 from ..sparsity.teal_gemv import MAX_ROWS, GemvConfig, teal_gemv, triton_available
 from ..sparsity.triton_backend import kernel_eligible
@@ -89,9 +89,13 @@ class MlpSparsityBackend(ABC):
 
     Attributes:
         simulation: Set when the backend computes the dense maps and only masks (the saving is not realized).
+        weight_access: Set when the backend's kernels read the MLP weights themselves, with the weight storages they
+            read (:class:`~economize.WeightAccess`); a technique that leaves the weights in another storage is then
+            refused. ``None``: the maps run their own forward.
     """
 
     simulation: ClassVar[Simulation | None] = None
+    weight_access: ClassVar[WeightAccess | None] = None
 
     @abstractmethod
     def ops(self, mlp: GatedMlp) -> MlpOps:
@@ -214,6 +218,10 @@ class TritonMlpBackend(MlpSparsityBackend):
 
     row_config: ClassVar[RowGemvConfig | None] = None
     gemv_config: ClassVar[GemvConfig | None] = None
+    weight_access = WeightAccess(
+        "the sparse Triton GEMV of the MLP maps",
+        alternative="backend='dense' runs the masked dense reference instead (simulated, no speedup)",
+    )
 
     @classmethod
     def usable(cls) -> bool:

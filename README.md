@@ -16,8 +16,9 @@ function call.
 
 - **One interface for many methods.** Drafters such as EAGLE-3 and Medusa, dynamic-depth methods, weight
   compression and KV-cache compression share the same configuration and decoding API.
-- **Free combination.** Techniques can be stacked, for example 2:4 pruning, int4 quantization, activation sparsity
-  and a drafter in one model. economize attaches them in a well-defined order.
+- **Free combination.** Techniques can be stacked, for example layer pruning, int4 quantization, an fp8 KV cache
+  and a drafter in one model. economize attaches them in a well-defined order and refuses pairs whose kernels do not
+  fit together.
 - **The base model stays intact.** The model keeps its modules and its `forward` method, so it continues to work
   with `generate`, PEFT, the Hugging Face Hub and the rest of the ecosystem.
 - **Fast, lossless decoding.** Batches of prompts of different lengths, chains and draft trees, lossless
@@ -60,16 +61,17 @@ Several techniques combine in one call. Techniques that need calibration data re
 
 ```python
 from economize.techniques.eagle3 import Eagle3Config
-from economize.techniques.prune import PruneConfig
-from economize.techniques.quant import QuantConfig
-from economize.techniques.sparsity import TealConfig
+from economize.techniques.kv_quant import FP8KVConfig
+from economize.techniques.prune import DepthPruneConfig
+from economize.techniques.quant import DraftQuantConfig, QuantConfig
 
 model = economize.apply(
     base,
-    PruneConfig(method="wanda", sparsity="2:4"),                # 2:4 sparse weights
+    DepthPruneConfig(method="shortgpt", num_blocks=4),          # four decoder layers removed
     QuantConfig(format="int4", method="gptq", group_size=128),  # int4 weights
-    TealConfig(sparsity=0.4),                                   # activation sparsity
+    FP8KVConfig(),                                              # an fp8 KV cache
     Eagle3Config(),                                             # a drafter, trained with economize.train.fit
+    DraftQuantConfig(format="int8"),                            # int8 weights for the drafter
     calibration=calibration_ids,  # a LongTensor [N, S], an iterable of batches or a callable
 )
 ```

@@ -35,7 +35,6 @@ Through the recipe, with the calibration data passed to `economize.apply`:
 import economize
 from economize.techniques.prune import PruneConfig
 from economize.techniques.quant import QuantConfig
-from economize.techniques.sparsity import TealConfig
 
 # 128 sequences of 2048 tokens, as in the papers (WikiText-2 or C4)
 ids = tokenizer("\n\n".join(wikitext["text"]), return_tensors="pt").input_ids[0]
@@ -45,10 +44,13 @@ model = economize.apply(
     hf_model,
     PruneConfig(method="wanda", sparsity="2:4", semi_structured=False),   # masks kept for the quantizer
     QuantConfig(format="int4", method="gptq", group_size=128),            # best installed int4 kernel
-    TealConfig(sparsity=0.4),
     calibration=calibration,
 )
 ```
+
+TEAL stays out of this stack: its sparse Triton kernel reads dense floating-point weights, so `economize.apply`
+refuses it next to packed int4 or 2:4 sparse weights, and `economize.incompatibility("teal", "quant")` gives the
+reason.
 
 Every technique also has a plain functional core that works on any model with an architecture adapter and returns a
 summary dict. The recipe calls them, and the tests exercise them directly:

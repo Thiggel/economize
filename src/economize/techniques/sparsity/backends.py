@@ -13,12 +13,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, ClassVar
 
 from torch import Tensor, nn
 from torch.utils.hooks import RemovableHandle
 
-from ...core.metadata import Saving, Simulation
+from ...core.metadata import Saving, Simulation, WeightAccess
 from ...registry import Registry
 from .sparsify import PhasePolicy, sparsify_tokens
 
@@ -53,7 +53,15 @@ class Installed:
 
 
 class TealBackend(ABC):
-    """Makes linear maps act on sparsified inputs."""
+    """Makes linear maps act on sparsified inputs.
+
+    Attributes:
+        weight_access: Set when the backend's kernel reads the maps' weights itself, with the weight storages it
+            reads (:class:`~economize.WeightAccess`); a technique that leaves the weights in another storage is
+            then refused. ``None``: the maps run their own forward.
+    """
+
+    weight_access: ClassVar[WeightAccess | None] = None
 
     @abstractmethod
     def install(

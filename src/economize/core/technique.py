@@ -11,7 +11,17 @@ from torch import nn
 from ..errors import ConfigError, IncompatibleTechniquesError
 from ..registry import Registry
 from .config import TechniqueConfig
-from .metadata import Capability, Simulation, TechniqueInfo, check_declaration, conflict, unmet_requirement
+from .metadata import (
+    Capability,
+    Simulation,
+    TechniqueInfo,
+    WeightAccess,
+    WeightStorage,
+    check_declaration,
+    conflict,
+    storage_conflict,
+    unmet_requirement,
+)
 
 if TYPE_CHECKING:
     from ..arch import ArchAdapter
@@ -132,11 +142,44 @@ class Technique(nn.Module):
         ``other_config``; ``None`` if it can.
 
         The default applies the rules of the two :attr:`info` declarations (one technique per exclusive family,
-        :attr:`~economize.TechniqueInfo.excludes`). A technique with a rule that depends on its configuration
-        extends it; ``None`` for a configuration means the configuration is not known (:func:`economize.compatible`
-        on names), and such a rule then does not apply.
+        :attr:`~economize.TechniqueInfo.excludes`) and, when both configurations are known, refuses a kernel that
+        reads the base weights next to a weight transform that leaves them in a storage the kernel cannot read
+        (:meth:`weight_access_for`, :meth:`weight_storage_for`). A technique with a rule that depends on its
+        configuration extends it; ``None`` for a configuration means the configuration is not known, and such a
+        rule then does not apply.
         """
-        return conflict(cls.name, cls.info, other.name, other.info)
+        reason = conflict(cls.name, cls.info, other.name, other.info)
+        if reason is None and config is not None and other_config is not None:
+            reason = storage_conflict(
+                cls.name, cls.weight_access_for(config), other.name, other.weight_storage_for(other_config)
+            ) or storage_conflict(
+                other.name, other.weight_access_for(other_config), cls.name, cls.weight_storage_for(config)
+            )
+        return reason
+
+    @classmethod
+    def weight_storage_for(cls, config: TechniqueConfig | None = None) -> WeightStorage | None:
+        """How this technique with ``config`` (default: the config class's defaults) leaves the weights of the
+        base model's linear maps, ``None`` if it does not rewrite them or declares nothing.
+
+        The default reads the ``storage`` attribute of the kernel :attr:`~economize.TechniqueInfo.kernel` selects,
+        for techniques with :attr:`Capability.WEIGHTS`. A technique whose storage depends on more than its kernel
+        extends it.
+        """
+        kernel = cls.info.kernel
+        if Capability.WEIGHTS not in cls.capabilities or kernel is None:
+            return None
+        return kernel.storage(config if config is not None else cls.config_class)
+
+    @classmethod
+    def weight_access_for(cls, config: TechniqueConfig | None = None) -> WeightAccess | None:
+        """Which weight storages the kernel of this technique with ``config`` reads itself (the ``weight_access``
+        attribute of the kernel :attr:`~economize.TechniqueInfo.kernel` selects), ``None`` if it reads the base
+        weights only through the modules' own forward."""
+        kernel = cls.info.kernel
+        if kernel is None:
+            return None
+        return kernel.weight_access(config if config is not None else cls.config_class)
 
     def check_compatible(self, others: Sequence[Technique]) -> None:
         """Raise :class:`~economize.IncompatibleTechniquesError` if this technique cannot be combined with
