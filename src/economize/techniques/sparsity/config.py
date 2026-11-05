@@ -45,9 +45,14 @@ class TealConfig(TechniqueConfig):
             outside decoding (:meth:`PhasePolicy.from_prefill`): ``"dense"`` (default, as TEAL's single-token
             kernels), ``"second_half"`` (TEAL's perplexity protocol) or ``"all"``. With a string, decoding and
             drafting steps are always sparsified.
-        backend: Registered kernel backend (``"dense"``: masking hooks, the numerical reference; ``"triton"``: TEAL's
-            sparse GEMV for calls of up to 16 rows, :mod:`.triton_backend`; ``"triton_autotune"``: the same kernel with
-            launch parameters timed per map shape on the device, :mod:`.triton_autotune`).
+        backend: Registered kernel backend. ``"auto"`` (default): TEAL's sparse Triton GEMV for decoding calls of up
+            to 16 rows on every map, the exact masked dense matmul for larger calls (prefill), and a
+            :class:`~economize.errors.ConfigError` at attach time when the kernel cannot serve a map (no CUDA or
+            Triton, float32 or quantized weights), :mod:`.auto_backend`. ``"dense"``: masking hooks in front of the
+            dense matmul, the numerical reference on any device, which only simulates the saving. ``"triton"``: the
+            kernel of ``"auto"`` that falls back to the masking hooks on maps it cannot serve,
+            :mod:`.triton_backend`. ``"triton_autotune"``: the same kernel with launch parameters timed per map shape
+            on the device, :mod:`.triton_autotune`.
         targets: Globs over linear-module names inside a layer.
         exclude: Globs removed from ``targets``.
         layers: 1-indexed layers to sparsify; empty means all.
@@ -63,7 +68,7 @@ class TealConfig(TechniqueConfig):
     greedy_fraction: float = 0.25
     greedy_batches: int = 0
     prefill: str | PhasePolicy = "dense"
-    backend: str = "dense"
+    backend: str = "auto"
     targets: tuple[str, ...] = ("*",)
     exclude: tuple[str, ...] = ()
     layers: tuple[int, ...] = ()

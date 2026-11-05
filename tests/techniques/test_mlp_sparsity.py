@@ -44,7 +44,7 @@ FAST_DEJAVU = dict(rank=16, fit_steps=60, fit_batch=128, fit_lr=1e-2)
 
 def _gated(model: torch.nn.Module, layer: int = 1):
     adapter = economize.arch.adapter_for(model)
-    return gated_mlps(adapter, CatsConfig())[layer]
+    return gated_mlps(adapter, CatsConfig(backend="dense"))[layer]
 
 
 def _hidden(model: torch.nn.Module, rows: int = 12, seed: int = 0) -> Tensor:
@@ -78,12 +78,12 @@ def test_dejavu_config_validation(kwargs: dict) -> None:
 
 def test_config_rejects_missing_layer(tiny2, adapter_of) -> None:
     with pytest.raises(ConfigError):
-        CatsConfig(layers=(3,)).validate(adapter_of(tiny2))
+        CatsConfig(layers=(3,), backend="dense").validate(adapter_of(tiny2))
 
 
 def test_mixture_of_experts_or_fused_mlps_are_refused(tiny2, adapter_of) -> None:
     with pytest.raises(UnsupportedModelError, match="gated MLP"):
-        CatsTechnique(CatsConfig(up="fused_gate_up"), adapter_of(tiny2))
+        CatsTechnique(CatsConfig(up="fused_gate_up", backend="dense"), adapter_of(tiny2))
 
 
 def test_metadata_and_registration() -> None:
@@ -159,7 +159,7 @@ def test_topk_mask() -> None:
 @pytest.mark.parametrize("target", [0.3, 0.5, 0.7])
 def test_cats_threshold_drops_the_target_fraction(tiny2, adapter_of, calib, attach_context, target: float) -> None:
     adapter = adapter_of(tiny2)
-    technique = CatsTechnique(CatsConfig(sparsity=target, prefill="all"), adapter)
+    technique = CatsTechnique(CatsConfig(sparsity=target, prefill="all", backend="dense"), adapter)
     technique.attach(tiny2, adapter, attach_context(calib))
     seen: list[float] = []
     for index, t in technique.threshold_map().items():
@@ -178,7 +178,7 @@ def test_cats_threshold_drops_the_target_fraction(tiny2, adapter_of, calib, atta
 
 def test_cats_attach_detach_and_state_round_trip(tiny2, adapter_of, calib, held_out, attach_context) -> None:
     adapter = adapter_of(tiny2)
-    config = CatsConfig(sparsity=0.5, prefill="all")
+    config = CatsConfig(sparsity=0.5, prefill="all", backend="dense")
     reference = tiny2(held_out).logits
     technique = CatsTechnique(config, adapter)
     assert not technique.calibrated
@@ -200,12 +200,12 @@ def test_cats_attach_detach_and_state_round_trip(tiny2, adapter_of, calib, held_
 
 def test_cats_loading_after_attach_updates_the_thresholds(tiny2, adapter_of, calib, held_out, attach_context) -> None:
     adapter = adapter_of(tiny2)
-    first = CatsTechnique(CatsConfig(sparsity=0.6, prefill="all"), adapter)
+    first = CatsTechnique(CatsConfig(sparsity=0.6, prefill="all", backend="dense"), adapter)
     first.attach(tiny2, adapter, attach_context(calib))
     target = tiny2(held_out).logits
     state = first.state_dict()
     first.detach()
-    second = CatsTechnique(CatsConfig(sparsity=0.2, prefill="all"), adapter)
+    second = CatsTechnique(CatsConfig(sparsity=0.2, prefill="all", backend="dense"), adapter)
     second.attach(tiny2, adapter, attach_context(calib))
     second.load_state_dict(state)
     assert torch.equal(tiny2(held_out).logits, target)
@@ -215,12 +215,12 @@ def test_cats_loading_after_attach_updates_the_thresholds(tiny2, adapter_of, cal
 def test_cats_needs_calibration(tiny2, adapter_of, attach_context) -> None:
     adapter = adapter_of(tiny2)
     with pytest.raises(ConfigError, match="calibration"):
-        CatsTechnique(CatsConfig(), adapter).attach(tiny2, adapter, attach_context(None))
+        CatsTechnique(CatsConfig(backend="dense"), adapter).attach(tiny2, adapter, attach_context(None))
 
 
 def test_dense_prefill_keeps_multi_token_calls_exact(tiny2, calib, held_out) -> None:
     reference = tiny2(held_out).logits
-    model = economize.apply(tiny2, CatsConfig(sparsity=0.5), calibration=[calib])
+    model = economize.apply(tiny2, CatsConfig(sparsity=0.5, backend="dense"), calibration=[calib])
     assert torch.equal(model(held_out).logits, reference)  # default prefill="dense": a forward pass outside decoding
     model.detach()
     assert torch.equal(tiny2(held_out).logits, reference)
@@ -229,18 +229,18 @@ def test_dense_prefill_keeps_multi_token_calls_exact(tiny2, calib, held_out) -> 
 def test_cats_and_dejavu_conflict_with_teal() -> None:
     from economize.techniques.sparsity import TealConfig
 
-    for config in (CatsConfig(), DejaVuConfig()):
+    for config in (CatsConfig(backend="dense"), DejaVuConfig(backend="dense")):
         with pytest.raises(IncompatibleTechniquesError):
-            economize.apply(make_tiny_model(num_layers=2), config, TealConfig())
+            economize.apply(make_tiny_model(num_layers=2), config, TealConfig(backend="dense"))
     with pytest.raises(IncompatibleTechniquesError):
-        economize.apply(make_tiny_model(num_layers=2), CatsConfig(), DejaVuConfig())
+        economize.apply(make_tiny_model(num_layers=2), CatsConfig(backend="dense"), DejaVuConfig(backend="dense"))
 
 
 def test_cats_composes_with_weight_quantization(calib, held_out) -> None:
     from economize.techniques.prune import PruneConfig
 
     base = make_tiny_model(num_layers=2)
-    model = economize.apply(base, PruneConfig(sparsity=0.3), CatsConfig(sparsity=0.5, prefill="all"),
+    model = economize.apply(base, PruneConfig(sparsity=0.3), CatsConfig(sparsity=0.5, prefill="all", backend="dense"),
                             calibration=[calib])
     logits = model(held_out).logits
     assert torch.isfinite(logits).all()
@@ -250,7 +250,7 @@ def test_cats_composes_with_weight_quantization(calib, held_out) -> None:
 
 
 def _fitted(model, adapter, calib, attach_context, **kwargs) -> DejaVuTechnique:
-    config = DejaVuConfig(sparsity=0.5, prefill="all", **{**FAST_DEJAVU, **kwargs})
+    config = DejaVuConfig(sparsity=0.5, prefill="all", **{**FAST_DEJAVU, **kwargs}, backend="dense")
     technique = DejaVuTechnique(config, adapter)
     technique.attach(model, adapter, attach_context(calib))
     return technique
@@ -275,7 +275,8 @@ def _recall(technique: DejaVuTechnique, model, ids: Tensor) -> float:
 
 def test_dejavu_fit_beats_a_random_predictor(tiny2, adapter_of, calib, held_out, attach_context) -> None:
     adapter = adapter_of(tiny2)
-    untrained = DejaVuTechnique(DejaVuConfig(sparsity=0.5, prefill="all", **{**FAST_DEJAVU, "fit_steps": 0}), adapter)
+    untrained_config = DejaVuConfig(sparsity=0.5, prefill="all", **{**FAST_DEJAVU, "fit_steps": 0}, backend="dense")
+    untrained = DejaVuTechnique(untrained_config, adapter)
     untrained.attach(tiny2, adapter, attach_context(None))  # no fit: no calibration needed
     chance = _recall(untrained, tiny2, held_out)
     untrained.detach()
@@ -291,7 +292,7 @@ def test_dejavu_long_prefill_in_pieces_matches_one_piece(
     tiny2, adapter_of, held_out, attach_context, monkeypatch, prefill
 ) -> None:
     adapter = adapter_of(tiny2)
-    config = DejaVuConfig(sparsity=0.5, prefill=prefill, **{**FAST_DEJAVU, "fit_steps": 0})
+    config = DejaVuConfig(sparsity=0.5, prefill=prefill, **{**FAST_DEJAVU, "fit_steps": 0}, backend="dense")
     technique = DejaVuTechnique(config, adapter)
     technique.attach(tiny2, adapter, attach_context(None))
     whole = tiny2(held_out).logits
@@ -339,7 +340,8 @@ def test_dejavu_lookahead_reads_the_first_norm(tiny2, adapter_of, calib, held_ou
     logits = tiny2(held_out).logits
     assert torch.isfinite(logits).all()
     technique.detach()
-    missing = DejaVuTechnique(DejaVuConfig(predictor_input="lookahead", lookahead_norm="nope", fit_steps=0), adapter)
+    lookahead = DejaVuConfig(predictor_input="lookahead", lookahead_norm="nope", fit_steps=0, backend="dense")
+    missing = DejaVuTechnique(lookahead, adapter)
     with pytest.raises(UnsupportedModelError, match="nope"):
         missing.attach(tiny2, adapter, None)
     missing.detach()
@@ -358,7 +360,7 @@ def test_dejavu_objective_trains_only_the_predictors(calib) -> None:
 
     base = make_tiny_model(num_layers=2)
     base_before = {k: v.clone() for k, v in base.state_dict().items()}
-    config = DejaVuConfig(sparsity=0.5, prefill="all", rank=16, fit_steps=0)
+    config = DejaVuConfig(sparsity=0.5, prefill="all", rank=16, fit_steps=0, backend="dense")
     model = economize.apply(base, config)
     technique = model.techniques["dejavu"]
     assert OBJECTIVES.get("dejavu") is DejaVuObjective
@@ -375,7 +377,7 @@ def test_dejavu_objective_trains_only_the_predictors(calib) -> None:
 def test_dejavu_objective_needs_the_installed_technique() -> None:
     from economize.train.objective import Batch
 
-    model = economize.apply(make_tiny_model(num_layers=2), DejaVuConfig(rank=4, fit_steps=0))
+    model = economize.apply(make_tiny_model(num_layers=2), DejaVuConfig(rank=4, fit_steps=0, backend="dense"))
     technique = model.techniques["dejavu"]
     technique.detach()
     with pytest.raises(UnsupportedModelError, match="installed"):
@@ -385,7 +387,7 @@ def test_dejavu_objective_needs_the_installed_technique() -> None:
 # ---- serving -------------------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("config", [CatsConfig(), DejaVuConfig()], ids=["cats", "dejavu"])
+@pytest.mark.parametrize("config", [CatsConfig(backend="dense"), DejaVuConfig(backend="dense")], ids=["cats", "dejavu"])
 def test_serving_adapters_refuse_honestly(config) -> None:
     from economize.backends.sglang.serving.base import SGLANG_TECHNIQUES
     from economize.backends.vllm.serving.base import VLLM_TECHNIQUES, Support
@@ -447,7 +449,7 @@ class Interpreted(TritonMlpBackend):
 
 torch.manual_seed(0)
 model = make_tiny_model(num_layers=2)
-mlp = gated_mlps(economize.arch.adapter_for(model), CatsConfig())[1]
+mlp = gated_mlps(economize.arch.adapter_for(model), CatsConfig(backend="dense"))[1]
 x = torch.randn(3, model.config.hidden_size)
 with torch.no_grad():
     ops = Interpreted().ops(mlp)

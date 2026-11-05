@@ -26,10 +26,10 @@ from ...core.calibration import (
     resolve_layers,
     token_batches,
 )
-from ...core.metadata import Family, KernelChoice, Saving, TechniqueInfo
+from ...core.metadata import Family, KernelChoice, Saving, Simulation, TechniqueInfo
 from ...core.technique import Capability, Technique, register_technique
 from ..sparsity.sparsify import magnitude_quantile, track_layer_tokens
-from .backends import MLP_SPARSITY_BACKENDS, MlpOps
+from .backends import MLP_SPARSITY_BACKENDS, MlpOps, fallback_simulation
 from .config import CatsConfig
 from .mlp import GatedMlp, MlpPatch, dense_first_half, gated_mlps, masked
 
@@ -119,6 +119,7 @@ class CatsTechnique(Technique):
     def attach(self, model: nn.Module, adapter: Any, context: Any = None) -> None:
         self.config.validate(adapter)
         self.detach()  # calibration reads the dense MLPs
+        MLP_SPARSITY_BACKENDS.get(self.config.backend)().check(gated_mlps(adapter, self.config))
         if not self.calibrated:
             batches = token_batches(calibration_source(context, self.name))
             found = calibrate_cats(adapter, self.config, batches)
@@ -137,6 +138,12 @@ class CatsTechnique(Technique):
             self._live.append(live)
             self._patches.append(MlpPatch(mlp, partial(_rule, threshold=live), backend.ops(mlp), policy))
         self._patches += track_layer_tokens(self.adapter.layers)
+
+    def simulation(self) -> Simulation | None:
+        """The backend's simulation, or the dense fallback of an installed backend on MLPs its kernels cannot serve
+        (:attr:`.backends.MlpOps.realized`)."""
+        ops = [patch.ops for patch in self._patches if isinstance(patch, MlpPatch)]
+        return super().simulation() or fallback_simulation(ops, self.info.saves)
 
     def detach(self) -> None:
         for patch in self._patches:

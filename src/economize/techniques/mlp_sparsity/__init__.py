@@ -2,20 +2,26 @@
 
 Both techniques skip FFN channels of a gated MLP ``down(act(gate(x)) * up(x))`` per token. CATS drops the channels
 whose gate activation is below a calibrated threshold; Deja Vu computes the channels a trained low-rank predictor
-scores highest. The ``dense`` backend masks around the unchanged dense maps (the numerical reference, declared as
-a simulation); the ``triton`` backend reads only the kept weight rows of the up (and gate) maps
+scores highest. The default ``auto`` backend reads only the kept weight rows of the up (and gate) maps
 (:func:`.kernel.row_masked_gemv`) and the kept weight columns of the down map (TEAL's column-sparse GEMV) for calls
-of up to 16 rows on 16-bit CUDA weights.
+of up to 16 rows on 16-bit CUDA weights with launch parameters timed on the device (:mod:`.autotune`), and refuses a
+model the kernels cannot serve; ``triton`` runs the same kernels with heuristic launch parameters and a dense
+fallback; the ``dense`` backend masks around the unchanged dense maps (the numerical reference on any device,
+declared as a simulation).
 """
 
+from .auto_backend import AutoMlpBackend
+from .autotune import RowTuner, RowTuning, clear_row_tuning_cache
 from .backends import (
     MLP_SPARSITY_BACKENDS,
     DenseMlpBackend,
     DenseOps,
+    KernelPlan,
     MlpOps,
     MlpSparsityBackend,
     TritonMlpBackend,
     TritonOps,
+    fallback_simulation,
 )
 from .cats import CatsTechnique, GateMagnitudeObserver, calibrate_cats, cats_mlp
 from .config import PREDICTOR_DTYPES, PREDICTOR_INPUTS, CatsConfig, DejaVuConfig, MlpSparsityConfig
@@ -35,6 +41,7 @@ __all__ = [
     "MLP_SPARSITY_BACKENDS",
     "PREDICTOR_DTYPES",
     "PREDICTOR_INPUTS",
+    "AutoMlpBackend",
     "CatsConfig",
     "CatsTechnique",
     "DejaVuConfig",
@@ -44,21 +51,26 @@ __all__ = [
     "DenseOps",
     "GateMagnitudeObserver",
     "GatedMlp",
+    "KernelPlan",
     "MlpOps",
     "MlpPatch",
     "MlpRule",
     "MlpSparsityBackend",
     "MlpSparsityConfig",
     "RowGemvConfig",
+    "RowTuner",
+    "RowTuning",
     "TritonMlpBackend",
     "TritonOps",
     "calibrate_cats",
     "call_mode",
     "cats_mlp",
+    "clear_row_tuning_cache",
     "default_row_config",
     "dejavu_labels",
     "dejavu_mlp",
     "dense_first_half",
+    "fallback_simulation",
     "ffn_width",
     "fit_predictor",
     "gated_mlps",

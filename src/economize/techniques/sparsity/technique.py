@@ -9,7 +9,7 @@ import torch
 from torch import nn
 
 from ...core.calibration import calibration_source, token_batches
-from ...core.metadata import Family, KernelChoice, Saving, TechniqueInfo
+from ...core.metadata import Family, KernelChoice, Saving, Simulation, TechniqueInfo
 from ...core.technique import Capability, Technique, register_technique
 from .backends import TEAL_BACKENDS, Installed
 from .config import TealConfig
@@ -62,6 +62,7 @@ class TealTechnique(Technique):
 
     def attach(self, model: Any, adapter: Any, context: Any = None) -> None:
         self.config.validate(adapter)
+        TEAL_BACKENDS.get(self.config.backend)().check(teal_modules(adapter, self.config))  # before calibrating
         if not self.calibrated:
             batches = token_batches(calibration_source(context, self.name))
             self.calibration = calibrate_teal(adapter, self.config, batches)
@@ -78,6 +79,16 @@ class TealTechnique(Technique):
         if self._installed is not None:
             self._installed.remove()
         self._installed, self._live = None, {}
+
+    def simulation(self) -> Simulation | None:
+        """The backend's simulation, or the masked fallback of an installed backend on maps its kernel cannot serve
+        (:attr:`.backends.Installed.masked`)."""
+        declared = super().simulation()
+        masked = self._installed.masked if self._installed is not None else ()
+        if declared is not None or not masked:
+            return declared
+        reason = f"masks the inputs of the dense matmul in {len(masked)} maps the kernel cannot serve"
+        return Simulation(Saving.COMPUTE | Saving.LATENCY, reason).within(self.info.saves)
 
     def threshold_map(self) -> dict[str, float]:
         """Threshold of every target map, keyed ``"<layer>.<module>"``."""

@@ -67,6 +67,8 @@ SUBSTITUTIONS: list[tuple[str, str]] = [
     (r"\[:32768\]", "[:4096]"),
     (r"Qwen/Qwen2\.5-7B-Instruct", "Qwen/Qwen2.5-0.5B"),
     (r"Qwen/Qwen2\.5-7B", "Qwen/Qwen2.5-0.5B-Instruct"),
+    # The default sparse kernels need CUDA; on a CPU the pages run the masked dense reference (same numbers).
+    (r"\b(TealConfig|CatsConfig|DejaVuConfig)\((?!.*backend=)", r'\1(backend="dense", '),
 ]
 
 
