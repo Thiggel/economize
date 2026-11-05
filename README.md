@@ -1,4 +1,7 @@
-<h1 align="center">🤑 economize</h1>
+<h1 align="center">
+  <img src="https://raw.githubusercontent.com/Thiggel/economize/main/docs/assets/logo.svg" alt="" width="40" height="40">
+  economize
+</h1>
 
 <p align="center">
   <a href="https://pypi.org/project/economize/"><img alt="PyPI" src="https://img.shields.io/pypi/v/economize.svg"></a>
