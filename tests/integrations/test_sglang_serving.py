@@ -252,7 +252,7 @@ def test_fp8_kv_cache(tiny_dir: Path, tmp_path: Path) -> None:
 
 
 def test_fake_quant_with_jump_writes_the_dequantized_base(tiny_dir: Path, tmp_path: Path) -> None:
-    model = economize.apply(_base(tiny_dir), QuantConfig(format="int4", group_size=32), JUMP)
+    model = economize.apply(_base(tiny_dir), QuantConfig(format="int4", group_size=32, backend="fake"), JUMP)
     perturb(model.techniques["jump"], 0.02, seed=1)
     plan = to_sglang(model, tmp_path / "out")
     assert plan.model_path == str(tmp_path / "out" / "model") and plan.tokenizer == str(tiny_dir)

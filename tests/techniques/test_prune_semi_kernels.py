@@ -29,7 +29,7 @@ def test_builtin_kernels_registered() -> None:
     "kwargs",
     [
         {"sparsity": "2:4", "semi_structured": True, "semi_structured_kernel": "nope"},
-        {"sparsity": "2:4", "semi_structured_kernel": "auto"},
+        {"sparsity": "2:4", "semi_structured": False, "semi_structured_kernel": "auto"},
     ],
 )
 def test_kernel_config_validation(kwargs) -> None:
@@ -105,7 +105,7 @@ def test_prune_model_with_kernel_matches_masked_dense(tiny2, adapter_of, name: s
     model = tiny2.to("cuda", torch.float16)
     adapter = adapter_of(model)
     ids = torch.randint(0, 128, (1, 64), device="cuda")
-    prune_model(adapter, PruneConfig(method="magnitude", sparsity="2:4", targets=("mlp.*",)))
+    prune_model(adapter, PruneConfig(method="magnitude", sparsity="2:4", targets=("mlp.*",), semi_structured=False))
     dense = model(ids).logits
     prune_model(
         adapter,

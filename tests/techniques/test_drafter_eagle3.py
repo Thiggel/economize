@@ -377,7 +377,7 @@ def test_eagle3_on_a_pruned_model_equals_its_greedy(trained: SimpleNamespace, ca
     from economize.techniques.prune import PruneConfig
 
     base = make_tiny_model()
-    model = economize.apply(base, PruneConfig(method="wanda", sparsity="2:4"), Eagle3Config(),
+    model = economize.apply(base, PruneConfig(method="wanda", sparsity="2:4", semi_structured=False), Eagle3Config(),
                          decoding=DecodeConfig(cycle_length=4), calibration=calib)
     assert list(model.techniques) == ["prune", "eagle3"]
     model.techniques["eagle3"].load_state_dict(trained.model.techniques["eagle3"].state_dict())

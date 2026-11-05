@@ -63,7 +63,9 @@ def test_every_technique_has_a_trtllm_status() -> None:
     assert all(reason for _, _, reason in rows.values())
     for native in ("draft_model", "placed_draft_model", "medusa", "lookup", "kv_fp8", "kv_evict", "depth_prune"):
         assert rows[native][1] == Support.NATIVE.value, native
-    assert rows["quant"][1] == rows["lowrank"][1] == rows["prune"][1] == Support.DENSIFIED.value
+    # the default int4 codes are asymmetric (W4A16_AWQ has no zero points); nothing holds 2:4 or factored weights
+    for refused in ("quant", "lowrank", "prune", "littlebit"):
+        assert rows[refused][1] == Support.UNSUPPORTED.value, refused
     for refused in ("eagle", "eagle3", "hydra", "redrafter", "lookahead", "teal", "calm", "frspec"):
         assert rows[refused][1] == Support.UNSUPPORTED.value, refused
     assert "jump" not in rows and TRTLLM.support_table(["jump"])[0][2] == Support.UNSUPPORTED.value  # unlisted
@@ -79,8 +81,9 @@ def test_backend_support_reports_trtllm() -> None:
 def test_levels_follow_the_configuration() -> None:
     quant = TRTLLM.adapter_for("quant")
     assert quant.level(_quant()) is Support.NATIVE
-    assert quant.level(_quant(symmetric=False)) is Support.NATIVE  # decided per map (asymmetric maps are densified)
-    assert quant.level(_quant("int8")) is Support.DENSIFIED
+    assert quant.level(_quant(symmetric=False)) is Support.UNSUPPORTED  # W4A16_AWQ has no zero points
+    assert quant.level(_quant(group_size=32)) is Support.UNSUPPORTED
+    assert quant.level(_quant("int8")) is Support.UNSUPPORTED
     assert quant.level(_quant(backend="fake")) is Support.DENSIFIED
     w8a8 = QuantConfig(format="fp8", backend="torchao", fp8_activations=True, group_size=None)
     assert quant.level(w8a8) is Support.UNSUPPORTED
@@ -218,13 +221,18 @@ def test_int4_codes_dequantize_to_economize_weights(tmp_path: Path) -> None:
                             "has_zero_point": False, "pre_quant_scale": True, "exclude_modules": ["lm_head"]}
 
 
-@pytest.mark.parametrize(("config", "reason"), [
-    (_quant(symmetric=False), "asymmetric"),
-    (_quant(group_size=32), "group size 32"),
-    (_quant("int8"), "dense equivalent"),
-    (_quant(backend="fake"), "dense equivalent"),
+@pytest.mark.parametrize(("config", "match"), [
+    (_quant(symmetric=False), "asymmetric int4 codes"),
+    (_quant(group_size=32), "group_size=32 is not one of W4A16_AWQ's group sizes"),
+    (_quant("int8"), "int8 codes"),
 ])
-def test_codes_without_a_w4a16_form_are_written_dense(tmp_path: Path, config: QuantConfig, reason: str) -> None:
+def test_codes_without_a_w4a16_form_are_refused(tmp_path: Path, config: QuantConfig, match: str) -> None:
+    with pytest.raises(UnsupportedBackendError, match=match):
+        to_trtllm(economize.apply(make_tiny_model(), config), tmp_path, dtype="float32")
+
+
+@pytest.mark.parametrize(("config", "reason"), [(_quant(backend="fake"), "dense equivalent")])
+def test_the_fake_reference_is_written_dense(tmp_path: Path, config: QuantConfig, reason: str) -> None:
     model = economize.apply(make_tiny_model(), config)
     with pytest.warns(SimulatedPathWarning, match="quant"):
         export = to_trtllm(model, tmp_path, dtype="float32")

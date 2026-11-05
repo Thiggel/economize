@@ -153,7 +153,7 @@ def test_hqq_model_writes_the_hqq_weights(tiny2, adapter_of, held_out, nll) -> N
     original = copy.deepcopy(tiny2)
     dense = nll(tiny2, held_out)
     adapter = adapter_of(tiny2)
-    summary = quantize_model(adapter, QuantConfig(method="hqq", format="int4", group_size=32))
+    summary = quantize_model(adapter, QuantConfig(method="hqq", format="int4", group_size=32, backend="fake"))
     assert summary["modules"] == 14
     before = linear_modules(adapter, original.model.layers[0])
     for name, module in linear_modules(adapter, adapter.layer(1)).items():

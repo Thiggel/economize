@@ -325,7 +325,7 @@ def test_streaming_bytes_count_committed_entries_after_rollback() -> None:
 def test_eviction_with_prune(calib) -> None:
     from economize.techniques.prune import PruneConfig
 
-    prune = PruneConfig(method="wanda", sparsity="2:4")
+    prune = PruneConfig(method="wanda", sparsity="2:4", semi_structured=False)
     prompt = _prompts()[0]
     expected = economize.apply(make_tiny_model(), prune, calibration=calib).decode(prompt, 20).tokens
     model = economize.apply(make_tiny_model(), prune, KVEvictConfig(method="h2o", recent=1000), calibration=calib)

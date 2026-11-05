@@ -48,12 +48,12 @@ def _dense() -> Tensors:
 # ---- weight transforms ---------------------------------------------------------------------------------------------
 @golden("quant_rtn_int4_g32")
 def _rtn() -> Tensors:
-    return logits_after(QuantConfig(method="rtn", format="int4", group_size=32))
+    return logits_after(QuantConfig(method="rtn", format="int4", group_size=32, backend="fake"))
 
 
 @golden("quant_gptq_int4_g32")
 def _gptq() -> Tensors:
-    return logits_after(QuantConfig(method="gptq", format="int4", group_size=32), calibrate=True)
+    return logits_after(QuantConfig(method="gptq", format="int4", group_size=32, backend="fake"), calibrate=True)
 
 
 @golden("quant_awq_scales_int3_g32")
@@ -65,54 +65,57 @@ def _awq() -> Tensors:
     groups). Another torch build or CPU flips some of them, so the clipped logits move by up to 0.8 between torch
     2.5 and 2.14, while the scale search alone agrees to 2e-5. ``tests/techniques/test_quant.py`` covers clipping.
     """
-    return logits_after(QuantConfig(method="awq", format="int3", group_size=32, awq_clip=False), calibrate=True)
+    config = QuantConfig(method="awq", format="int3", group_size=32, awq_clip=False, backend="fake")
+    return logits_after(config, calibrate=True)
 
 
 @golden("quant_fp8")
 def _fp8() -> Tensors:
-    return logits_after(QuantConfig(format="fp8", group_size=None))
+    return logits_after(QuantConfig(format="fp8", group_size=None, backend="fake"))
 
 
 @golden("quant_hqq_int4_g32")
 def _hqq() -> Tensors:
-    return logits_after(QuantConfig(method="hqq", format="int4", group_size=32))
+    return logits_after(QuantConfig(method="hqq", format="int4", group_size=32, backend="fake"))
 
 
 # int8 activations: the mean |diff| between CPUs is 1e-2, the method moves the logits by 0.11 on average.
 @golden("quant_smoothquant_w8a8", mean_atol=3e-2)
 def _smoothquant() -> Tensors:
-    config = QuantConfig(method="smoothquant", format="int8", group_size=None, symmetric=True, activations="int8")
+    config = QuantConfig(
+        method="smoothquant", format="int8", group_size=None, symmetric=True, activations="int8", backend="fake"
+    )
     return logits_after(config, calibrate=True)
 
 
 @golden("quant_nvfp4_g16")
 def _nvfp4() -> Tensors:
-    return logits_after(QuantConfig(format="nvfp4", group_size=16))
+    return logits_after(QuantConfig(format="nvfp4", group_size=16, backend="fake"))
 
 
 @golden("quant_mxfp4_g32")
 def _mxfp4() -> Tensors:
-    return logits_after(QuantConfig(format="mxfp4", group_size=32))
+    return logits_after(QuantConfig(format="mxfp4", group_size=32, backend="fake"))
 
 
 @golden("quant_rotate_rtn_int4_g32")
 def _rotate_rtn() -> Tensors:
-    return logits_after(RotateConfig(), QuantConfig(format="int4", group_size=32))
+    return logits_after(RotateConfig(), QuantConfig(format="int4", group_size=32, backend="fake"))
 
 
 @golden("prune_magnitude_50")
 def _magnitude() -> Tensors:
-    return logits_after(PruneConfig(method="magnitude", sparsity=0.5))
+    return logits_after(PruneConfig(method="magnitude", sparsity=0.5, semi_structured=False))
 
 
 @golden("prune_wanda_50")
 def _wanda() -> Tensors:
-    return logits_after(PruneConfig(method="wanda", sparsity=0.5), calibrate=True)
+    return logits_after(PruneConfig(method="wanda", sparsity=0.5, semi_structured=False), calibrate=True)
 
 
 @golden("prune_sparsegpt_2of4")
 def _sparsegpt() -> Tensors:
-    return logits_after(PruneConfig(method="sparsegpt", sparsity="2:4"), calibrate=True)
+    return logits_after(PruneConfig(method="sparsegpt", sparsity="2:4", semi_structured=False), calibrate=True)
 
 
 @golden("lowrank_svd_llm_20")

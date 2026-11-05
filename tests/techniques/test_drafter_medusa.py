@@ -261,7 +261,8 @@ def test_medusa_on_a_pruned_model_equals_its_greedy(calib) -> None:
     from economize.techniques.prune import PruneConfig
 
     base = make_tiny_model()
-    model = economize.apply(base, PruneConfig(method="wanda", sparsity="2:4"), MedusaConfig(num_heads=3, tree=TREE),
+    model = economize.apply(base, PruneConfig(method="wanda", sparsity="2:4", semi_structured=False),
+                            MedusaConfig(num_heads=3, tree=TREE),
                          decoding=DecodeConfig(cycle_length=4), calibration=calib)
     assert list(model.techniques) == ["prune", "medusa"]
     _assert_greedy(model, base)

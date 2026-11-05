@@ -10,7 +10,10 @@ and are invisible on the rendered page:
 * a line ``--8<-- "docs/snippets/<file>.md"`` includes a snippet, as ``pymdownx.snippets`` does when the site is built
   (paths are relative to the repository root).
 
-The rewrites change sizes and devices, never an economize call.
+The rewrites change sizes and devices, never an economize call, with one exception: the defaults of ``quant``,
+``draft_quant``, ``prune``, ``teal``, ``cats`` and ``dejavu`` need GPU kernels (int4 GEMMs, 2:4 sparse tensor cores,
+sparse Triton GEMVs), so the CPU run swaps them for their simulated references (``backend="fake"``,
+``semi_structured=False``, ``backend="dense"``), which compute the same numbers.
 """
 
 from __future__ import annotations
@@ -69,6 +72,9 @@ SUBSTITUTIONS: list[tuple[str, str]] = [
     (r"Qwen/Qwen2\.5-7B", "Qwen/Qwen2.5-0.5B-Instruct"),
     # The default sparse kernels need CUDA; on a CPU the pages run the masked dense reference (same numbers).
     (r"\b(TealConfig|CatsConfig|DejaVuConfig)\((?!.*backend=)", r'\1(backend="dense", '),
+    # The GPU-kernel defaults of the weight compressions, replaced by their references (same numerics).
+    (r"(?<!\w)(DraftQuantConfig|QuantConfig)\((?![^)]*(?<!\w)backend\s*=)", r'\1(backend="fake", '),
+    (r"(?<!\w)PruneConfig\((?![^)]*(?<!\w)semi_structured\s*=)", "PruneConfig(semi_structured=False, "),
 ]
 
 

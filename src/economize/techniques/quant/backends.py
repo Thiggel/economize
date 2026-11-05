@@ -1,7 +1,9 @@
 """Kernel backends: how a quantized linear map is stored and run.
 
-* ``"fake"``: the dequantized weights stay in the model dtype (simulated quantization). Exact reference for the
-  quality of a format and method on any device; no memory or speed gain.
+* ``"auto"`` (the default, :mod:`.auto`): the fastest installed real kernel below that stores the layout and runs on
+  the modules' device and dtype; an error lists the packages to install when none does.
+* ``"fake"``: the dequantized weights stay in the model dtype (simulated quantization, an explicit opt-in). Exact
+  reference for the quality of a format and method on any device; no memory or speed gain.
 * ``"torchao"``: the codes are wrapped in torchao tensor subclasses that ``F.linear`` dispatches to quantized
   kernels. The tensors are built from the codes the method chose, so GPTQ and AWQ codes run unchanged. One builder
   per format is registered in :data:`TORCHAO_TENSORS`, and what its kernel accepts (group sizes, zero points,
@@ -105,6 +107,39 @@ class QuantBackend(ABC):
                 drafter-only quantization.
         """
 
+    def unavailable(self, config: QuantSpec) -> str | None:
+        """Why no installed package can run ``config`` on this backend, independent of the device (``None``: one can).
+
+        :func:`~economize.backend_support` reports the technique as unsupported on the Hugging Face backend with
+        this reason. The device, dtype and GPU generation are only known to :meth:`check`.
+
+        Parameters
+        ----------
+        config : QuantSpec
+            The quantization config.
+
+        Returns
+        -------
+        str or None
+            The reason, or ``None`` when the backend's packages are installed.
+        """
+        return None
+
+    def resolved(self, config: QuantSpec) -> str:
+        """The name of the backend that stores the weights (a dispatching backend names the one it chose).
+
+        Parameters
+        ----------
+        config : QuantSpec
+            The quantization config.
+
+        Returns
+        -------
+        str
+            The registered backend name.
+        """
+        return config.backend
+
     @abstractmethod
     def apply(self, module: nn.Linear, qweight: QuantizedWeight, config: QuantSpec) -> None:
         """Replace ``module.weight`` by its stored form. The module already holds the dequantized weight."""
@@ -187,6 +222,9 @@ class TorchaoBackend(QuantBackend):
     def stores_float_zeros(self, config: QuantSpec) -> bool:
         return config.format in TORCHAO_CONSTRAINTS and TORCHAO_CONSTRAINTS.get(config.format).float_zeros
 
+    def unavailable(self, config: QuantSpec) -> str | None:
+        return _torchao_reason()
+
     def check(self, modules: Mapping[str, nn.Linear], config: QuantSpec) -> None:
         _require_torchao()
         check_devices(TORCHAO_CONSTRAINTS, modules, config, self.options)
@@ -218,9 +256,16 @@ def warn_eager_dequant(modules: Mapping[str, nn.Linear], config: QuantSpec) -> b
     return True
 
 
-def _require_torchao() -> None:
+def _torchao_reason() -> str | None:
     if importlib.util.find_spec("torchao") is None:
-        raise ConfigError("backend 'torchao' needs the torchao package: pip install 'economize[quant]'")
+        return "backend 'torchao' needs the torchao package: pip install 'economize[quant]'"
+    return None
+
+
+def _require_torchao() -> None:
+    reason = _torchao_reason()
+    if reason is not None:
+        raise ConfigError(reason)
 
 
 @register_torchao_format(

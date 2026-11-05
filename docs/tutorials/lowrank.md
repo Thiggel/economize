@@ -11,7 +11,10 @@ of `W S` and folds `S^-1` back into the factors. The output error `||(W - W') X^
 dropped squared singular values, which makes truncation optimal for the calibration inputs. The `svd` method
 truncates `W` itself and reads no data. Nothing is trained, and the result is lossy.
 
-The saving is real: the two factors are plain `nn.Linear` maps with fewer parameters, on `transformers` and on vLLM.
+The saving is real: the two factors are plain `nn.Linear` maps with fewer parameters, on `transformers`, on vLLM and
+in an ONNX export, which writes the two factors as two `MatMul` nodes (`MatMulNBits` when they are quantized).
+SGLang, llama.cpp, MLX and TensorRT-LLM build each linear map from one weight, so their exports refuse the technique
+instead of multiplying the factors out.
 The time saved follows the parameter count only when the two thin matrix products are not bound by kernel launches,
 which holds for large models more than for small ones. Factorization rewrites the base model in place, so the
 technique cannot be detached.

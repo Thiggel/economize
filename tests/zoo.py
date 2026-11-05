@@ -118,7 +118,7 @@ _SPECIMENS: dict[str, Callable[[Path], TechniqueConfig]] = {
     "dflash": lambda _: DFlashConfig(),
     "dmtd": lambda _: DmtdConfig(decoding_layers=2),
     "draft_model": lambda a: DraftModelConfig(model=_draft_lm(a), dtype="float32"),
-    "draft_quant": lambda _: DraftQuantConfig(group_size=None),  # per channel: the tiny maps are 64 wide
+    "draft_quant": lambda _: DraftQuantConfig(group_size=None, backend="fake"),  # per channel: the maps are 64 wide
     "duo_attention": lambda _: DuoAttentionConfig(pattern=((0.9, 0.1),) * 6, sinks=2, recent=4),
     "eagle": lambda _: EagleConfig(),
     "eagle3": lambda _: Eagle3Config(),
@@ -151,8 +151,8 @@ _SPECIMENS: dict[str, Callable[[Path], TechniqueConfig]] = {
     "mod": lambda _: MoDConfig(),
     "pard": lambda a: PardConfig(model=_draft_lm(a), mask_token_id=VOCAB - 1),
     "placed_draft_model": lambda a: PlacedDraftModelConfig(model=_draft_lm(a), device="cpu"),
-    "prune": lambda _: PruneConfig(),
-    "quant": lambda _: QuantConfig(),
+    "prune": lambda _: PruneConfig(sparsity=0.5, semi_structured=False),  # the masked reference: no CPU sparse kernel
+    "quant": lambda _: QuantConfig(backend="fake"),  # the CPU reference: no int4 kernel here
     "quest": lambda _: QuestConfig(page_size=16, token_budget=32, dense_layers=0),
     "redrafter": lambda _: RedrafterConfig(),
     "rest": lambda a: RestConfig(datastore=_datastore(a), max_span=4),

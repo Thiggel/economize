@@ -78,13 +78,18 @@ model.detach()
 calibration = ids.repeat(4, 1)
 model = economize.apply(
     base,
-    PruneConfig(method="wanda", sparsity="2:4"),                # 2:4 sparse weights
-    QuantConfig(format="int8", method="rtn"),                   # int8 weights
+    PruneConfig(method="wanda", sparsity="2:4", semi_structured=False),  # 2:4 masks in dense weights
+    QuantConfig(format="int8", method="rtn"),                   # int8 weights on the best installed kernel
     TealConfig(sparsity=0.4),                                   # activation sparsity
     Eagle3Config(),                                             # a drafter
     calibration=calibration,
 )
 ```
+
+By default `PruneConfig` stores 2:4 weights as sparse tensors for the sparse tensor cores and `QuantConfig`
+picks the best installed low-bit kernel (`backend="auto"`). Sparse tensors cannot be quantized afterwards, so a
+recipe that quantizes pruned weights keeps the masks in dense weights with `semi_structured=False`, which
+`economize.backend_support` reports as simulated for the pruning step.
 
 The order of the arguments does not matter. economize first applies the weight transforms (depth pruning, pruning,
 low-rank factorization, then quantization), followed by activation hooks, KV-cache techniques, dynamic depth, the

@@ -129,7 +129,11 @@ BACKEND_SUPPORT: Registry[SupportFn] = Registry("backend", "economize.backend_su
 
 @BACKEND_SUPPORT.register("transformers")
 def _transformers(technique: type[Technique], config: TechniqueConfig | None) -> BackendSupport:
-    """The Hugging Face path of :class:`~economize.EfficientModel` (see :meth:`Technique.simulation_for`)."""
+    """The Hugging Face path of :class:`~economize.EfficientModel` (see :meth:`Technique.unsupported_for` and
+    :meth:`Technique.simulation_for`)."""
+    reason = technique.unsupported_for(config)
+    if reason is not None:
+        return BackendSupport(SupportStatus.UNSUPPORTED, reason)
     return BackendSupport.of(technique.simulation_for(config))
 
 

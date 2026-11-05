@@ -10,13 +10,20 @@ verified tokens) and writes the drafter under ``drafter/``. The draft checkpoint
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, ClassVar
 
 from torch import nn
 
 from ....errors import ConfigError
 from ...exporters import UnsupportedBackendError
-from ...vllm.serving.drafters import DRAFTER_DIR, MTP_COUNT_KEYS, _check_eagle3, _ct_quantized
+from ...vllm.serving.drafters import (
+    DRAFT_QUANT_FAKE,
+    DRAFT_QUANT_REASON,
+    DRAFTER_DIR,
+    MTP_COUNT_KEYS,
+    _check_eagle3,
+    _ct_quantized,
+)
 from .base import Role, SglangPlanBuilder, SglangTechnique, Support, register_sglang_technique
 
 
@@ -276,12 +283,30 @@ class DraftQuantSglang(SglangTechnique):
 
     technique = "draft_quant"
     role = Role.DRAFT_OPTION
-    support = Support.DENSIFIED
-    reason = "the drafter is exported with its rounded (dequantized) weights in the dense dtype"
+    support = Support.UNSUPPORTED
+    reason = DRAFT_QUANT_REASON.format(engine="SGLang")
+    #: Quantization backend -> how SGLang serves the quantized drafter (see :class:`DraftQuantVllm`).
+    levels: ClassVar[dict[str, Support]] = {"fake": Support.DENSIFIED}
 
-    def check(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
-        if _config(technique).backend != "fake":
-            raise UnsupportedBackendError(f"draft_quant backend {_config(technique).backend!r} has no SGLang export")
+    def level(self, technique: nn.Module) -> Support:
+        return self.levels.get(_config(technique).backend, Support.UNSUPPORTED)
+
+    def reason_of(self, technique: nn.Module) -> str:
+        """What SGLang serves for the configured backend, or why it refuses it.
+
+        Parameters
+        ----------
+        technique : nn.Module
+            The technique, or any object with its ``config``.
+
+        Returns
+        -------
+        str
+            The reason shown by :func:`economize.backend_support`.
+        """
+        if self.level(technique) is Support.DENSIFIED:
+            return DRAFT_QUANT_FAKE
+        return self.reason
 
     def contribute(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
         builder.note(self.technique, "the drafter runs the rounded weights in the dense dtype: same drafts, no "

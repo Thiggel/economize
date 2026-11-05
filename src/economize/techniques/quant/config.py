@@ -74,8 +74,8 @@ def _check_float_zeros(config: QuantConfig, float_zeros: bool) -> None:
     if float_zeros and not QUANT_BACKENDS.get(config.backend)().stores_float_zeros(config):
         raise ConfigError(
             f"method {config.method!r} chooses real-valued zero points, which backend {config.backend!r} cannot "
-            f"store for format {config.format!r}: use backend='fake', torchao int4, or the method's integer-zero "
-            f"option"
+            f"store for format {config.format!r}: use torchao int4, the method's integer-zero option, or "
+            f"backend='fake' (the simulated reference)"
         )
 
 
@@ -90,7 +90,10 @@ class QuantConfig(TechniqueConfig):
             ``"awq"`` or ``"smoothquant"`` (these need calibration data); see :mod:`.methods`.
         group_size: Input columns per scale (``None``: one scale per output channel).
         symmetric: Integer grids without a zero point.
-        backend: ``"fake"`` (dequantized weights, any device), ``"torchao"`` (torchao kernels), ``"marlin"``
+        backend: ``"auto"`` (default: the fastest installed real kernel for the format, group size, device and
+            dtype, among Machete, Marlin, CUTLASS and torchao; an error names the packages to install when none
+            fits, :mod:`.auto`), ``"fake"`` (dequantized weights on any device, the simulated reference: no memory
+            or speed saving), ``"torchao"`` (torchao kernels), ``"marlin"``
             (vLLM's Marlin weight-only GEMM, the fast int8 / fp8 path on A100), ``"machete"`` (vLLM's Machete
             int4 / int8 GEMM on H100), ``"cutlass"`` (vLLM's CUTLASS int8 x int8 GEMM, W8A8 with
             ``activations="int8"``) or ``"compressed-tensors"`` (dequantized weights plus the codes, for an
@@ -153,7 +156,7 @@ class QuantConfig(TechniqueConfig):
     method: str = "rtn"
     group_size: int | None = 128
     symmetric: bool = False
-    backend: str = "fake"
+    backend: str = "auto"
     targets: tuple[str, ...] = ("*",)
     exclude: tuple[str, ...] = ()
     layers: tuple[int, ...] = ()
@@ -213,7 +216,8 @@ class DraftQuantConfig(TechniqueConfig):
         group_size: Input columns per scale (``None``: per output channel). Modules whose input size it does not
             divide are skipped.
         symmetric: Integer grids without a zero point.
-        backend: ``"fake"``, ``"torchao"``, ``"marlin"`` or ``"machete"``.
+        backend: ``"auto"`` (default: the fastest installed real kernel, see :class:`QuantConfig`), ``"fake"``
+            (the simulated reference), ``"torchao"``, ``"marlin"`` or ``"machete"``.
         targets: Globs over module names inside the drafter (``"predictor.*"``, ``"blocks.*"``).
         exclude: Globs removed from ``targets``.
     """
@@ -224,7 +228,7 @@ class DraftQuantConfig(TechniqueConfig):
     format: str = "int8"
     group_size: int | None = 128
     symmetric: bool = True
-    backend: str = "fake"
+    backend: str = "auto"
     targets: tuple[str, ...] = ("*",)
     exclude: tuple[str, ...] = ("*lora*",)
     #: Drafter quantization is weight-only (see :class:`QuantSpec`).

@@ -4,7 +4,9 @@ The export is an ``mlx_lm`` model folder. What ``mlx_lm`` realizes of economize'
 
 * weights: integer codes of 2 to 8 bits in contiguous groups of 32, 64 or 128 are stored as MLX's affine
   quantization (``QuantizedLinear``: packed codes, scales, biases); other codes and the ``fake`` backend are written
-  dequantized; pruned, low-rank and LittleBit weights are written dense, and a depth-pruned model is a plain model;
+  dequantized; a depth-pruned model is a plain model; pruning, low rank and LittleBit are refused (``mlx_lm``
+  builds its models from its own architecture code, one dense weight per linear map, and has no sparse kernel),
+  except the explicit masked-dense pruning reference ``prune(semi_structured=False)``, written dense;
 * drafting: a separate draft model (``draft_model``, ``placed_draft_model``) becomes ``mlx_lm.generate
   --draft-model`` (``mlx_lm``'s speculative decoding);
 * KV eviction: StreamingLLM with 4 sinks (``kv_evict(method="streaming")``) is ``mlx_lm``'s rotating cache
@@ -24,10 +26,10 @@ from torch import nn
 
 from ...core.config import TechniqueConfig
 from ...registry import Registry
-from ..export_adapters import QuantExport, StreamingWindowExport, register_weight_adapters
+from ..export_adapters import QuantExport, StreamingWindowExport, int_bits, register_weight_adapters
 from ..runtime_export import ExportBuilder, ExportRuntime, ExportTechnique
 from ..vllm.serving.base import Role, Support
-from .writer import mlx_reason
+from .writer import MLX_BITS, MLX_GROUP_SIZES, mlx_reason
 
 if TYPE_CHECKING:
     from ...techniques.quant.grid import QuantizedWeight
@@ -64,17 +66,25 @@ class MlxQuant(QuantExport):
     """``quant``: integer codes are stored as MLX affine quantization (``scales * code + biases``).
 
     The codes are copied as they are and ``biases = -scale * zero``; scales and biases are stored in the export's
-    float type, so a float16 or bfloat16 export rounds them. Weights with ``act_order`` groups, group sizes other
-    than 32, 64 or 128 and scale-only grids are written dequantized (the export then reports ``DENSIFIED``).
+    float type, so a float16 or bfloat16 export rounds them. A weight with ``act_order`` groups or an input width
+    its group size does not divide is written dequantized (the export then reports ``DENSIFIED``). Other formats
+    and group sizes other than 32, 64 or 128 are refused; ``backend="fake"`` is written dequantized.
     """
 
-    reason = ("int2 / int3 / int4 / int8 codes of the compressed-tensors, marlin, machete and torchao backends in "
-              "groups of 32, 64 or 128 are stored as MLX affine quantization (packed uint32 codes, scales, biases); "
-              "backend='fake' and other formats are written dequantized")
+    reason = ("int2-int8 codes of the auto, compressed-tensors, marlin, machete and torchao backends in groups of 32, "
+              "64 or 128 are stored as MLX affine quantization (packed uint32 codes, scales, biases) and run by "
+              "MLX's quantized matmul")
     fp8_activations_reason = "MLX's QuantizedLinear is weight-only (no fp8 activations); export the weight-only model"
 
-    def stores(self, config: TechniqueConfig) -> bool:
-        return getattr(config, "backend", "fake") != "fake" and getattr(config, "format", "").startswith("int")
+    def layout_reason(self, config: TechniqueConfig) -> str | None:
+        bits = int_bits(config)
+        if bits not in MLX_BITS:
+            return (f"{getattr(config, 'format', '?')} codes have no MLX affine form "
+                    f"(int{', int'.join(map(str, MLX_BITS))})")
+        group = getattr(config, "group_size", None)
+        if group not in MLX_GROUP_SIZES:
+            return f"group_size={group} is not one of MLX's group sizes {', '.join(map(str, MLX_GROUP_SIZES))}"
+        return None
 
     def stores_weight(self, name: str, weight: QuantizedWeight) -> str | None:
         return mlx_reason(weight)

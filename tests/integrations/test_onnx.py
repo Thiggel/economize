@@ -28,6 +28,8 @@ from economize.errors import ConfigError, SimulatedPathWarning
 from economize.techniques.draft_model.config import DraftModelConfig
 from economize.techniques.kv_quant.fp8 import FP8KVConfig
 from economize.techniques.lookup.config import LookupConfig
+from economize.techniques.lowrank.config import LowRankConfig
+from economize.techniques.prune import PruneConfig
 from economize.techniques.quant import QuantConfig
 from helpers import make_family_model, make_tiny_model, reference_greedy
 
@@ -61,9 +63,11 @@ def test_every_technique_has_an_onnx_status() -> None:
     rows = {name: (role, support, reason) for name, role, support, reason in ONNX.support_table()}
     assert set(listed_techniques()) <= set(rows)
     assert all(reason for _, _, reason in rows.values())
-    assert rows["quant"][1] == Support.DENSIFIED.value  # the default backend is "fake"
+    assert rows["quant"][1] == Support.NATIVE.value  # the default backend "auto" writes int4 codes MatMulNBits stores
     assert rows["depth_prune"][1] == Support.NATIVE.value
-    assert rows["lowrank"][1] == Support.DENSIFIED.value
+    assert rows["lowrank"][1] == Support.NATIVE.value  # two MatMul nodes per factored map
+    for refused in ("prune", "littlebit"):  # no sparse or binary-factor kernel; the prune reference is opt-in
+        assert rows[refused][1] == Support.UNSUPPORTED.value, refused
     for refused in ("draft_model", "lookup", "eagle", "medusa", "kv_fp8", "kv_evict", "teal", "calm"):
         assert rows[refused][1] == Support.UNSUPPORTED.value, refused
     assert "jump" not in rows and ONNX.support_table(["jump"])[0][2] == Support.UNSUPPORTED.value  # unlisted
@@ -98,17 +102,21 @@ def test_quant_levels() -> None:
     assert adapter.level(_quant("int4")) is Support.NATIVE
     assert adapter.level(_quant("int8", symmetric=True, backend="marlin")) is Support.NATIVE
     assert adapter.level(_quant("int4", backend="fake")) is Support.DENSIFIED
-    assert adapter.level(_quant("fp8", backend="compressed-tensors")) is Support.DENSIFIED
+    assert adapter.level(_quant("fp8", backend="compressed-tensors")) is Support.UNSUPPORTED  # no fp8 MatMulNBits
+    assert "MatMulNBits form" in adapter.reason_for(_quant("fp8", backend="compressed-tensors"))
     w8a8 = QuantConfig(format="fp8", group_size=None, backend="torchao", fp8_activations=True)
     assert adapter.level(w8a8) is Support.UNSUPPORTED
 
 
-def test_codes_without_a_matmul_nbits_form_are_densified() -> None:
+def test_codes_without_a_matmul_nbits_form_are_refused() -> None:
     model = economize.apply(make_tiny_model(num_layers=2), _quant("int3"))
+    with pytest.raises(UnsupportedBackendError, match="MatMulNBits form"):
+        check_onnx(model)
+    reference = economize.apply(make_tiny_model(num_layers=2), _quant("int3", backend="fake"))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", SimulatedPathWarning)
-        builder = check_onnx(model)
-    assert builder.supports["quant"] is Support.DENSIFIED
+        builder = check_onnx(reference)
+    assert builder.supports["quant"] is Support.DENSIFIED  # the explicit reference is written dequantized
     assert not builder.quantized
 
 
@@ -201,6 +209,60 @@ def test_quant_codes_run_as_matmul_nbits(tmp_path: Path, fmt: str) -> None:
     assert np.abs(_onnx_logits(export) - _logits(model)).max() < 1e-4
     tokens = load_onnx(export).generate(np.array([PROMPT]), 10)
     assert tokens[0, len(PROMPT):].tolist() == _greedy(model)
+
+
+def test_prune_is_refused_and_its_reference_densified() -> None:
+    pruned = economize.apply(make_tiny_model(num_layers=2), PruneConfig(method="magnitude", semi_structured=False))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", SimulatedPathWarning)
+        assert check_onnx(pruned).supports["prune"] is Support.DENSIFIED
+    refused = economize.backend_support("prune")["onnx"]
+    assert refused.status.value == "unsupported" and "semi_structured=False" in refused.detail
+
+
+def _initializers(export: RuntimeExport) -> dict[str, int]:
+    """The number of values each initializer of the exported graph stores, by name."""
+    import onnx
+
+    return {init.name: int(np.prod(init.dims)) for init in onnx.load(str(export.path)).graph.initializer}
+
+
+def _layer_numbers(export: RuntimeExport) -> int:
+    return sum(count for name, count in _initializers(export).items() if ".layers." in name)
+
+
+def test_lowrank_keeps_its_two_factors(tmp_path: Path) -> None:
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("onnxscript")
+    model = economize.apply(make_tiny_model(num_layers=2), LowRankConfig(method="svd", compression=0.5))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", SimulatedPathWarning)
+        export = to_onnx(model, tmp_path)
+    assert export.supports == {"lowrank": "native"} and not export.simulated
+    names = _initializers(export)
+    assert {"lm.model.layers.0.mlp.down_proj.down.weight", "lm.model.layers.0.mlp.down_proj.up.weight"} <= set(names)
+    assert "lm.model.layers.0.mlp.down_proj.weight" not in names
+    dense = to_onnx(make_tiny_model(num_layers=2), tmp_path / "dense")
+    assert _layer_numbers(export) < 0.55 * _layer_numbers(dense)  # compression 0.5: the factors hold half
+    assert np.abs(_onnx_logits(export) - _logits(model)).max() < 1e-4
+    tokens = load_onnx(export).generate(np.array([PROMPT]), 10)
+    assert tokens[0, len(PROMPT):].tolist() == _greedy(model)
+
+
+def test_quantized_factors_run_as_matmul_nbits(tmp_path: Path) -> None:
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("onnxscript")
+    import onnx
+
+    lowrank = LowRankConfig(method="svd", compression=0.25, targets=("mlp.*",), rank_multiple=32)
+    model = economize.apply(make_tiny_model(num_layers=2), lowrank, _quant("int4", symmetric=True))
+    export = to_onnx(model, tmp_path)
+    assert export.supports == {"lowrank": "native", "quant": "native"}
+    graph = onnx.load(str(export.path)).graph
+    nodes = [node for node in graph.node if node.op_type == "MatMulNBits"]
+    assert len(nodes) == 2 * (4 + 2 * 3)  # per layer: q, k, v, o dense and two factors of gate, up and down
+    assert "lm.model.layers.0.mlp.down_proj.down.weight" not in {init.name for init in graph.initializer}
+    assert np.abs(_onnx_logits(export) - _logits(model)).max() < 1e-4
 
 
 @pytest.mark.parametrize("family", ["llama", "qwen3"])

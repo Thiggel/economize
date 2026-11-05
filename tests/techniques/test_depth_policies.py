@@ -357,12 +357,15 @@ def test_depth_with_prune_and_lowrank(config: object, calib) -> None:
     from economize.techniques.prune import PruneConfig
 
     prompt = _prompts()[0]
-    for weights in (PruneConfig(method="wanda", sparsity="2:4"), LowRankConfig(method="svd", compression=0.3)):
+    for weights in (
+        PruneConfig(method="wanda", sparsity="2:4", semi_structured=False),
+        LowRankConfig(method="svd", compression=0.3),
+    ):
         expected = economize.apply(make_tiny_model(), weights, calibration=calib).decode(prompt, 20).tokens
         model = economize.apply(make_tiny_model(), weights, config, calibration=calib)
         assert torch.equal(model.decode(prompt, 20).tokens, expected)
     lossy = economize.apply(
-        make_tiny_model(), PruneConfig(method="wanda", sparsity="2:4"),
+        make_tiny_model(), PruneConfig(method="wanda", sparsity="2:4", semi_structured=False),
         SkipDecodeConfig(min_layers=3, decay=8), calibration=calib,
     )
     result = lossy.decode(prompt, 20)

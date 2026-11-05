@@ -28,12 +28,12 @@ import warnings
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, TypeVar
+from typing import TYPE_CHECKING, ClassVar, TypeVar, overload
 
 import torch
 from torch import nn
 
-from ..core.compatibility import BackendSupport
+from ..core.compatibility import BackendSupport, resolve
 from ..core.config import TechniqueConfig
 from ..core.metadata import Simulation
 from ..core.technique import TECHNIQUES, Technique, listed_techniques
@@ -105,6 +105,21 @@ class ExportTechnique:
         """
         return self.support
 
+    def reason_for(self, config: TechniqueConfig) -> str:
+        """The reason shown for the technique configured by ``config`` (why it is refused, or what runs).
+
+        Parameters
+        ----------
+        config : TechniqueConfig
+            The technique's configuration.
+
+        Returns
+        -------
+        str
+            The default returns :attr:`reason`.
+        """
+        return self.reason
+
     def check(self, technique: nn.Module, builder: ExportBuilder) -> None:
         """Raise if ``technique`` cannot be exported next to what ``builder`` holds.
 
@@ -120,9 +135,10 @@ class ExportTechnique:
         UnsupportedBackendError
             The level of the configured technique is ``UNSUPPORTED`` (the default check).
         """
-        if self.level(config_of(technique)) is Support.UNSUPPORTED:
+        config = config_of(technique)
+        if self.level(config) is Support.UNSUPPORTED:
             raise UnsupportedBackendError(
-                f"{builder.runtime.title} cannot run the {self.technique!r} technique: {self.reason}"
+                f"{builder.runtime.title} cannot run the {self.technique!r} technique: {self.reason_for(config)}"
             )
 
     def contribute(self, technique: nn.Module, builder: ExportBuilder) -> None:
@@ -166,6 +182,12 @@ class ExportRuntime:
     defaults: Mapping[str, tuple[Role, str]]
     fallback: str
     exclusive: Mapping[Role, str] = field(default_factory=dict)
+
+    @overload
+    def register(self, adapter: _A, *, override: bool = False) -> _A: ...
+
+    @overload
+    def register(self, adapter: None = None, *, override: bool = False) -> Callable[[_A], _A]: ...
 
     def register(self, adapter: _A | None = None, *, override: bool = False) -> Callable[[_A], _A] | _A:
         """Class decorator registering an adapter under its :attr:`ExportTechnique.technique`.
@@ -274,10 +296,14 @@ class ExportRuntime:
         """
         adapter = self.adapter_for(technique.name)
         level = adapter.level(config) if config is not None else adapter.support
-        return adapter_support(self.title, technique, level, adapter.reason, adapter.simulation)
+        reason = adapter.reason_for(config) if config is not None else adapter.reason
+        return adapter_support(self.title, technique, level, reason, adapter.simulation)
 
     def support_table(self, names: Iterable[str] | None = None) -> list[tuple[str, str, str, str]]:
         """``(technique, role, support, reason)`` of every registered technique (or of ``names``), sorted.
+
+        The level and reason are those of the technique's default configuration (the adapter's class attributes
+        when the technique has no valid default).
 
         Parameters
         ----------
@@ -296,7 +322,10 @@ class ExportRuntime:
         rows = []
         for name in sorted(listed):
             adapter = self.adapter_for(name)
-            rows.append((name, adapter.role.value, adapter.support.value, adapter.reason))
+            config = _default_config(name)
+            level = adapter.level(config) if config is not None else adapter.support
+            reason = adapter.reason_for(config) if config is not None else adapter.reason
+            rows.append((name, adapter.role.value, level.value, reason))
         return rows
 
     def plan(self, model: nn.Module, out_dir: str | Path | None, *, num_draft_tokens: int = 4) -> ExportBuilder:
@@ -378,6 +407,9 @@ class ExportBuilder:
         Tensors an adapter adds to the checkpoint under the runtime's names (e.g. Medusa heads, cache scales).
     header : dict[str, object]
         Fields an adapter adds to the runtime's model config (a dict value is merged into the field's dict).
+    factored : dict[str, nn.Module]
+        Factored linear maps (``down`` then ``up``) by qualified name in the base model that the runtime keeps as
+        their two factors instead of multiplying them out.
     """
 
     runtime: ExportRuntime
@@ -393,6 +425,7 @@ class ExportBuilder:
     drafter: nn.Module | None = None
     tensors: dict[str, torch.Tensor] = field(default_factory=dict)
     header: dict[str, object] = field(default_factory=dict)
+    factored: dict[str, nn.Module] = field(default_factory=dict)
 
     @property
     def base(self) -> nn.Module:
@@ -588,6 +621,11 @@ def config_of(technique: nn.Module) -> TechniqueConfig:
     """
     config: TechniqueConfig = getattr(technique, "config")  # noqa: B009 (nn.Module types attributes as tensors)
     return config
+
+
+def _default_config(name: str) -> TechniqueConfig | None:
+    """The default configuration of the registered technique ``name`` (``None``: unregistered, or no valid default)."""
+    return resolve(name)[1] if name in TECHNIQUES else None
 
 
 def dense_state(builder: ExportBuilder, dtype: torch.dtype | None = None) -> dict[str, torch.Tensor]:

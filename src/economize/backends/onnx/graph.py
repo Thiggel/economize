@@ -128,6 +128,8 @@ def nbits_reason(weight: QuantizedWeight) -> str | None:
         return f"{weight.grid.name} codes have no MatMulNBits form (bits {', '.join(map(str, NBITS))})"
     if weight.g_idx is not None:
         return "GPTQ act_order groups are not contiguous (MatMulNBits blocks are)"
+    if weight.zero is not None and not bool(torch.equal(weight.zero, torch.round(weight.zero))):
+        return "real-valued zero points (HQQ) have no MatMulNBits form (its zero points are integers)"
     size = weight.group_size
     if size < 16 or size & (size - 1) or weight.codes.shape[1] % size:
         return f"group size {size} is not a power of two >= 16 that divides the {weight.codes.shape[1]} inputs"

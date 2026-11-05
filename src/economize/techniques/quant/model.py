@@ -66,7 +66,7 @@ class _Summary:
         self.bits += q.bits_per_weight * q.codes.numel()
 
     def as_dict(
-        self, config: QuantConfig | DraftQuantConfig, method: str, skipped: Sequence[str] = ()
+        self, config: QuantConfig | DraftQuantConfig, method: str, kernel: str, skipped: Sequence[str] = ()
     ) -> dict[str, Any]:
         return {
             "method": method,
@@ -74,6 +74,7 @@ class _Summary:
             "group_size": config.group_size,
             "symmetric": config.grid.symmetric,  # fp8 is scale-only whatever the flag says
             "backend": config.backend,
+            "kernel": kernel,  # the backend that stores the weights (what backend="auto" chose)
             "modules": self.modules,
             "weights": self.weights,
             "bits_per_weight": self.bits / max(self.weights, 1),
@@ -123,7 +124,7 @@ def quantize_model(
     def convert_pending() -> None:
         for module, q in pending:
             if q.g_idx is not None and not backend.supports_g_idx:
-                raise ConfigError(f"backend {config.backend!r} cannot store non-contiguous groups (g_idx)")
+                raise ConfigError(f"backend {backend.resolved(config)!r} cannot store non-contiguous groups (g_idx)")
             backend.apply(module, q, config)
         pending.clear()
 
@@ -146,7 +147,7 @@ def quantize_model(
         for module in targets.values():  # the transaction restores parameters, not activation hooks
             activations.uninstall(module)
         raise
-    return summary.as_dict(config, config.method, skipped)
+    return summary.as_dict(config, config.method, backend.resolved(config), skipped)
 
 
 @torch.no_grad()
@@ -164,5 +165,5 @@ def quantize_modules(
         module.weight.data.copy_(q.dequantize(module.weight.dtype))
         backend.apply(module, q, config)
         summary.add(q)
-    return summary.as_dict(config, "rtn", skipped)
+    return summary.as_dict(config, "rtn", backend.resolved(config), skipped)
 

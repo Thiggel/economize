@@ -14,7 +14,8 @@ weight and reads no data. `blockwise` starts from it and then trains each decode
 against the original layer's outputs on calibration data, with the SmoothSign surrogate gradient. The paper trains
 the whole model end to end, so `blockwise` is its short-budget, layer-local form. The result is lossy. The packed
 factors are the stored weights on `transformers`, and the forward runs a Triton binary GEMM on CUDA GPUs and an
-unpack-and-matmul reference elsewhere. Other backends receive dense weights. The technique rewrites the base model in
+unpack-and-matmul reference elsewhere. The other backends have no binary low-rank kernel, and writing the product of
+the factors as a dense weight would discard the saving, so their exports refuse the technique. The technique rewrites the base model in
 place, so it cannot be detached.
 
 ## Setup

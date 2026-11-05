@@ -138,7 +138,7 @@ def test_early_exit_on_a_pruned_model_equals_its_greedy(calib) -> None:
     from economize.techniques.prune import PruneConfig
 
     base = make_tiny_model()
-    model = economize.apply(base, PruneConfig(method="wanda", sparsity="2:4"),
+    model = economize.apply(base, PruneConfig(method="wanda", sparsity="2:4", semi_structured=False),
                          EarlyExitConfig(exit_layer=3, adaptation="lora", lora_rank=2),
                          decoding=DecodeConfig(cycle_length=4), calibration=calib)
     assert list(model.techniques) == ["prune", "early_exit"]
@@ -153,7 +153,8 @@ def test_draft_quant_quantizes_the_layer_copies_only() -> None:
 
     base = make_tiny_model()
     reference = {k: v.clone() for k, v in base.state_dict().items()}
-    model = economize.apply(base, EarlyExitConfig(exit_layer=3, adaptation="full"), DraftQuantConfig(group_size=None),
+    model = economize.apply(base, EarlyExitConfig(exit_layer=3, adaptation="full"),
+                            DraftQuantConfig(group_size=None, backend="fake"),
                          decoding=DecodeConfig(cycle_length=4))
     assert all(torch.equal(v, reference[k]) for k, v in base.state_dict().items())
     prompt = _prompts()[0]

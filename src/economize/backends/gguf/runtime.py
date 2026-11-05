@@ -3,7 +3,9 @@
 llama.cpp runs a GGUF file with its own kernels. What it realizes of economize's techniques:
 
 * weights: ``quant`` codes that have a GGUF block type are stored in it (``int4`` as ``Q4_0`` / ``Q4_1``, ``int8``
-  as ``Q8_0``); pruned, low-rank and LittleBit weights are written dense, a depth-pruned model is a plain model;
+  as ``Q8_0``); a depth-pruned model is a plain model; pruning, low rank and LittleBit are refused (llama.cpp
+  graphs have one dense weight per linear map and no sparse kernel), except the explicit masked-dense pruning
+  reference ``prune(semi_structured=False)``, written dense;
 * drafting: a separate draft model (``draft_model``, ``placed_draft_model``) becomes ``llama-server --model-draft``,
   and prompt lookup (``lookup``) llama-cpp-python's ``LlamaPromptLookupDecoding``;
 * everything else is refused with the reason (llama.cpp has no hook for hidden-state drafters, dynamic depth,
@@ -62,18 +64,25 @@ class GgufQuant(QuantExport):
 
     The codes are repacked bit for bit; the block scales are float16 (GGUF's), so the stored weights differ from
     economize's by the float16 rounding of the scales. Weights whose groups are not multiples of 32 input columns,
-    ``act_order`` weights and other grids are written dequantized (the export then reports ``DENSIFIED``).
+    ``act_order`` weights are written dequantized (the export then reports ``DENSIFIED``). Other formats, asymmetric
+    int8 and group sizes that are not multiples of 32 are refused; ``backend="fake"`` is written dequantized.
     """
 
-    reason = ("int4 / int8 codes of the compressed-tensors, marlin, machete and torchao backends are stored as GGUF "
-              "Q4_0, Q4_1 or Q8_0 blocks (float16 block scales); backend='fake' and other formats are written "
-              "dequantized")
+    reason = ("int4 / int8 codes of the auto, compressed-tensors, marlin, machete and torchao backends are stored as "
+              "GGUF Q4_0, Q4_1 or Q8_0 blocks (float16 block scales) and run by llama.cpp's quantized kernels")
     fp8_activations_reason = ("llama.cpp has no fp8 activations (W8A8); export the weight-only model or let "
                               "llama-quantize make a K-quant from an f16 export")
 
-    def stores(self, config: TechniqueConfig) -> bool:
-        backend = getattr(config, "backend", "fake")
-        return backend != "fake" and getattr(config, "format", "") in ("int4", "int8")
+    def layout_reason(self, config: TechniqueConfig) -> str | None:
+        fmt = getattr(config, "format", "")
+        if fmt not in ("int4", "int8"):
+            return f"{fmt} codes have no GGUF block type (int4 is Q4_0 / Q4_1, symmetric int8 Q8_0)"
+        if fmt == "int8" and not getattr(config, "symmetric", False):
+            return "asymmetric int8 codes have no GGUF block type (Q8_0 is symmetric: set symmetric=True)"
+        group = getattr(config, "group_size", None)
+        if group is not None and group % 32:
+            return f"group_size={group} is not a multiple of GGUF's 32-value blocks"
+        return None
 
     def stores_weight(self, name: str, weight: QuantizedWeight) -> str | None:
         code, why = code_type(weight)

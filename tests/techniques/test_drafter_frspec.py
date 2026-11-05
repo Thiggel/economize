@@ -139,7 +139,8 @@ def test_inner_must_draft() -> None:
     from economize.techniques.prune import PruneConfig
 
     with pytest.raises(ConfigError, match="draft"):
-        economize.apply(make_tiny_model(), FRSpecConfig(drafter=PruneConfig(method="magnitude", sparsity=0.5),
+        economize.apply(make_tiny_model(), FRSpecConfig(drafter=PruneConfig(method="magnitude", sparsity=0.5,
+                                                                            semi_structured=False),
                                                      vocab_size=8, token_ids=tuple(range(8))))
 
 
@@ -336,7 +337,8 @@ def test_frspec_on_a_pruned_model_equals_its_greedy(calib: torch.Tensor) -> None
     from economize.techniques.prune import PruneConfig
 
     base = make_tiny_model()
-    model = economize.apply(base, PruneConfig(method="wanda", sparsity="2:4"), FRSpecConfig(drafter=JUMP, vocab_size=K),
+    model = economize.apply(base, PruneConfig(method="wanda", sparsity="2:4", semi_structured=False),
+                            FRSpecConfig(drafter=JUMP, vocab_size=K),
                          decoding=DecodeConfig(cycle_length=4), calibration=calib)
     perturb(model.techniques["frspec"].inner, std=0.05, seed=3)
     assert list(model.techniques) == ["prune", "frspec"]

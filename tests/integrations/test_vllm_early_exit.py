@@ -138,7 +138,7 @@ def _base(folder: Path) -> Any:
 def test_plan_serves_early_exit_on_the_plugin(tiny_dir: Path, tmp_path: Path) -> None:
     """fp8 KV cache + early-exit drafter + its layer copies in int8 in one plan, served on the jump plugin."""
     model = economize.apply(_base(tiny_dir), FP8KVConfig(), EarlyExitConfig(exit_layer=EXIT, adaptation="full"),
-                            DraftQuantConfig(format="int8"))
+                            DraftQuantConfig(format="int8", backend="fake"))
     plan = to_vllm(model, tmp_path / "out", num_speculative_tokens=3)
     assert plan.techniques == {"kv_fp8": "native", "early_exit": "plugin", "draft_quant": "densified"}
     assert plan.model == str(tiny_dir) and plan.engine["kv_cache_dtype"] == "fp8_e4m3"

@@ -5,8 +5,9 @@ techniques:
 
 * weights: symmetric int4 codes in groups of 64 or 128 are stored as ``W4A16_AWQ``; other codes and the ``fake``
   backend are written dequantized (TensorRT-LLM's int8 and per-channel weight-only checkpoints hold float weights
-  that ``trtllm-build`` quantizes itself); pruned, low-rank and LittleBit weights are written dense, and a
-  depth-pruned model is a plain model;
+  that ``trtllm-build`` quantizes itself); a depth-pruned model is a plain model; pruning, low rank and
+  LittleBit are refused (the checkpoint would hold their multiplied-out dense weights), except the explicit
+  masked-dense pruning reference ``prune(semi_structured=False)``, written dense;
 * drafting: a separate draft model (``draft_model``, ``placed_draft_model``) is a second checkpoint in ``draft/``
   for TensorRT-LLM's draft-target speculation; Medusa heads (``head="own"``) go into the checkpoint as
   ``MedusaForCausalLM`` with the static tree as ``medusa_choices``; prompt lookup (``lookup``) is TensorRT-LLM's
@@ -33,11 +34,17 @@ from torch import nn
 
 from ...core.config import TechniqueConfig
 from ...registry import Registry
-from ..export_adapters import QuantExport, StreamingWindowExport, register_weight_adapters
+from ..export_adapters import (
+    PRUNE_REFERENCE_HINT,
+    PruneExport,
+    QuantExport,
+    StreamingWindowExport,
+    register_weight_adapters,
+)
 from ..exporters import UnsupportedBackendError
 from ..runtime_export import ExportBuilder, ExportRuntime, ExportTechnique, ModelShape, config_of
 from ..vllm.serving.base import Role, Support
-from .writer import fused_mismatches, trt_reason
+from .writer import TRT_GROUP_SIZES, fused_mismatches, trt_reason
 
 if TYPE_CHECKING:
     from ...techniques.quant.grid import QuantizedWeight
@@ -77,17 +84,26 @@ class TrtQuant(QuantExport):
 
     The codes are repacked bit for bit and the scales stored in the checkpoint's float type. Other weights are
     written dequantized (the export then reports ``DENSIFIED``); a fused attention map holds codes only when its
-    query, key and value maps all do.
+    query, key and value maps all do. Other formats, asymmetric codes and other group sizes are refused;
+    ``backend="fake"`` is written dequantized.
     """
 
-    reason = ("symmetric int4 codes of the compressed-tensors, marlin, machete and torchao backends in groups of 64 or "
-              "128 are stored as W4A16_AWQ; other codes and backend='fake' are written dequantized (trtllm-build "
-              "quantizes int8 / per-channel weight-only checkpoints from float weights itself)")
+    reason = ("symmetric int4 codes of the auto, compressed-tensors, marlin, machete and torchao backends in groups "
+              "of 64 or 128 are stored as W4A16_AWQ and run by TensorRT-LLM's weight-only int4 GEMM")
     fp8_activations_reason = ("the export writes TensorRT-LLM's weight-only int4 checkpoint; quantize to FP8 with "
                               "NVIDIA ModelOpt (W8A8 codes are not exported)")
 
-    def stores(self, config: TechniqueConfig) -> bool:
-        return getattr(config, "backend", "fake") != "fake" and getattr(config, "format", "") == "int4"
+    def layout_reason(self, config: TechniqueConfig) -> str | None:
+        fmt = getattr(config, "format", "")
+        if fmt != "int4":
+            return (f"{fmt} codes: TensorRT-LLM's int8 and per-channel weight-only checkpoints hold float weights "
+                    "that trtllm-build quantizes itself; only group-wise int4 is stored as codes")
+        if not getattr(config, "symmetric", False):
+            return "asymmetric int4 codes (W4A16_AWQ has no zero points): set symmetric=True"
+        group = getattr(config, "group_size", None)
+        if group not in TRT_GROUP_SIZES:
+            return f"group_size={group} is not one of W4A16_AWQ's group sizes {', '.join(map(str, TRT_GROUP_SIZES))}"
+        return None
 
     def stores_weight(self, name: str, weight: QuantizedWeight) -> str | None:
         return trt_reason(weight)
@@ -104,6 +120,19 @@ class TrtQuant(QuantExport):
 
 
 register_weight_adapters(TRTLLM, TrtQuant)
+
+
+@TRTLLM.register(override=True)
+class TrtPrune(PruneExport):
+    """``prune`` on TensorRT-LLM: refused (see :class:`~economize.backends.export_adapters.PruneExport`).
+
+    ``trtllm-build --weight_sparsity`` builds 2:4 sparse GEMMs from the dense weights of a checkpoint, but the
+    export does not set it and no test here runs TensorRT-LLM, so a sparse engine is not claimed.
+    """
+
+    reason = ("the checkpoint holds dense weights and the export does not enable trtllm-build --weight_sparsity (its "
+              "2:4 sparse GEMMs are not verified here), so the pruned model would run at dense cost; "
+              + PRUNE_REFERENCE_HINT)
 
 
 @TRTLLM.register

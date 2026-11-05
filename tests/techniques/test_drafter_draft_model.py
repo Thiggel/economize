@@ -245,7 +245,8 @@ def test_two_model_decoding_on_a_pruned_model_equals_its_greedy(draft_dir: str, 
     from economize.techniques.prune import PruneConfig
 
     base = make_tiny_model()
-    model = economize.apply(base, PruneConfig(method="wanda", sparsity="2:4"), DraftModelConfig(model=draft_dir),
+    model = economize.apply(base, PruneConfig(method="wanda", sparsity="2:4", semi_structured=False),
+                            DraftModelConfig(model=draft_dir),
                          decoding=DecodeConfig(cycle_length=4), calibration=calib)
     assert list(model.techniques) == ["prune", "draft_model"]
     draft = model.techniques["draft_model"].draft_model

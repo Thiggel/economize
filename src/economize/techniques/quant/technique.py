@@ -43,6 +43,11 @@ class QuantTechnique(CalibratedWeightTransform):
     methods: ClassVar[Registry[Any]] = QUANT_METHODS
     config: QuantConfig
 
+    @classmethod
+    def unsupported_for(cls, config: TechniqueConfig | None = None) -> str | None:
+        """Why no installed package runs the configured kernel backend (see :meth:`.QuantBackend.unavailable`)."""
+        return _kernel_unavailable(config if isinstance(config, QuantConfig) else QuantConfig())
+
     def transform(self, adapter: Any, batches: Sequence[Tensor] | None) -> dict[str, Any]:
         return quantize_model(adapter, self.config, batches)
 
@@ -80,6 +85,11 @@ class DraftQuantTechnique(Technique):
             reason = f"{cls.name} cannot be combined with {other.name}: {other.name} has no drafter modules to quantize"
         return reason
 
+    @classmethod
+    def unsupported_for(cls, config: TechniqueConfig | None = None) -> str | None:
+        """Why no installed package runs the configured kernel backend (see :meth:`.QuantBackend.unavailable`)."""
+        return _kernel_unavailable(config if isinstance(config, DraftQuantConfig) else DraftQuantConfig())
+
     def attach(self, model: Any, adapter: Any, context: Any = None) -> None:
         drafter = _the_drafter(getattr(context, "techniques", ()) if context is not None else ())
         modules = draft_modules(drafter, self.config, adapter.model.parameters())
@@ -93,6 +103,10 @@ class DraftQuantTechnique(Technique):
         if snapshot is not None:
             restore_draft(snapshot)
             self._snapshot = None
+
+
+def _kernel_unavailable(config: QuantConfig | DraftQuantConfig) -> str | None:
+    return QUANT_BACKENDS.get(config.backend)().unavailable(config)
 
 
 def _the_drafter(techniques: Sequence[Technique]) -> Technique:

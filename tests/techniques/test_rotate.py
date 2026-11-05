@@ -230,7 +230,7 @@ def _outlier_model() -> nn.Module:
 def test_rotate_lowers_the_error_of_round_to_nearest() -> None:
     base = _outlier_model()
     reference = base(IDS).logits
-    quant = QuantConfig(format="int4", group_size=None)
+    quant = QuantConfig(format="int4", group_size=None, backend="fake")
     errors = {}
     for name, configs in {"rtn": (quant,), "rotate+rtn": (RotateConfig(), quant)}.items():
         model = economize.apply(copy.deepcopy(base), *configs)
@@ -247,11 +247,12 @@ def test_rotate_alone_is_refused() -> None:
 
 
 @pytest.mark.parametrize("other", [
-    PruneConfig(sparsity=0.5),
+    PruneConfig(sparsity=0.5, semi_structured=False),
     LowRankConfig(),
     TealConfig(sparsity=0.5),
-    QuantConfig(method="awq", format="int4", group_size=32),
-    QuantConfig(method="smoothquant", format="int8", group_size=None, symmetric=True, activations="int8"),
+    QuantConfig(method="awq", format="int4", group_size=32, backend="fake"),
+    QuantConfig(method="smoothquant", format="int8", group_size=None, symmetric=True, activations="int8",
+                backend="fake"),
     FP8KVConfig(scale="tensor"),
 ])
 def test_refused_combinations(other: Any) -> None:
@@ -264,9 +265,9 @@ def test_refused_combinations(other: Any) -> None:
 
 
 @pytest.mark.parametrize("other", [
-    QuantConfig(format="int4", group_size=32),
-    QuantConfig(method="gptq", format="int4", group_size=32),
-    QuantConfig(method="hqq", format="int4", group_size=32),
+    QuantConfig(format="int4", group_size=32, backend="fake"),
+    QuantConfig(method="gptq", format="int4", group_size=32, backend="fake"),
+    QuantConfig(method="hqq", format="int4", group_size=32, backend="fake"),
     FP8KVConfig(),
 ])
 def test_allowed_combinations(other: Any) -> None:
@@ -281,7 +282,7 @@ def test_allowed_combinations(other: Any) -> None:
 def test_awq_is_allowed_without_online_rotations() -> None:
     from economize.core.technique import TECHNIQUES
 
-    awq = QuantConfig(method="awq", format="int4", group_size=32)
+    awq = QuantConfig(method="awq", format="int4", group_size=32, backend="fake")
     assert TECHNIQUES.get("rotate").conflict(RotateConfig(online=()), TECHNIQUES.get("quant"), awq) is None
 
 
@@ -332,7 +333,7 @@ def test_vllm_export_declares_the_online_transforms(tiny_dir: Path, tmp_path: Pa
 def test_vllm_export_folds_dense_rotations_back(tiny_dir: Path, tmp_path: Path) -> None:
     from economize.backends.vllm.serving import to_vllm
 
-    model = economize.apply(_base(tiny_dir), RotateConfig(), QuantConfig(format="int4", group_size=32))
+    model = economize.apply(_base(tiny_dir), RotateConfig(), QuantConfig(format="int4", group_size=32, backend="fake"))
     plan = to_vllm(model, tmp_path / "out")
     config = json.loads((Path(plan.model) / "config.json").read_text())
     assert "transform_config" not in (config.get("quantization_config") or {})
