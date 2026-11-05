@@ -1,6 +1,6 @@
 # DFlash block drafting
 
-`dflash` implements DFlash (Chen et al., 2026; arXiv 2602.06036), a drafter that proposes a whole block of tokens
+`dflash` implements DFlash [@chen2026dflash], a drafter that proposes a whole block of tokens
 with one forward of a few small decoder layers. It is a lossless speculative technique (Capability `DRAFTER`): the
 block is verified as a chain by the shared exact pass, so greedy decoding returns the base model's tokens.
 

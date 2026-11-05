@@ -2,8 +2,8 @@
 
 <!-- technique-info: kv_evict_fused -->
 
-`kv_evict_fused` runs the prompt-time eviction policies of [`kv_evict`](kv_evict.md), SnapKV (Li et al., 2024),
-PyramidKV (Cai et al., 2024) and the prompt-time form of H2O (Zhang et al., 2023), and changes how attention reads the
+`kv_evict_fused` runs the prompt-time eviction policies of [`kv_evict`](kv_evict.md), SnapKV [@li2024snapkv],
+PyramidKV [@cai2024pyramidkv] and the prompt-time form of H2O [@zhang2023h2o], and changes how attention reads the
 result. `kv_evict` masks the evicted entries, so a decoding step still visits every block of the prompt that holds a
 kept entry. These three policies select once, right after the prompt pass, and never change the selection, so
 `kv_evict_fused` copies the kept prompt entries of every layer, row and KV head into compact buffers at that point.
@@ -113,16 +113,3 @@ print(economize.backend_support("kv_evict_fused")["vllm"].detail)
 ## Configuration
 
 <!-- technique-config: kv_evict_fused -->
-
-## Reference
-
-Yuhong Li, Yingbing Huang, Bowen Yang, Bharat Venkitesh, Acyr Locatelli, Hanchen Ye, Tianle Cai, Patrick Lewis and
-Deming Chen. *SnapKV: LLM Knows What You are Looking for Before Generation.* NeurIPS 2024, arXiv:2404.14469.
-
-Zefan Cai, Yichi Zhang, Bofei Gao, Yuliang Liu, Yucheng Li, Tianyu Liu, Keming Lu, Wayne Xiong, Yue Dong, Junjie Hu
-and Wen Xiao. *PyramidKV: Dynamic KV Cache Compression based on Pyramidal Information Funneling.* arXiv:2406.02069,
-2024.
-
-Zhenyu Zhang, Ying Sheng, Tianyi Zhou, Tianlong Chen, Lianmin Zheng, Ruisi Cai, Zhao Song, Yuandong Tian, Christopher
-Ré, Clark Barrett, Zhangyang Wang and Beidi Chen. *H2O: Heavy-Hitter Oracle for Efficient Generative Inference of
-Large Language Models.* NeurIPS 2023, arXiv:2306.14048.

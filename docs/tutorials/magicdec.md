@@ -4,7 +4,7 @@
 <!-- test-substitute: texts\[:20\] => texts[:3] -->
 <!-- test-substitute: budget=512 => budget=128 -->
 
-MagicDec (Sadhukhan et al., 2025) is self-speculative decoding for long prompts. With a long prompt the cost of a
+MagicDec [@sadhukhan2025magicdec] is self-speculative decoding for long prompts. With a long prompt the cost of a
 decoding step is dominated by reading the KV cache, so a drafter that keeps every weight of the model and reads only
 a small part of the cache is cheap and still accurate. MagicDec drafts with the base model itself on a StreamingLLM
 view of its cache: the first `sinks` positions (the attention sinks) and a recent window, `budget` slots in all.
@@ -130,9 +130,3 @@ gives the reason per backend.
 ## Configuration
 
 <!-- technique-config: magicdec -->
-
-## Reference
-
-Ranajoy Sadhukhan, Jian Chen, Zhuoming Chen, Vashisth Tiwari, Ruihang Lai, Jinyuan Shi, Ian En-Hsu Yen, Avner May,
-Tianqi Chen and Beidi Chen. *MagicDec: Breaking the Latency-Throughput Tradeoff for Long Context Generation with
-Speculative Decoding.* ICLR 2025, arXiv:2408.11049, 2025.

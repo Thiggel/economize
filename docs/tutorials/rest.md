@@ -2,7 +2,7 @@
 
 <!-- technique-info: rest -->
 
-REST (He et al., 2024) drafts by retrieval from a datastore of text. At every cycle it searches the datastore for
+REST [@he2024rest] drafts by retrieval from a datastore of text. At every cycle it searches the datastore for
 the last `n` committed tokens of a row, for `n = max_span, ..., min_span`, and uses the longest suffix that occurs.
 The `max_depth` tokens that follow each of up to `max_occurrences` occurrences are merged into a trie in which every
 node counts the continuations through it. The `tree_size` most frequent nodes form a draft tree, which the model
@@ -117,8 +117,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: rest -->
-
-## Reference
-
-Zhenyu He, Zexuan Zhong, Tianle Cai, Jason D. Lee and Di He. *REST: Retrieval-Based Speculative Decoding.* NAACL
-2024, arXiv:2311.08252.

@@ -295,7 +295,7 @@ the value. verl takes `verl_engine_kwargs(...)` as `actor_rollout_ref.rollout.en
 
 ## Speculative speculative decoding on several GPUs
 
-`economize.distributed.AsyncSpeculativeDecoder` implements speculative speculative decoding (SSD, Kumar et al., 2026)
+`economize.distributed.AsyncSpeculativeDecoder` implements speculative speculative decoding [SSD, @kumar2026ssd]
 with the target on one GPU and a draft model on another. While the target verifies the current chain, the drafter
 guesses the verification outcome (how many drafts are kept and which token follows) and drafts the next chain
 behind each guess, `fanout` guessed tokens per outcome, in one tree pass per depth. When the actual outcome is

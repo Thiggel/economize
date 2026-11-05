@@ -3,7 +3,7 @@
 <!-- technique-info: kv_fp8 -->
 
 `kv_fp8` stores every key and value entry as an 8-bit float, the `fp8` cache dtype of vLLM and TensorRT-LLM, in one
-of the two formats of Micikevicius et al. (2022): `e4m3` (4 exponent and 3 mantissa bits, the default) or `e5m2`
+of the two formats of @micikevicius2022fp8: `e4m3` (4 exponent and 3 mantissa bits, the default) or `e5m2`
 (a wider range with 2 mantissa bits). Entries are cast to fp8 when they are written and cast back to the model's
 dtype when attention reads them. The cache holds the raw bytes, so the memory it reports is the memory it uses:
 one byte per element, half of a bf16 cache. Three scaling rules are available. `scale="none"` casts directly and
@@ -120,9 +120,3 @@ TensorRT-LLM accepts only `e4m3` with `scale="none"`.
 ## Configuration
 
 <!-- technique-config: kv_fp8 -->
-
-## Reference
-
-Paulius Micikevicius, Dusan Stosic, Neil Burgess, Marius Cornea, Pradeep Dubey, Richard Grisenthwaite, Sangwon Ha,
-Alexander Heinecke, Patrick Judd, John Kamalu, Naveen Mellempudi, Stuart Oberman, Mohammad Shoeybi, Michael Siu and
-Hao Wu. *FP8 Formats for Deep Learning.* arXiv:2209.05433, 2022.

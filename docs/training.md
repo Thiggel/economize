@@ -60,7 +60,7 @@ The techniques register further objectives, each documented with its technique:
 | name | trains | default for |
 | --- | --- | --- |
 | `eagle3_ttt` | EAGLE-3 with its training-time test | `eagle3` |
-| `hass` | EAGLE-3 with HASS (Zhang et al., ICLR 2025): `step_distill` plus a top-K term (`top_k=10`) over three unrolled steps that read the earlier steps' outputs without gradients | |
+| `hass` | EAGLE-3 with HASS [@zhang2025hass]: `step_distill` plus a top-K term (`top_k=10`) over three unrolled steps that read the earlier steps' outputs without gradients | |
 | `early_exit_kl` | the early-exit readout, and the LoRA (2e-4) or layer copies (3e-5) of an adapted exit path | `early_exit` |
 | `medusa_ce` | Medusa heads (Medusa-1) | `medusa` |
 | `step_distill` | any `StepDrafter`: divergence distillation over decode-faithful draft steps (named explicitly for `kangaroo`) | `hydra`, `redrafter` |
@@ -117,7 +117,7 @@ model = economize.apply(base, EarlyExitConfig(exit_layer=12, adaptation="lora", 
 fit(model, "train.bin", steps=2000, batch_size=8, seq_len=1024, seed=0, output_dir="runs/exit12_lora")
 ```
 
-`layerskip` implements the two training ingredients of LayerSkip (Elhoushi et al., 2024): block `l` is skipped
+`layerskip` implements the two training ingredients of LayerSkip [@elhoushi2024layerskip]: block `l` is skipped
 with a probability that grows exponentially from 0 at the first block to `dropout_max` at the last, and the
 cross-entropy of every enabled exit (the model's own norm and head after block `l`) enters with the paper's
 weights `e(l)`. The rotational curriculum enables every `rotation`-th exit per step, shifting by one each step.
@@ -134,7 +134,7 @@ log-probabilities on the scored positions only, which keeps the memory of a 150k
 is the model as it is when training starts. Weight techniques (quantization, pruning) rewrite the base in place,
 so a drafter trained on a quantized model learns to match the quantized model.
 
-A larger model with the same tokenizer can stand in as teacher (DistillSpec, Zhou et al., 2024):
+A larger model with the same tokenizer can stand in as teacher [DistillSpec, @zhou2023distillspec]:
 
 ```python
 from economize.techniques.eagle3 import Eagle3Config

@@ -6,11 +6,11 @@
 the key and value head it reads (one key/value group with the query heads that share it), so a GQA model keeps its
 layout. An FFN channel is one row of the gate and up maps and one column of the down map. A residual channel, pruned
 by Minitron only, is one column of the embedding, one entry of every norm and one row or column of every map on the
-residual stream. Three criteria score the units on calibration data. FLAP (An et al., 2024) multiplies the
+residual stream. Three criteria score the units on calibration data. FLAP [@an2024flap] multiplies the
 fluctuation of a channel's inputs by the squared norm of its weight column, `Var[x_j] ||W_:,j||^2`, and folds the
-removed channels' mean contribution into a bias of the output map. LLM-Pruner (Ma et al., 2023) sums the first-order
+removed channels' mean contribution into a bias of the output map. LLM-Pruner [@ma2023llmpruner] sums the first-order
 Taylor importance `|W * dL/dW|` over each coupled group, from one backward pass of the calibration cross-entropy.
-Minitron (Muralidharan et al., 2024) uses activation magnitudes and is the only criterion that prunes the residual
+Minitron [@muralidharan2024minitron] uses activation magnitudes and is the only criterion that prunes the residual
 stream.
 
 The saving is real: every pruned map is a smaller `nn.Linear`. Pruning is lossy, and two recovery stages exist. A
@@ -145,15 +145,3 @@ pruned heads, since it derives the head size from `hidden_size // num_attention_
 ## Configuration
 
 <!-- technique-config: width_prune -->
-
-## Reference
-
-Yongqi An, Xu Zhao, Tao Yu, Ming Tang and Jinqiao Wang. *Fluctuation-based Adaptive Structured Pruning for Large
-Language Models.* AAAI, 2024.
-
-Xinyin Ma, Gongfan Fang and Xinchao Wang. *LLM-Pruner: On the Structural Pruning of Large Language Models.* NeurIPS,
-2023.
-
-Saurav Muralidharan, Sharath Turuvekere Sreenivas, Raviraj Joshi, Marcin Chochowski, Mostofa Patwary, Mohammad
-Shoeybi, Bryan Catanzaro, Jan Kautz and Pavlo Molchanov. *Compact Language Models via Pruning and Knowledge
-Distillation.* NeurIPS, 2024.

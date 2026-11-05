@@ -2,7 +2,7 @@
 
 <!-- technique-info: rotate -->
 
-`rotate` applies the rotations of QuaRot (Ashkboos et al., 2024) that every normalization layout admits, so that a
+`rotate` applies the rotations of QuaRot [@ashkboos2024quarot] that every normalization layout admits, so that a
 following weight quantization sees inputs without outlier channels. The value rotation (QuaRot's R2) fuses a
 random-sign Hadamard matrix `R` of size `head_dim` into the rows of `v_proj` and the columns of `o_proj`, so every
 head's attention output is rotated by `R` and `o_proj` undoes it. The online rotation (QuaRot's R4, on
@@ -123,8 +123,3 @@ SGLang reads no `transform_config`, so it serves value rotations but refuses onl
 ## Configuration
 
 <!-- technique-config: rotate -->
-
-## Reference
-
-Saleh Ashkboos, Amirkeivan Mohtashami, Maximilian L. Croci, Bo Li, Pashmina Cameron, Martin Jaggi, Dan Alistarh,
-Torsten Hoefler and James Hensman. *QuaRot: Outlier-Free 4-bit Inference in Rotated LLMs.* NeurIPS, 2024.

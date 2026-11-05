@@ -2,7 +2,7 @@
 
 <!-- technique-info: medusa -->
 
-Medusa (Cai et al., 2024) adds `K` decoding heads on top of the base model's last hidden state. At the last
+Medusa [@cai2024medusa] adds `K` decoding heads on top of the base model's last hidden state. At the last
 processed token `t`, the LM head predicts token `t + 1` as usual and head `j` predicts token `t + 1 + j`, so one
 step drafts up to `K` tokens without running any extra layer of the base model. Each head is a stack of residual
 blocks `x + SiLU(W x + b)` followed by its own vocabulary projection, initialized from the LM head. The drafts form a
@@ -142,8 +142,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: medusa -->
-
-## Reference
-
-Tianle Cai, Yuhong Li, Zhengyang Geng, Hongwu Peng, Jason D. Lee, Deming Chen and Tri Dao. *Medusa: Simple LLM
-Inference Acceleration Framework with Multiple Decoding Heads.* ICML 2024, arXiv:2401.10774.

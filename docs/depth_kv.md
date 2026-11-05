@@ -5,25 +5,25 @@ economize ships twelve lossy techniques that act while the model decodes. Six ch
 
 | name | paper | what it does | trains |
 |---|---|---|---|
-| `gateskip` | GateSkip (Laitenberger, Kopiczko, Snoek, Asano, 2025; arXiv 2510.13876) | sigmoid residual gates, tokens with low gates skip a layer | gates |
-| `mod` | Mixture-of-Depths (Raposo et al., 2024; arXiv 2404.02258) | a router per routed layer sends some tokens through it | routers |
-| `flexidepth` | FlexiDepth (Luo, Wang, Yan, 2025; arXiv 2503.23798) | a router per layer, skipped tokens take a light adapter | routers, adapters |
-| `skipdecode` | SkipDecode (Del Corro et al., 2023; arXiv 2307.02628) | a layer budget that falls with the position | nothing |
-| `calm` | CALM (Schuster et al., NeurIPS 2022; arXiv 2207.07061) | early exit once a confidence measure passes a threshold | the exit classifier (optional) |
-| `loradrop` | LoRA-Drop (2026; arXiv 2601.02569) | droppable layers run in full every `period` tokens, a low-rank update in between | low-rank updates |
-| `kivi` | KIVI (Liu et al., ICML 2024; arXiv 2402.02750) | 2/4-bit KV, keys per channel, values per token, recent tokens in full precision | nothing |
+| `gateskip` | GateSkip [@laitenberger2026gateskip] | sigmoid residual gates, tokens with low gates skip a layer | gates |
+| `mod` | Mixture-of-Depths [@raposo2024mod] | a router per routed layer sends some tokens through it | routers |
+| `flexidepth` | FlexiDepth [@luo2025flexidepth] | a router per layer, skipped tokens take a light adapter | routers, adapters |
+| `skipdecode` | SkipDecode [@delcorro2023skipdecode] | a layer budget that falls with the position | nothing |
+| `calm` | CALM [@schuster2022calm] | early exit once a confidence measure passes a threshold | the exit classifier (optional) |
+| `loradrop` | LoRA-Drop [@rajabzadeh2026loradrop] | droppable layers run in full every `period` tokens, a low-rank update in between | low-rank updates |
+| `kivi` | KIVI [@liu2024kivi] | 2/4-bit KV, keys per channel, values per token, recent tokens in full precision | nothing |
 | `kivi_fused` | as `kivi`, read by an attention kernel that dequantizes the 2/4/8-bit codes in registers | the same values as `kivi` (bit for bit), attention reads packed codes plus fp16 scales instead of dense K/V; needs `attn_implementation="economize"` | nothing |
-| `kv_fp8` | the `fp8` cache dtype of vLLM and TensorRT-LLM; formats from Micikevicius et al. (2022, arXiv 2209.05433) | every K/V entry stored as an 8-bit float | nothing |
+| `kv_fp8` | the `fp8` cache dtype of vLLM and TensorRT-LLM; formats from @micikevicius2022fp8 | every K/V entry stored as an 8-bit float | nothing |
 | `kv_fp8_fused` | as `kv_fp8` (`scale="none"`), read by an attention kernel that decodes fp8 in registers | the same bytes as `kv_fp8`, handed to attention without the upcast copy; needs `attn_implementation="economize"` | nothing |
-| `kv_evict`, `method="streaming"` | StreamingLLM (Xiao et al., ICLR 2024; arXiv 2309.17453) | attention sinks plus a recent window | nothing |
-| `kv_evict`, `method="h2o"` | H2O (Zhang et al., NeurIPS 2023; arXiv 2306.14048) | a recent window plus the heavy hitters of accumulated attention | nothing |
+| `kv_evict`, `method="streaming"` | StreamingLLM [@xiao2024streamingllm] | attention sinks plus a recent window | nothing |
+| `kv_evict`, `method="h2o"` | H2O [@zhang2023h2o] | a recent window plus the heavy hitters of accumulated attention | nothing |
 | `kv_evict`, `method="h2o_prefill"` | H2O as KVCache-Factory runs it (`H2OKVCluster`) | the heavy hitters of the prompt attention plus the last prompt entries, chosen once at prefill | nothing |
-| `kv_evict`, `method="snapkv"` | SnapKV (Li et al., NeurIPS 2024; arXiv 2404.14469) | compresses the prompt once from an observation window | nothing |
-| `kv_evict`, `method="pyramidkv"` | PyramidKV (Cai et al., 2024; arXiv 2406.02069) | SnapKV's selection with a prompt budget that shrinks linearly from the bottom layer to the top (`beta`), the same total as SnapKV | nothing |
+| `kv_evict`, `method="snapkv"` | SnapKV [@li2024snapkv] | compresses the prompt once from an observation window | nothing |
+| `kv_evict`, `method="pyramidkv"` | PyramidKV [@cai2024pyramidkv] | SnapKV's selection with a prompt budget that shrinks linearly from the bottom layer to the top (`beta`), the same total as SnapKV | nothing |
 | `kv_evict_fused` (`snapkv`, `h2o_prefill`, `pyramidkv`) | as `kv_evict` with a method that selects once, read by an attention kernel over a compacted cache | the same selection as `kv_evict`; after the prompt pass the kept prompt entries of every layer are copied into compact per-KV-head buffers, and decode attention reads them plus the dense entries after the prompt, so its cost follows the budget instead of the prompt length; needs `attn_implementation="economize"` | nothing |
-| `duo_attention` | DuoAttention (Xiao et al., ICLR 2025; arXiv 2410.10819) | retrieval heads keep the whole cache, streaming heads keep `sinks` first and `recent` last entries, from a trained per-KV-head pattern | `duo_attention_gates` (gate training, `train_pattern`), or a pattern of the reference |
-| `quest` | Quest (Tang et al., ICML 2024; arXiv 2406.10774) | every decoding query reads only the `token_budget / page_size - 1` cache pages whose channel-wise key bounds promise the largest scores, plus its own page; the cache keeps every entry; needs `attn_implementation="economize"` | nothing |
-| `minference` | MInference 1.0 (Jiang et al., NeurIPS 2024; arXiv 2407.02490) | a long prompt attends, in every head of a covered layer, over an A-shape, vertical-slash or block-sparse pattern whose indices are estimated from the prompt itself; decoding and the cache are unchanged; needs `attn_implementation="economize"` | nothing (reads the reference's searched pattern files, or one pattern for every head) |
+| `duo_attention` | DuoAttention [@xiao2025duoattention] | retrieval heads keep the whole cache, streaming heads keep `sinks` first and `recent` last entries, from a trained per-KV-head pattern | `duo_attention_gates` (gate training, `train_pattern`), or a pattern of the reference |
+| `quest` | Quest [@tang2024quest] | every decoding query reads only the `token_budget / page_size - 1` cache pages whose channel-wise key bounds promise the largest scores, plus its own page; the cache keeps every entry; needs `attn_implementation="economize"` | nothing |
+| `minference` | MInference 1.0 [@jiang2024minference] | a long prompt attends, in every head of a covered layer, over an A-shape, vertical-slash or block-sparse pattern whose indices are estimated from the prompt itself; decoding and the cache are unchanged; needs `attn_implementation="economize"` | nothing (reads the reference's searched pattern files, or one pattern for every head) |
 
 Author lists and venues were taken from `lit/SURVEY_decoding.md` and `lit/SURVEY_orthogonal.md`; the paper
 descriptions in the deviation lists below were written from those surveys and memory of the papers, and should be
@@ -294,9 +294,9 @@ over the pending tokens, then draft steps), so they combine with everything that
 
 | name | paper | what it does | trains |
 |---|---|---|---|
-| `free` | FREE (Bae et al., EMNLP 2023; arXiv 2310.05424) | shallow exits after layer `L_S` are kept while their softmax gap passes `lambda`; the next deep pass fills the deep layers of the exited tokens in parallel | the model (`free`, CE of both exits plus layer-mapped KD) or a readout (`early_exit_kl` with `technique="free"`) |
-| `dmtd` | DMTD (Luo et al., 2025; arXiv 2510.11958) | after a full pass the last `L_d` layers decode `tau - 1` more tokens from their embeddings | late-layer copies or LoRA (`dmtd`, a rollout over the cycle) |
-| `hidden_transfer` | Hidden Transfer (Wu et al., 2024; arXiv 2404.12022) | step `i` maps the state after layer `t_i` to a pseudo state `i` positions ahead and runs layers `t_i + 1..L` on it | one `d x d` map per step (`hidden_transfer_kl`) |
+| `free` | FREE [@bae2023free] | shallow exits after layer `L_S` are kept while their softmax gap passes `lambda`; the next deep pass fills the deep layers of the exited tokens in parallel | the model (`free`, CE of both exits plus layer-mapped KD) or a readout (`early_exit_kl` with `technique="free"`) |
+| `dmtd` | DMTD [@luo2025dmtd] | after a full pass the last `L_d` layers decode `tau - 1` more tokens from their embeddings | late-layer copies or LoRA (`dmtd`, a rollout over the cycle) |
+| `hidden_transfer` | Hidden Transfer [@wu2024hiddentransfer] | step `i` maps the state after layer `t_i` to a pseudo state `i` positions ahead and runs layers `t_i + 1..L` on it | one `d x d` map per step (`hidden_transfer_kl`) |
 
 FREE and DMTD keep every draft (`lossless=False`); Hidden Transfer verifies greedily by default and can run lossy
 with `decode_config(lossless=False)`. Their `cost_summary` (`dynamic_depth.drafted_cost_summary`) subtracts the

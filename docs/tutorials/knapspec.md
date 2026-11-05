@@ -2,7 +2,7 @@
 
 <!-- technique-info: knapspec -->
 
-KnapSpec (Cha et al., 2026) is a training-free self-drafter that skips sublayers of the model. A draft step runs the
+KnapSpec [@cha2026knapspec] is a training-free self-drafter that skips sublayers of the model. A draft step runs the
 model with the attention of some layers and the MLP of others left out, and reads the next token from the model's
 own norm and LM head. Every `interval` decoded tokens the drafter chooses a new skip set and draft length from the
 hidden states of its recent exact passes. A dynamic program over the `2 L` sublayers, each weighted by its measured
@@ -119,8 +119,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: knapspec -->
-
-## Reference
-
-Seongjin Cha, Gyuwan Kim, Dongsu Han, Tao Yang and Insu Han. *KnapSpec: Self-Speculative Decoding via Adaptive
-Layer Selection as a Knapsack Problem.* ICML 2026, arXiv:2602.20217, 2026.

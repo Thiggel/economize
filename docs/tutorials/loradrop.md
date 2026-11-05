@@ -2,7 +2,7 @@
 
 <!-- technique-info: loradrop -->
 
-LoRA-Drop (Rajabzadeh et al., 2026) runs a set of droppable layers in full only every `period` generated tokens.
+LoRA-Drop [@rajabzadeh2026loradrop] runs a set of droppable layers in full only every `period` generated tokens.
 Decoding goes in cycles of `period` tokens, and the first token of a cycle, the anchor, runs every layer. At a
 droppable layer `l`, every other token of the cycle skips the layer and leaves it as
 `h_l(anchor) + B A x * alpha / rank`: the anchor's output of layer `l` plus a low-rank map of the token's own layer
@@ -130,8 +130,3 @@ print(economize.backend_support(LoRADropConfig()))
 ## Configuration
 
 <!-- technique-config: loradrop -->
-
-## Reference
-
-Hossein Rajabzadeh, Maryam Dialameh, Chul B. Park, Il-Min Kim and Hyock Ju Kwon. *LoRA-Drop: Temporal LoRA Decoding
-for Efficient LLM Inference.* arXiv:2601.02569, 2026.

@@ -2,7 +2,7 @@
 
 <!-- technique-info: frspec -->
 
-FR-Spec (Zhao et al., 2025) restricts the drafts of another drafter to a vocabulary of frequent tokens. Models with
+FR-Spec [@zhao2025frspec] restricts the drafts of another drafter to a vocabulary of frequent tokens. Models with
 large vocabularies spend a large share of a small drafter's cost in its LM head, while most accepted drafts come from
 a small set of common tokens. FR-Spec ranks the token ids by their frequency in a corpus, and the drafter proposes
 only among the `K` most frequent ones. The base model verifies with its full vocabulary, so greedy decoding stays
@@ -152,9 +152,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: frspec -->
-
-## Reference
-
-Weilin Zhao, Tengyu Pan, Xu Han, Yudi Zhang, Ao Sun, Yuxiang Huang, Kaihuo Zhang, Weilun Zhao, Yuxuan Li, Jianyong
-Wang, Zhiyuan Liu and Maosong Sun. *FR-Spec: Accelerating Large-Vocabulary Language Models via Frequency-Ranked
-Speculative Sampling.* arXiv:2502.14856, 2025.

@@ -2,7 +2,7 @@
 
 <!-- technique-info: draft_model -->
 
-Two-model speculative decoding (Leviathan et al., 2023; Chen et al., 2023) drafts with a separate, smaller causal LM
+Two-model speculative decoding [@leviathan2023speculative; @chen2023speculative] drafts with a separate, smaller causal LM
 of the same tokenizer. The draft LM proposes several tokens one after another, and the base model scores all of them
 in one forward pass and keeps the longest prefix it agrees with, plus one token of its own. Greedy decoding is
 lossless, and with the `rejection` verifier sampled outputs follow the base model's distribution. What is saved is
@@ -51,7 +51,7 @@ draft LM reads the ids beyond it as its last token, which stays lossless but dra
 ## Training
 
 Agreement between the two models, and with it the number of accepted drafts, grows when the draft LM is distilled on
-the base model's next-token distributions (DistillSpec, Zhou et al., 2024). The `logit_distill` objective does this
+the base model's next-token distributions [DistillSpec, @zhou2023distillspec]. The `logit_distill` objective does this
 for a draft LM wrapped without techniques, with the base model as `teacher_model`:
 
 ```python
@@ -135,11 +135,3 @@ from their exports, as described in [Exports](../exports.md).
 ## Configuration
 
 <!-- technique-config: draft_model -->
-
-## Reference
-
-Yaniv Leviathan, Matan Kalman and Yossi Matias. *Fast Inference from Transformers via Speculative Decoding.* ICML
-2023, arXiv:2211.17192, 2023.
-
-Charlie Chen, Sebastian Borgeaud, Geoffrey Irving, Jean-Baptiste Lespiau, Laurent Sifre and John Jumper.
-*Accelerating Large Language Model Decoding with Speculative Sampling.* arXiv:2302.01318, 2023.

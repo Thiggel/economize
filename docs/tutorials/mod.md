@@ -2,7 +2,7 @@
 
 <!-- technique-info: mod -->
 
-Mixture-of-Depths (Raposo et al., 2024) puts a router in front of a subset of the layers. Router `l` scores every
+Mixture-of-Depths [@raposo2024mod] puts a router in front of a subset of the layers. Router `l` scores every
 token with a logit `r = w . x + b` of the layer's input `x`. A token that is routed through the layer leaves it as
 `x + r (layer(x) - x)`, and a token that is routed around it passes unchanged. In training, the `capacity` fraction of
 each sequence's tokens with the largest `r` runs the layer. That top-k choice looks at the whole sequence, which
@@ -119,8 +119,3 @@ print(economize.backend_support(MoDConfig()))
 ## Configuration
 
 <!-- technique-config: mod -->
-
-## Reference
-
-David Raposo, Sam Ritter, Blake Richards, Timothy Lillicrap, Peter Conway Humphreys and Adam Santoro.
-*Mixture-of-Depths: Dynamically allocating compute in transformer-based language models.* arXiv:2404.02258, 2024.

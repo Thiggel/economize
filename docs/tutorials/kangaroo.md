@@ -2,7 +2,7 @@
 
 <!-- technique-info: kangaroo -->
 
-Kangaroo (Liu et al., 2024) drafts with a shallow sub-network of the model. A draft step runs the model's first
+Kangaroo [@liu2024kangaroo] drafts with a shallow sub-network of the model. A draft step runs the model's first
 `exit_layer` layers on the last token, then a small adapter (one attention layer with its own KV cache and two RMS
 norms, no MLP), and reads the next token from the model's LM head. The adapter is the only trained part. It learns
 to map the shallow hidden state to one the LM head can read, so a draft costs `exit_layer` of the model's layers
@@ -118,8 +118,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: kangaroo -->
-
-## Reference
-
-Fangcheng Liu, Yehui Tang, Zhenhua Liu, Yunsheng Ni, Kai Han and Yunhe Wang. *Kangaroo: Lossless Self-Speculative
-Decoding via Double Early Exiting.* NeurIPS 2024, arXiv:2404.18911, 2024.

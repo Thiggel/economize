@@ -2,7 +2,7 @@
 
 <!-- technique-info: vendor_mtp -->
 
-DeepSeek-V3 (DeepSeek-AI, 2024) trains its base model with multi-token-prediction (MTP) modules, and GLM-4.5, MiMo,
+DeepSeek-V3 [@deepseek2024v3] trains its base model with multi-token-prediction (MTP) modules, and GLM-4.5, MiMo,
 Qwen3-Next and Qwen3.5 ship similar modules with their weights. Module `i` reads the state `h` of the previous
 position and the embedding of the current token, mixes them with `eh_proj(cat(enorm(E[x]), hnorm(h)))` and runs one
 decoder layer with its own KV cache, followed by its own final norm and the base model's LM head. In decoding the
@@ -145,7 +145,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: vendor_mtp -->
-
-## Reference
-
-DeepSeek-AI. *DeepSeek-V3 Technical Report.* arXiv:2412.19437, 2024.

@@ -3,7 +3,7 @@
 <!-- technique-info: draft_quant -->
 
 Draft-only quantization rounds the weights of a drafter to a low-bit grid and leaves the base model in full
-precision. It follows the idea of QSpec (Zhao et al., 2025), which drafts with a low-precision version of the
+precision. It follows the idea of QSpec [@zhao2025qspec], which drafts with a low-precision version of the
 computation and verifies in high precision. In economize the drafter is a separate technique, such as an EAGLE-3
 head, and `draft_quant` quantizes the linear maps that this drafter adds: the drafter's `draft_modules()` when it
 defines them, otherwise every `nn.Linear` in its module tree. Maps whose weight is a base-model parameter and LoRA
@@ -138,8 +138,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: draft_quant -->
-
-## Reference
-
-Juntao Zhao, Wenhao Lu, Sheng Wang, Lingpeng Kong and Chuan Wu. *QSpec: Speculative Decoding with Complementary
-Quantization Schemes.* EMNLP 2025, arXiv:2410.11305.

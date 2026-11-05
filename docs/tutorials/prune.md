@@ -4,9 +4,9 @@
 
 `prune` sets a fraction of the weights of every linear map in the decoder layers to zero, either unstructured (a
 fixed fraction of every output row) or in an N:M pattern (at most N nonzeros in every M consecutive input weights).
-Three criteria choose the weights. `magnitude` keeps the largest `|W_ij|` and reads no data. Wanda (Sun et al., 2024)
+Three criteria choose the weights. `magnitude` keeps the largest `|W_ij|` and reads no data. Wanda [@sun2024wanda]
 scores each weight by `|W_ij| * ||X_j||_2`, the weight's magnitude times the norm of its input channel over the
-calibration tokens. SparseGPT (Frantar and Alistarh, 2023) prunes the columns in blocks of 128 with the Optimal Brain
+calibration tokens. SparseGPT [@frantar2023sparsegpt] prunes the columns in blocks of 128 with the Optimal Brain
 Surgeon mask and updates the remaining weights of each row through the inverse Hessian `(X^T X)^-1`, so that they
 compensate the error of the removed ones. Calibration runs one decoder layer at a time on the outputs of the already
 pruned layers. Nothing is trained, and the result is lossy.
@@ -143,10 +143,3 @@ print(perplexity(model, windows))
 ## Configuration
 
 <!-- technique-config: prune -->
-
-## Reference
-
-Mingjie Sun, Zhuang Liu, Anna Bair and J. Zico Kolter. *A Simple and Effective Pruning Approach for Large Language
-Models.* ICLR, 2024.
-
-Elias Frantar and Dan Alistarh. *SparseGPT: Massive Language Models Can Be Accurately Pruned in One-Shot.* ICML, 2023.

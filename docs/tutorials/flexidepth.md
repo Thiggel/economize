@@ -2,7 +2,7 @@
 
 <!-- technique-info: flexidepth -->
 
-FlexiDepth (Luo et al., 2025) gives each flexible layer a router and a light adapter. At layer `l` the router scores
+FlexiDepth [@luo2025flexidepth] gives each flexible layer a router and a light adapter. At layer `l` the router scores
 every token with `g = sigmoid(router(x))` of the layer's input `x`. A token with `g > threshold` runs the layer and
 leaves it as `x + g (layer(x) - x)`. Any other token leaves it as `x + (1 - g) adapter(x)`, where the adapter is a
 SwiGLU MLP whose width is the layer's FFN width divided by `adapter_reduction`. Skipped tokens still write their K/V,
@@ -133,7 +133,3 @@ print(economize.backend_support(FlexiDepthConfig()))
 ## Configuration
 
 <!-- technique-config: flexidepth -->
-
-## Reference
-
-Xuan Luo, Weizhi Wang and Xifeng Yan. *Adaptive Layer-skipping in Pre-trained LLMs.* arXiv:2503.23798, 2025.

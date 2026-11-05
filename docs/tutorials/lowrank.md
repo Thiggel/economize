@@ -5,7 +5,7 @@
 `lowrank` replaces each selected linear map `W` (`m` outputs, `n` inputs) of the decoder layers by two thin maps,
 `down` from `n` to `k` features and `up` from `k` to `m`, with the original bias on `up`. The rank is
 `k = floor((1 - c) m n / (m + n))`, so every map loses at least the fraction `c = compression` of its parameters. A
-map whose rank would save nothing stays dense. SVD-LLM (Wang et al., 2025) chooses the factors from the calibration
+map whose rank would save nothing stays dense. SVD-LLM [@wang2025svdllm] chooses the factors from the calibration
 inputs: with `S` the Cholesky factor of the input Gram matrix `X^T X`, it truncates the singular value decomposition
 of `W S` and folds `S^-1` back into the factors. The output error `||(W - W') X^T||_F^2` is then the sum of the
 dropped squared singular values, which makes truncation optimal for the calibration inputs. The `svd` method
@@ -119,8 +119,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: lowrank -->
-
-## Reference
-
-Xin Wang, Yu Zheng, Zhongwei Wan and Mi Zhang. *SVD-LLM: Truncation-aware Singular Value Decomposition for Large
-Language Model Compression.* ICLR, 2025.

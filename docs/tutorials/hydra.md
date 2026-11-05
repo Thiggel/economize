@@ -2,7 +2,7 @@
 
 <!-- technique-info: hydra -->
 
-Hydra (Ankner et al., 2024) makes Medusa's draft heads sequentially dependent. After the last processed token `t`,
+Hydra [@ankner2024hydra] makes Medusa's draft heads sequentially dependent. After the last processed token `t`,
 head `j` drafts token `t + 1 + j` from the base state `P_t` and the embeddings of the tokens before it,
 `[P_t; E[x_{t+1}]; ...; E[x_{t+j}]]`, where `x_{t+1}` is the base model's own token and the later ones were drafted by
 heads `1..j - 1`. Each head is a stack of residual blocks with its own vocabulary projection. Hydra++, the default,
@@ -118,8 +118,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: hydra -->
-
-## Reference
-
-Zachary Ankner, Rishab Parthasarathy, Aniruddha Nrusimha, Christopher Rinard, Jonathan Ragan-Kelley and William
-Brandon. *Hydra: Sequentially-Dependent Draft Heads for Medusa Decoding.* COLM 2024, arXiv:2402.05109.

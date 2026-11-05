@@ -4,7 +4,7 @@
 <!-- test-substitute: texts\[:20\] => texts[:3] -->
 <!-- test-substitute: budget=1024 => budget=128 -->
 
-TriForce (Sun et al., 2024) is self-speculative decoding for long prompts with a retrieval view of the KV cache. The
+TriForce [@sun2024triforce] is self-speculative decoding for long prompts with a retrieval view of the KV cache. The
 prompt part of the cache is cut into chunks of `chunk_size` slots, and the drafter, the base model itself, reads only
 the first chunk and the chunks whose mean key best matches the current query, `budget` slots in all, plus the slots
 after the last whole chunk and every generated position. With a long prompt the KV reads dominate a decoding step,
@@ -141,8 +141,3 @@ its paged cache. `economize.backend_support("triforce")` gives the reason per ba
 ## Configuration
 
 <!-- technique-config: triforce -->
-
-## Reference
-
-Hanshi Sun, Zhuoming Chen, Xinyu Yang, Yuandong Tian and Beidi Chen. *TriForce: Lossless Acceleration of Long
-Sequence Generation with Hierarchical Speculative Decoding.* COLM 2024, arXiv:2404.11912, 2024.

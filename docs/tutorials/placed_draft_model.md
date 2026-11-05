@@ -6,7 +6,7 @@
 `placed_draft_model` is [two-model speculative decoding](draft_model.md) with the draft LM on a device of its own.
 A separate, smaller causal LM of the same tokenizer drafts several tokens, and the base model verifies them in one
 forward pass, so greedy decoding is lossless and sampling with the `rejection` verifier follows the base model's
-distribution (Leviathan et al., 2023; Chen et al., 2023). What changes is where the draft LM lives: its weights, its
+distribution [@leviathan2023speculative; @chen2023speculative]. What changes is where the draft LM lives: its weights, its
 KV cache and the memory pool of its CUDA graphs are on `device`, and the base model stays where it is.
 
 Per draft step the input tokens and positions are copied to the draft device, and the draft's float logits come back
@@ -110,11 +110,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: placed_draft_model -->
-
-## Reference
-
-Yaniv Leviathan, Matan Kalman and Yossi Matias. *Fast Inference from Transformers via Speculative Decoding.* ICML
-2023, arXiv:2211.17192, 2023.
-
-Charlie Chen, Sebastian Borgeaud, Geoffrey Irving, Jean-Baptiste Lespiau, Laurent Sifre and John Jumper.
-*Accelerating Large Language Model Decoding with Speculative Sampling.* arXiv:2302.01318, 2023.

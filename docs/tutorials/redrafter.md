@@ -2,7 +2,7 @@
 
 <!-- technique-info: redrafter -->
 
-ReDrafter (Cheng et al., 2024) drafts with a small recurrent network on top of the base model's last hidden state.
+ReDrafter [@cheng2024redrafter] drafts with a small recurrent network on top of the base model's last hidden state.
 After the base model has processed token `t`, a recurrent state starts at `s_0 = 0` and takes the embedding of every
 later token, `s_k = SiLU(W E[x_{t+k}] + U s_{k-1} + b)`. A head of residual blocks reads `[h_t; s_k]` and drafts token
 `t + k + 1`. Token `t + 1` is the base model's own, and the later inputs are the drafter's previous outputs, so a
@@ -128,8 +128,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: redrafter -->
-
-## Reference
-
-Yunfei Cheng, Aonan Zhang, Xuanyu Zhang, Chong Wang and Yi Wang. *Recurrent Drafter for Fast Speculative Decoding in
-Large Language Models.* arXiv:2403.09919, 2024.

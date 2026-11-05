@@ -2,7 +2,7 @@
 
 <!-- technique-info: gateskip -->
 
-GateSkip (Laitenberger et al., 2025) adds a learned residual gate to the layers of a model and lets the tokens with
+GateSkip [@laitenberger2026gateskip] adds a learned residual gate to the layers of a model and lets the tokens with
 low gate values skip them. In economize every gated layer `l` gets one scalar gate `g = sigmoid(w . rms(x) + b)`,
 computed from the layer's input `x`. A token that runs the layer leaves it as `x + g (layer(x) - x)`, and a token
 that skips it leaves it as `x`, with its K/V at that layer computed from `x`. Since the gate is known before the layer
@@ -133,8 +133,3 @@ print(economize.backend_support(GateSkipConfig()))
 ## Configuration
 
 <!-- technique-config: gateskip -->
-
-## Reference
-
-Filipe Laitenberger, Dawid Kopiczko, Cees G. M. Snoek and Yuki M. Asano. *What Layers When: Learning to Skip Compute
-in LLMs with Residual Gates.* arXiv:2510.13876, 2025.

@@ -2,7 +2,7 @@
 
 <!-- technique-info: minference -->
 
-MInference (Jiang et al., 2024) reduces the cost of the prefill of long prompts, where attention grows with the
+MInference [@jiang2024minference] reduces the cost of the prefill of long prompts, where attention grows with the
 square of the prompt length. It gives every attention head one of three sparse patterns and fits the pattern's
 indices to each prompt from the prompt's own queries and keys. An A-shape head keeps the first `sinks` keys and a
 local window of `local` keys. A vertical-slash head keeps the `vertical` key columns and the `slash` diagonals that
@@ -121,9 +121,3 @@ print(economize.backend_support("minference")["vllm"].detail)
 ## Configuration
 
 <!-- technique-config: minference -->
-
-## Reference
-
-Huiqiang Jiang, Yucheng Li, Chengruidong Zhang, Qianhui Wu, Xufang Luo, Surin Ahn, Zhenhua Han, Amir H. Abdi,
-Dongsheng Li, Chin-Yew Lin, Yuqing Yang and Lili Qiu. *MInference 1.0: Accelerating Pre-filling for Long-Context
-LLMs via Dynamic Sparse Attention.* NeurIPS 2024, arXiv:2407.02490.

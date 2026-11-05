@@ -2,7 +2,7 @@
 
 <!-- technique-info: lookup -->
 
-Prompt lookup decoding (Saxena, 2023) drafts by copying. At every cycle it takes the last `n` committed tokens of a
+Prompt lookup decoding [@saxena2023promptlookup] drafts by copying. At every cycle it takes the last `n` committed tokens of a
 row and searches for an earlier occurrence of them in the row's own tokens, prompt and output alike, for
 `n = max_ngram, ..., min_ngram`, longest first. The tokens that followed the match become the draft, and the model
 verifies them in one forward pass. No network runs while drafting, so a draft costs only the extra positions of the
@@ -111,7 +111,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: lookup -->
-
-## Reference
-
-Apoorv Saxena. *Prompt Lookup Decoding.* GitHub repository (apoorvumang/prompt-lookup-decoding), 2023.

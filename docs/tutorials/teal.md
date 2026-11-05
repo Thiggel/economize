@@ -4,7 +4,7 @@
 
 <!-- test-substitute: TealConfig\(sparsity=0\.4, => TealConfig(sparsity=0.4, layers=(1,), greedy_step=0.2, -->
 
-TEAL (Liu et al., 2025) zeroes the entries with `|x| < t` of the input `x` of every linear map in the decoder layers,
+TEAL [@liu2025teal] zeroes the entries with `|x| < t` of the input `x` of every linear map in the decoder layers,
 with no training. The thresholds `t` come from the magnitude distribution of the base model's inputs on calibration
 tokens. `sparsity` is the parameter-weighted mean fraction of zeroed inputs, which is the fraction of weight columns
 a sparse matrix-vector kernel skips. `allocation="greedy"` runs TEAL's block-wise greedy search, which repeatedly
@@ -131,8 +131,3 @@ print(perplexity(model, windows))
 ## Configuration
 
 <!-- technique-config: teal -->
-
-## Reference
-
-James Liu, Pragaash Ponnusamy, Tianle Cai, Han Guo, Yoon Kim and Ben Athiwaratkun. *Training-Free Activation Sparsity
-in Large Language Models.* ICLR, 2025.

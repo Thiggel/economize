@@ -2,15 +2,15 @@
 
 <!-- technique-info: eagle -->
 
-EAGLE (Li et al., 2024) drafts at the level of features. Its drafter is one decoder layer with its own attention and
+EAGLE [@li2024eagle] drafts at the level of features. Its drafter is one decoder layer with its own attention and
 KV cache. At position `t` it reads `fc([E[x_t]; f_{t-1}])`, where `f_{t-1}` is the base model's last hidden state
 after the final norm when token `t - 1` was processed by the base model, and the layer's own previous output
 otherwise. The base model's LM head turns the layer's output into the next draft token, so each draft costs one small
 layer and one LM head call. The base model verifies the drafts in one forward pass and keeps the longest prefix it
-agrees with, which makes greedy decoding lossless. EAGLE-2 (Li et al., 2024) keeps the same head and replaces the
+agrees with, which makes greedy decoding lossless. EAGLE-2 [@li2024eagle2] keeps the same head and replaces the
 static draft tree with a dynamic one that expands the most probable branches. Only the draft layer is trained.
 
-economize trains the layer by default with HASS (Zhang et al., 2025), which adds a top-K distillation term and
+economize trains the layer by default with HASS [@zhang2025hass], which adds a top-K distillation term and
 unrolls the drafter on its own outputs during training. HASS changes only the objective, so its heads save, load and
 decode as EAGLE heads.
 
@@ -144,14 +144,3 @@ economize writes no vLLM or SGLang checkpoint for an EAGLE-1/2 head. The authors
 ## Configuration
 
 <!-- technique-config: eagle -->
-
-## Reference
-
-Yuhui Li, Fangyun Wei, Chao Zhang and Hongyang Zhang. *EAGLE: Speculative Sampling Requires Rethinking Feature
-Uncertainty.* ICML 2024, arXiv:2401.15077.
-
-Yuhui Li, Fangyun Wei, Chao Zhang and Hongyang Zhang. *EAGLE-2: Faster Inference of Language Models with Dynamic
-Draft Trees.* EMNLP 2024, arXiv:2406.16858.
-
-Lefan Zhang, Xiaodan Wang, Yanhua Huang and Ruiwen Xu. *Learning Harmonized Representations for Speculative
-Sampling.* ICLR 2025, arXiv:2408.15766.

@@ -6,8 +6,8 @@ Self-speculative decoding by layer skipping drafts with the model itself minus a
 every layer outside the skip set on the last token and reads the next token from the model's own norm and LM head, so a
 draft costs the remaining layers and needs no extra parameters. Skipped layers write no K/V for the drafted positions,
 and the next exact pass recomputes these positions with all layers while it verifies the drafts. Greedy decoding is
-therefore lossless. Draft & Verify (Zhang et al., 2024) chooses the skip set offline by Bayesian optimization, SWIFT
-(Xia et al., 2025) searches it on the fly during decoding, and CLaSp (Chen et al., 2025) by dynamic programming.
+therefore lossless. Draft & Verify [@zhang2024draftverify] chooses the skip set offline by Bayesian optimization, SWIFT
+[@xia2025swift] searches it on the fly during decoding, and CLaSp [@chen2025clasp] by dynamic programming.
 economize takes a given skip set or searches one once, when the technique attaches, on calibration data: the `greedy`
 search adds one layer at a time, the one whose removal changes the model's next-token distribution least. None of the
 three papers' own searches is implemented, and nothing is trained.
@@ -119,11 +119,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: layer_skip -->
-
-## Reference
-
-Heming Xia, Yongqi Li, Jun Zhang, Cunxiao Du and Wenjie Li. *SWIFT: On-the-Fly Self-Speculative Decoding for LLM
-Inference Acceleration.* ICLR 2025, arXiv:2410.06916, 2025.
-
-Jun Zhang, Jue Wang, Huan Li, Lidan Shou, Ke Chen, Gang Chen and Sharad Mehrotra. *Draft & Verify: Lossless Large
-Language Model Acceleration via Self-Speculative Decoding.* ACL 2024, arXiv:2309.08168, 2024.

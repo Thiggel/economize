@@ -2,7 +2,7 @@
 
 <!-- technique-info: quest -->
 
-Quest (Tang et al., 2024) speeds up the attention of decoding steps over long contexts without discarding any
+Quest [@tang2024quest] speeds up the attention of decoding steps over long contexts without discarding any
 KV-cache entry. The cache is split into pages of `page_size` consecutive slots, and every page stores the
 channel-wise minimum and maximum of its keys. A decoding query bounds the largest score any key of a page can reach,
 by taking per channel the larger of the products with the minimum and the maximum, and attends only to the pages
@@ -118,8 +118,3 @@ print(economize.backend_support("quest")["vllm"].detail)
 ## Configuration
 
 <!-- technique-config: quest -->
-
-## Reference
-
-Jiaming Tang, Yilong Zhao, Kan Zhu, Guangxuan Xiao, Baris Kasikci and Song Han. *Quest: Query-Aware Sparsity for
-Efficient Long-Context LLM Inference.* ICML 2024, arXiv:2406.10774.

@@ -2,7 +2,7 @@
 
 <!-- technique-info: free -->
 
-FREE (Bae et al., 2023) splits the model into a shallow model, its first `L_S` layers with an exit, and the deep model,
+FREE [@bae2023free] splits the model into a shallow model, its first `L_S` layers with an exit, and the deep model,
 all `L` layers. A token is emitted by the shallow model when its confidence, the gap between the two largest
 probabilities of the exit's distribution, reaches the threshold `lambda`. Exited tokens stack up until one does not
 exit, and then the deep layers run once, in parallel, over the stacked tokens and that token (synchronized parallel
@@ -121,8 +121,3 @@ llm = plan.llm()
 ## Configuration
 
 <!-- technique-config: free -->
-
-## Reference
-
-Sangmin Bae, Jongwoo Ko, Hwanjun Song and Se-Young Yun. *Fast and Robust Early-Exiting Framework for Autoregressive
-Language Models with Synchronized Parallel Decoding.* EMNLP 2023, arXiv:2310.05424, 2023.
