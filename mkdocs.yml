@@ -92,6 +92,7 @@ nav:
   - Reproductions: reproductions.md
   - User guide:
       - Techniques: techniques.md
+      - Choosing a technique: choosing.md
       - Drafters: drafters.md
       - Dynamic draft trees: dynamic_tree.md
       - Sequoia and SpecExec trees: tree_search.md
