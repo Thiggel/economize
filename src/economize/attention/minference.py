@@ -508,6 +508,12 @@ def _tiles(block_d: int) -> tuple[int, int, int]:
     return 64, 64, 8
 
 
+# Smaller tiles, tried in order when the device's shared memory cannot hold the sweep's choice (about 100 KB per
+# block on an L40 or A6000 against 228 KB on an H100). Rows stay divisors of the 64-token index block.
+_FALLBACK_TILES = ((64, 32), (32, 32), (32, 16), (16, 16))
+_fitted_tiles: dict[tuple[int, int, int, torch.dtype], tuple[int, int]] = {}
+
+
 def sparse_prefill_attention(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -559,8 +565,11 @@ def sparse_prefill_attention(
     block_d = max(16, next_power_of_2(head_dim))
     block_dv = max(16, next_power_of_2(head_dv))
     block_m, block_n, warps = _tiles(max(block_d, block_dv))
+    fit_key = (query.get_device(), block_d, block_dv, query.dtype)
     if tiles is not None:
         block_m, block_n = tiles
+    else:
+        block_m, block_n = _fitted_tiles.get(fit_key, (block_m, block_n))
     if BLOCK % block_m or block_m < 16 or block_n < 16 or block_n & (block_n - 1):
         raise ConfigError(f"sparse prefill tiles {(block_m, block_n)} must be powers of two >= 16, rows dividing 64")
     if out is None:
@@ -573,7 +582,9 @@ def sparse_prefill_attention(
 
     rs, re, rc = flat(index.range_start), flat(index.range_end), flat(index.range_count)
     ci, cc = flat(index.column_index), flat(index.column_count)
-    with torch.cuda.device(query.device) if query.is_cuda else nullcontext():
+    from triton.runtime.errors import OutOfResources
+
+    def launch(block_m: int, block_n: int) -> None:
         _sparse_prefill_kernel[(math.ceil(queries / block_m), batch * heads)](
             query, key, value, out, rs, re, rc, ci, cc, flat(index.window), flat(index.sinks),
             *query.stride(), *key.stride(), *value.stride(), *out.stride(),
@@ -583,6 +594,21 @@ def sparse_prefill_attention(
             IEEE=query.dtype == torch.float32, DOT_DTYPE=_DOT[query.dtype], KV_FMT=kv_fmt,
             num_warps=warps, num_stages=2,
         )
+
+    candidates = [(block_m, block_n)]
+    if tiles is None:
+        candidates += [t for t in _FALLBACK_TILES if t[0] * t[1] < block_m * block_n]
+    with torch.cuda.device(query.device) if query.is_cuda else nullcontext():
+        for i, (block_m, block_n) in enumerate(candidates):
+            try:
+                launch(block_m, block_n)
+            except OutOfResources:
+                if i == len(candidates) - 1:
+                    raise
+                continue
+            if tiles is None:
+                _fitted_tiles[fit_key] = (block_m, block_n)
+            break
     return out
 
 

@@ -192,12 +192,22 @@ def test_float_zero_codes_refuse_the_compressed_tensors_export() -> None:
 @pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (8, 0), reason="sm80+")
 def test_torchao_tinygemm_runs_hqq_float_zeros(tiny_factory, adapter_of, held_out) -> None:
-    """tinygemm int4 stores HQQ's real zero points as they are: its logits match the fake backend's."""
+    """tinygemm int4 stores HQQ's real zero points as they are: each layer decodes to the fake backend's weight up to
+    one bf16 rounding, and the logits differ by no more than bf16 arithmetic moves the unquantized model's."""
     pytest.importorskip("torchao")
-    outputs = []
+    ids = held_out.cuda()
+    models, outputs = [], []
     for backend in ("fake", "torchao"):
         model = tiny_factory(num_layers=2).to("cuda", torch.bfloat16)
         quantize_model(adapter_of(model), QuantConfig(method="hqq", group_size=32, backend=backend))
-        outputs.append(model(held_out.cuda()).logits.float())
-    assert type(model.model.layers[0].mlp.up_proj.weight).__module__.startswith("torchao")
-    torch.testing.assert_close(outputs[1], outputs[0], atol=5e-2, rtol=5e-2)
+        models.append(model)
+        outputs.append(model(ids).logits.float())
+    assert type(models[1].model.layers[0].mlp.up_proj.weight).__module__.startswith("torchao")
+    fake, tiny = models[0].model.layers[0].mlp.up_proj, models[1].model.layers[0].mlp.up_proj
+    eye = torch.eye(fake.in_features, device="cuda", dtype=torch.bfloat16)
+    dense = fake(eye).float()
+    torch.testing.assert_close(tiny(eye).float(), dense, atol=float(dense.abs().max()) * 2**-7, rtol=0)
+    plain = tiny_factory(num_layers=2).to("cuda")
+    exact = plain(ids).logits
+    noise = (plain.to(torch.bfloat16)(ids).logits.float() - exact).abs().max()
+    assert (outputs[1] - outputs[0]).abs().max() <= 2 * noise
