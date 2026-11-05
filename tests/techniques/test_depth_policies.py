@@ -113,6 +113,7 @@ def _identity_jump(base: torch.nn.Module, *configs: object, cycle_length: int = 
         lambda: GateSkipConfig(layers=(0,)),
         lambda: MoDConfig(capacity=0.0),
         lambda: MoDConfig(router_init_std=-1.0),
+        lambda: MoDConfig(threshold=float("nan")),
         lambda: FlexiDepthConfig(threshold=1.0),
         lambda: FlexiDepthConfig(router_reduction=0),
         lambda: SkipDecodeConfig(skip="middle"),
@@ -251,6 +252,20 @@ def test_prompt_runs_every_layer_unless_asked() -> None:
         with phase("prefill"):
             runner.forward(seq[:, :PREFIX], ctx, policy=policy)
         assert (policy.meter.summary()["skipped_layer_tokens"] > 0) == prompt_skips, config
+
+
+def test_mod_threshold_routes_fewer_tokens_as_it_rises() -> None:
+    """The routed layers run a decode token only when its router logit exceeds ``threshold`` (0 in the paper), so a
+    higher threshold runs fewer layer tokens and never more."""
+    seq = _sequence()
+    executed = []
+    for threshold in (-1.0, 0.0, 1.0):
+        config = MoDConfig(router_bias=0.0, router_init_std=0.3, threshold=threshold)
+        model = economize.apply(make_tiny_model(), config)
+        policy = model.techniques["mod"].layer_policy()
+        _teacher_forced(model, seq, policy)
+        executed.append(policy.meter.summary()["executed_layer_tokens"])
+    assert executed[0] > executed[1] > executed[2]
 
 
 def test_skipdecode_budget_is_uniform_over_the_batch_and_counts_generated_tokens() -> None:

@@ -60,6 +60,7 @@ class MoDConfig(LayeredDepthConfig):
         router_init_std: Standard deviation of the initial router weights.
         router_input: :data:`MOD_ROUTER_INPUTS`.
         kv: :data:`MOD_KV_MODES` (see the module docstring).
+        threshold: Router logit above which a token runs a routed layer at inference (the paper's rule: ``0``).
         skip_prompt: Route the prompt too (``False``: the prompt runs every layer).
     """
 
@@ -69,6 +70,7 @@ class MoDConfig(LayeredDepthConfig):
     router_init_std: float = 0.0
     router_input: str = "raw"
     kv: str = "fill"
+    threshold: float = 0.0
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -76,6 +78,7 @@ class MoDConfig(LayeredDepthConfig):
         check_number("router_init_std", self.router_init_std, low=0)
         check_choice("router_input", self.router_input, MOD_ROUTER_INPUTS)
         check_choice("kv", self.kv, MOD_KV_MODES)
+        check_number("threshold", self.threshold)
 
     def validate(self, adapter: Any) -> None:
         super().validate(adapter)
@@ -123,7 +126,7 @@ class MoDPolicy(RoutedDepthPolicy):
         return self.technique.route(index, x)
 
     def select(self, index: int, score: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
-        return score > 0
+        return score > self.technique.config.threshold
 
     def train_select(self, index: int, score: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
         chosen = top_fraction(score.detach(), valid, self.technique.config.capacity)
