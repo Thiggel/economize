@@ -39,8 +39,11 @@ stand-in model (`tests/integrations/eco_fakes.py`). Run the suite with
 
 `pip install economize` needs torch, transformers, safetensors and huggingface_hub. The extras are `economize[peft]`,
 `economize[quant]` (torchao, compressed-tensors), `economize[kernels]`, `economize[train]` (accelerate, datasets, TRL),
-`economize[eval]` (`lm-eval[hf]`), `economize[bench]` (datasets), `economize[vllm]`, `economize[sglang]` and `economize[all]`, which
-installs every extra except vLLM and SGLang (both pin their own torch). None of them pins an upper bound. Installing
+`economize[eval]` (`lm-eval[hf]`), `economize[bench]` (datasets), the export runtimes `economize[gguf]`,
+`economize[llama-cpp]`, `economize[onnx]` and `economize[mlx]`, `economize[vllm]`, `economize[sglang]` and
+`economize[all]`, which installs every extra except the serving engines (vLLM, SGLang and Arctic Inference pin their
+own torch) and llama-cpp (built from source). Only the `vllm` extra has an upper bound, the tested vLLM series
+(`TESTED_VLLM` in `economize.backends.vllm.plugin`). Installing
 the package registers the vLLM plugin (entry point `vllm.general_plugins`), the compressed-tensors quantization
 backend and the `economize-lm-eval` command. A `vllm serve` process finds the plugin only through the entry point; when
 economize is imported from a source checkout without being installed, call `economize.backends.vllm.register()` before

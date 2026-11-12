@@ -7,8 +7,9 @@ import pytest
 from economize.backends.vllm.plugin import TESTED_VLLM
 from helpers import read_pyproject
 
-#: Extras left out of ``all``: development tools, and the serving engines, which pin their own torch build.
-NOT_IN_ALL = {"test", "docs", "dev", "vllm", "sglang", "arctic", "all", "gguf", "llama-cpp", "onnx", "mlx"}
+#: Extras left out of ``all``: development tools, the serving engines, which pin their own torch build, and
+#: llama-cpp, which compiles from source.
+NOT_IN_ALL = {"test", "docs", "dev", "vllm", "sglang", "arctic", "all", "llama-cpp"}
 
 
 @pytest.fixture(scope="module")
