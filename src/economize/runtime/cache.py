@@ -20,6 +20,7 @@ cannot be rewound by masking.
 
 from __future__ import annotations
 
+import functools
 import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
@@ -29,7 +30,6 @@ from typing import Any, ClassVar
 
 import torch
 import torch.nn.functional as F
-from transformers.cache_utils import DynamicCache
 
 from ..errors import ConfigError, UnsupportedModelError
 from ..modules.kv_cache import SlotLayout, write_slots
@@ -48,8 +48,18 @@ __all__ = [
     "StaticKVCache",
 ]
 
-#: ``transformers`` >= 5.14 keeps several conv/recurrent states per layer, addressed by ``state_idx``.
-_INDEXED_STATES = "state_idx" in inspect.signature(DynamicCache.update_conv_state).parameters
+
+@functools.cache
+def _indexed_states() -> bool:
+    """Whether ``transformers`` (>= 5.14) keeps several conv/recurrent states per layer, addressed by ``state_idx``.
+
+    Checked on first use: ``transformers.cache_utils`` imports optional kernels (``hqq``, and through it ``triton``)
+    when they are installed, which ``import economize`` must not trigger.
+    """
+    from transformers.cache_utils import DynamicCache
+
+    return "state_idx" in inspect.signature(DynamicCache.update_conv_state).parameters
+
 
 #: Key position given to never-written slots and to the trash slot; no query position reaches it.
 UNSEEN_POSITION = 2**40
@@ -484,8 +494,9 @@ class _LinearLayerView:
     record_past = True
 
     def __init__(self, conv: torch.Tensor | None, recurrent: torch.Tensor | None) -> None:
-        self.conv_states: Any = {0: conv} if _INDEXED_STATES else conv
-        self.recurrent_states: Any = {0: recurrent} if _INDEXED_STATES else recurrent
+        indexed = _indexed_states()
+        self.conv_states: Any = {0: conv} if indexed else conv
+        self.recurrent_states: Any = {0: recurrent} if indexed else recurrent
 
 
 class _LayerList:
