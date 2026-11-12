@@ -37,7 +37,7 @@ from torch.utils._device import DeviceContext
 from .banded import StructuredMask
 from .decode import _FP8, decode_attention, out_of_resources, triton_available
 from .flash import _offsets, flash_decode, flash_prefill, prefix_hint
-from .packed import packed_of
+from .packed import materialized_kv, packed_of
 from .prefill import prefill_of
 from .registry import ATTENTION_KERNELS, AttentionKernel
 from .sdpa_guard import sdpa_attention_forward
@@ -177,8 +177,10 @@ def _fallback(
     reason: str,
     kwargs: dict[str, Any],
 ) -> tuple[torch.Tensor, Any]:
-    """Run one call on ``sdpa``, or on the model's eager function for sinks and attention weights; log it."""
+    """Run one call on ``sdpa``, or on the model's eager function for sinks and attention weights; log it. A cache
+    without dense buffers (KIVI's packed storage) has its K/V materialized first."""
     layer = getattr(module, "layer_idx", None)
+    key, value = materialized_kv(key, value)
     restrict = getattr(packed_of(key), "restrict_mask", None)
     if restrict is not None:  # a sparse cache (quest) hides what its kernel would not read
         restricted = restrict(query, key, attention_mask, bool(is_causal))
@@ -262,13 +264,15 @@ def _flash(
     """A long query on FlashAttention, logged on path ``"flash<version>"``, or ``None`` (then ``sdpa`` runs it, logged
     with reason ``"long_query"``). fp8 K/V are upcast to the query's dtype first: a prefill chunk reads the cache once,
     so the copy costs far less than falling back to ``sdpa``. A packed attachment (KIVI's codes, say) is ignored, since
-    the dense buffers hold the values it encodes, and a sparse one's ``restrict_mask`` is applied to the mask first
+    the dense buffers hold the values it encodes (a cache without dense buffers has them materialized for the call),
+    and a sparse one's ``restrict_mask`` is applied to the mask first
     (FlashAttention then refuses any mask that is not a causal prefix)."""
     if (dropout > 0.0 and module.training) or _sinks(kwargs) is not None or kwargs.get("output_attentions", False):
         return None
     observers = _observers()
     if observers is None:
         return None
+    key, value = materialized_kv(key, value)
     restrict = getattr(packed_of(key), "restrict_mask", None)
     if restrict is not None:
         attention_mask = restrict(query, key, attention_mask, False)
@@ -428,6 +432,7 @@ def economize_attention_forward(
             path = f"kernel_{packed.format}"
             out = packed.attend(query, key, value, attention_mask, scale, softcap=softcap, sinks=_sinks(kwargs))
         else:
+            key, value = materialized_kv(key, value)
             window = kwargs.get("sliding_window") if attention_mask is not None else None
             out = decode_attention(
                 query, key, value, attention_mask, scale, softcap=softcap, sinks=_sinks(kwargs), window=window
