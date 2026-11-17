@@ -22,6 +22,8 @@
   (documented in [docs/ecosystem.md](docs/ecosystem.md), GPU test skipped without `unsloth`).
 - Documentation: a page for choosing a technique by situation ([docs/choosing.md](docs/choosing.md)) and a
   reproductions page whose tables are generated from the validated data file `docs/data/reproductions.yaml`.
+- Reproductions: KV-cache eviction (SnapKV, H2O, StreamingLLM at budgets 128 and 2048) on Llama-3-8B-Instruct
+  against PyramidKV's LongBench table. H2O at budget 128 matches the paper (35.37) with `method="h2o_prefill"`.
 
 ### Changed
 
