@@ -177,7 +177,7 @@ class EfficientModel(nn.Module, EconomizeHubMixin):
         drafter = technique.drafter(self.runner) if technique is not None and config.cycle_length > 1 else None
         depth = self._first(Capability.DEPTH)
         policy: LayerPolicy | None = depth.layer_policy() if depth is not None else None
-        caches = [t for t in self.techniques.values() if Capability.KV_CACHE in t.capabilities]
+        caches = [t for t in self.techniques.values() if t.wraps_cache]
         wrap_cache = CacheWrapping(caches) if caches else None
         return CycleDecoder(
             self.runner,

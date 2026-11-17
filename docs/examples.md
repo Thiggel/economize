@@ -246,6 +246,25 @@ searched.decode(ids[0], 32)
 searched.detach()
 ```
 
+### Compressed draft views (`draft_with`)
+
+Drafts with the model under other techniques (activation sparsity, quantization, pruning, KV-cache eviction) and
+verifies with the unchanged model, so the output equals plain greedy decoding:
+
+```python
+from economize.techniques.draft_with import DraftWith
+from economize.techniques.kv_evict import KVEvictConfig
+from economize.techniques.quant import QuantConfig
+from economize.techniques.sparsity import TealConfig
+
+view = DraftWith(TealConfig(sparsity=0.5), QuantConfig(format="int4", group_size=128),
+                 KVEvictConfig(method="streaming", sinks=4, recent=256))
+model = economize.apply(base, view, calibration=calibration[:8, :256],
+                        decoding=economize.DecodeConfig(cycle_length=4))
+model.decode(ids[0], 32).mean_accepted
+model.detach()
+```
+
 ### Two-model speculative decoding (`draft_model`)
 
 A smaller model with the same tokenizer drafts. Its weights are loaded when the technique attaches:

@@ -18,6 +18,7 @@ from torch import nn
 from economize import TechniqueConfig
 from economize.techniques.dflash import DFlashConfig
 from economize.techniques.draft_model import DraftModelConfig
+from economize.techniques.draft_with import DraftWith
 from economize.techniques.duo_attention import DuoAttentionConfig
 from economize.techniques.dynamic_depth import (
     CalmConfig,
@@ -118,6 +119,7 @@ _SPECIMENS: dict[str, Callable[[Path], TechniqueConfig]] = {
     "dflash": lambda _: DFlashConfig(),
     "dmtd": lambda _: DmtdConfig(decoding_layers=2),
     "draft_model": lambda a: DraftModelConfig(model=_draft_lm(a), dtype="float32"),
+    "draft_with": lambda _: DraftWith(TealConfig(allocation="uniform", backend="dense")),
     "draft_quant": lambda _: DraftQuantConfig(group_size=None, backend="fake"),  # per channel: the maps are 64 wide
     "duo_attention": lambda _: DuoAttentionConfig(pattern=((0.9, 0.1),) * 6, sinks=2, recent=4),
     "eagle": lambda _: EagleConfig(),

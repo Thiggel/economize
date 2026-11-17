@@ -10,7 +10,7 @@ from torch import nn
 
 from ...core.calibration import calibration_source, token_batches
 from ...core.metadata import Family, KernelChoice, Saving, Simulation, TechniqueInfo
-from ...core.technique import Capability, Technique, register_technique
+from ...core.technique import Capability, DraftCopies, Technique, register_technique
 from .backends import TEAL_BACKENDS, Installed
 from .config import TealConfig
 from .model import TealCalibration, calibrate_teal, install_teal, teal_modules
@@ -39,6 +39,7 @@ class TealTechnique(Technique):
     )
     capabilities: ClassVar[Capability] = Capability.ACTIVATIONS
     order: ClassVar[int] = 0
+    draft_copies: ClassVar[DraftCopies | None] = DraftCopies.SHARED
     config: TealConfig
     sparsities: torch.Tensor
     thresholds: torch.Tensor

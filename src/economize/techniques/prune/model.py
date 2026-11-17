@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from ...arch import ArchAdapter
     from ...core.calibration import CalibrationStep, Observer
 
-__all__ = ["depth_prune_model", "prune_model"]
+__all__ = ["depth_prune_model", "prune_model", "select_depth_layers"]
 
 
 @torch.no_grad()
@@ -95,9 +95,15 @@ def prune_model(adapter: ArchAdapter, config: PruneConfig, batches: Sequence[Ten
 
 
 @torch.no_grad()
+def select_depth_layers(adapter: ArchAdapter, config: DepthPruneConfig, batches: Sequence[Tensor]) -> list[int]:
+    """The 1-indexed layers the configured criterion selects for removal (sorted), without removing them."""
+    candidates = config.candidates(adapter.num_layers)
+    return DEPTH_CRITERIA.get(config.method)().select(adapter, batches, config.num_blocks, candidates)
+
+
+@torch.no_grad()
 def depth_prune_model(adapter: ArchAdapter, config: DepthPruneConfig, batches: Sequence[Tensor]) -> list[int]:
     """Select layers with the configured criterion, remove them in place and return their original indices."""
-    candidates = config.candidates(adapter.num_layers)
-    chosen = DEPTH_CRITERIA.get(config.method)().select(adapter, batches, config.num_blocks, candidates)
+    chosen = select_depth_layers(adapter, config, batches)
     remove_layers(adapter, chosen)
     return chosen

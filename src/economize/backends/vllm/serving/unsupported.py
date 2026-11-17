@@ -56,6 +56,8 @@ UNSUPPORTED: dict[str, tuple[Role, str]] = {
                                  "positions, and has no hook for a per-head prefill pattern in its other "
                                  "backends; stays HF-only"),
     # ---- class C: per-token computation inside the target's forward ----
+    "draft_with": (Role.DRAFTER, "a draft view runs its held techniques on copies of the decoder layers next to the "
+                                 "exact verifier layers, which vLLM's model runner does not build; stays HF-only"),
     "calm": (Role.FORWARD, "per-token early exit: every token of a vLLM batch runs every layer, and an exited "
                            "token's KV entries in the skipped layers must be filled in later; stays HF-only"),
     "skipdecode": (Role.FORWARD, "per-position layer skipping: a batch of requests at different positions would "

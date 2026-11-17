@@ -115,9 +115,13 @@ class CacheWrapper(KVCache):
 
     Attributes:
         layers: The cache layers the wrapper acts on (``None``: all of them; see :meth:`covers`).
+        draft_only: Whether only draft steps see what the wrapper does (a technique inside
+            :class:`~economize.techniques.draft_with.DraftWith`): exact passes then read every entry, and
+            :meth:`account` counts every layer as dense.
     """
 
     layers: frozenset[int] | None = None
+    draft_only: bool = False
 
     def __init__(self, inner: KVCache) -> None:  # no super().__init__: every field lives in the inner cache
         if innermost(inner).keeps_recurrent_state:
@@ -389,7 +393,8 @@ class CacheWrapper(KVCache):
     def account(self, frontier: list[int | None], covered_bytes: LayerBytes) -> None:
         """Account one exact pass whose committed prefix of row ``b`` ends at ``frontier[b]``.
 
-        Layers the wrapper does not :meth:`cover <covers>` count as dense on both sides. For a covered layer,
+        Layers the wrapper does not :meth:`cover <covers>` count as dense on both sides, and so does every layer of a
+        :attr:`draft_only` wrapper, since exact passes read the full cache there. For a covered layer,
         ``covered_bytes(layer_idx, keys, committed)`` returns the stored and the uncompressed bytes per row
         (``[B]`` float64 tensors; ``committed`` is the frontier as a float64 tensor, 0 for padding rows).
         """
@@ -397,7 +402,7 @@ class CacheWrapper(KVCache):
         stored = torch.zeros_like(committed)
         full = torch.zeros_like(committed)
         for layer_idx, keys in self.positional_buffers().items():
-            if self.covers(layer_idx):
+            if self.covers(layer_idx) and not self.draft_only:
                 s, f = covered_bytes(layer_idx, keys, committed)
             else:
                 s = f = self.dense_bytes(keys, committed)

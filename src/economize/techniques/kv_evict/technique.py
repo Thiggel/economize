@@ -37,7 +37,7 @@ from torch import nn
 
 from ...core.config import TechniqueConfig
 from ...core.metadata import Family, Saving, Simulation, TechniqueInfo
-from ...core.technique import AttachContext, register_technique
+from ...core.technique import AttachContext, DraftCopies, register_technique
 from ...errors import ConfigError, UnsupportedModelError
 from ...runtime import KVCache, current_phase
 from ...runtime.transfer import device_tensor
@@ -624,6 +624,7 @@ class KVEvictTechnique(KVCacheTechnique):
         lossless=False,
     )
     order: ClassVar[int] = 20
+    draft_copies: ClassVar[DraftCopies | None] = DraftCopies.SHARED
     config: KVEvictConfig
 
     def __init__(self, config: KVEvictConfig, adapter: ArchAdapter) -> None:
@@ -634,6 +635,7 @@ class KVEvictTechnique(KVCacheTechnique):
         self.running: EvictionCache | None = None  # the cache of the decoder layer that is running
         self._handles: list[Any] = []
         self.storage = config.eviction_storage
+        self._draft = False  # attached to a draft view: only the draft path's reads are masked
 
     @classmethod
     def simulation_for(cls, config: TechniqueConfig | None = None) -> Simulation | None:
@@ -666,13 +668,26 @@ class KVEvictTechnique(KVCacheTechnique):
         return geometry.heads // geometry.kv_heads
 
     def attach(self, model: nn.Module, adapter: ArchAdapter, context: AttachContext | None = None) -> None:
-        if self.storage != "masked":
-            reason = self._compact_blocker(adapter, context or AttachContext())
-            if reason is not None and self.config.storage is not None:
-                raise ConfigError(f"storage={self.storage!r} cannot run here: {reason}; use storage='masked'")
-            if reason is not None:
-                self.storage = "masked"
+        self._draft = False
+        self._resolve_storage(self._compact_blocker(adapter, context or AttachContext()))
         self._install()
+
+    def attach_draft(self, model: nn.Module, view: ArchAdapter, context: AttachContext | None = None) -> None:
+        """On a draft path the draft layers mask the evicted entries, and the base layers keep full reads: their
+        hooks only tell the cache which layer runs, so that exact passes still score the entries. The entries stay
+        stored for the verifying model, so the storage is ``"masked"``."""
+        self._draft = True
+        self._resolve_storage("the verifying model of a draft path reads every entry")
+        self._install()
+
+    def _resolve_storage(self, blocker: str | None) -> None:
+        """Fall back to ``"masked"`` storage when ``blocker`` names why the configured one cannot run (an explicit
+        ``storage`` raises instead)."""
+        if self.storage == "masked" or blocker is None:
+            return
+        if self.config.storage is not None:
+            raise ConfigError(f"storage={self.storage!r} cannot run here: {blocker}; use storage='masked'")
+        self.storage = "masked"
 
     def _compact_blocker(self, adapter: ArchAdapter, context: AttachContext) -> str | None:
         """Why compact storage cannot run on this model and recipe (``None`` if it can)."""
@@ -692,18 +707,26 @@ class KVEvictTechnique(KVCacheTechnique):
             handle.remove()
         self._handles = []
 
+    def detach_draft(self) -> None:
+        self.detach()
+        self._draft = False
+
     def refresh(self) -> None:
         self.detach()
         self._install()
 
     def _install(self) -> None:
         eager = self.method.needs_scores and self.adapter.attn_implementation == "eager"
+        base = self.adapter.base_adapter
         for index in range(1, self.adapter.num_layers + 1):
-            layer = self.adapter.layer(index)
-            pre, post = _layer_hooks(self, index)
-            self._handles.append(layer.register_forward_pre_hook(pre, with_kwargs=True))
-            self._handles.append(layer.register_forward_hook(post, with_kwargs=True, always_call=True))
-            attention = self.adapter.attention_module(index)
+            hooked = [(self.adapter.layer(index), True)]
+            if self._draft:
+                hooked.append((base.layer(index), False))
+            for layer, masking in hooked:
+                pre, post = _layer_hooks(self, index, masking=masking)
+                self._handles.append(layer.register_forward_pre_hook(pre, with_kwargs=True))
+                self._handles.append(layer.register_forward_hook(post, with_kwargs=True, always_call=True))
+            attention = base.attention_module(index)  # scores come from the exact passes
             if eager and attention is not None:
                 self._handles.append(attention.register_forward_hook(_weights_hook(self)))
 
@@ -717,9 +740,9 @@ def _capturing(mask: torch.Tensor) -> bool:
     return mask.is_cuda and torch.cuda.is_current_stream_capturing()
 
 
-def _layer_hooks(technique: KVEvictTechnique, index: int) -> tuple[Any, Any]:
+def _layer_hooks(technique: KVEvictTechnique, index: int, masking: bool = True) -> tuple[Any, Any]:
     """Pre- and post-hooks of decoder layer ``index``. Closures (not bound methods) so that a deep copy of the layer
-    keeps hooks that point at the same technique."""
+    keeps hooks that point at the same technique. Without ``masking`` the hooks only set the running layer."""
 
     def pre(module: nn.Module, args: tuple, kwargs: dict) -> tuple[tuple, dict] | None:
         cache = find_wrapper(kwargs.get("past_key_values"), EvictionCache, owner=technique)
@@ -727,6 +750,8 @@ def _layer_hooks(technique: KVEvictTechnique, index: int) -> tuple[Any, Any]:
             return None
         cache.layer = technique.adapter.kv_source(index) - 1
         technique.running = cache
+        if not masking:
+            return None
         mask = kwargs.get("attention_mask")
         masked = cache.attention_mask(cache.layer, mask)
         if masked is mask:

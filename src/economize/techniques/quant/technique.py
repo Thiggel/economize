@@ -9,7 +9,7 @@ from torch import Tensor
 
 from ...core.config import TechniqueConfig
 from ...core.metadata import Family, KernelChoice, Saving, TechniqueInfo
-from ...core.technique import Capability, Technique, register_technique
+from ...core.technique import Capability, DraftCopies, Technique, register_technique
 from ...errors import ConfigError, IncompatibleTechniquesError
 from ...registry import Registry
 from .._weights.technique import CalibratedWeightTransform
@@ -40,6 +40,7 @@ class QuantTechnique(CalibratedWeightTransform):
     )
     capabilities: ClassVar[Capability] = Capability.WEIGHTS
     order: ClassVar[int] = 30
+    draft_copies: ClassVar[DraftCopies | None] = DraftCopies.OWNED
     methods: ClassVar[Registry[Any]] = QUANT_METHODS
     config: QuantConfig
 

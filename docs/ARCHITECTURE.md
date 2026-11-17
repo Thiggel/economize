@@ -327,7 +327,26 @@ class Technique(nn.Module):
     def drafter(self, runner: LayerRunner) -> Drafter      # DRAFTER
     def layer_policy(self) -> LayerPolicy | None           # DEPTH
     def wrap_cache(self, cache: KVCache) -> KVCache        # KV_CACHE
+    draft_copies: ClassVar[DraftCopies | None] = None      # how it runs in a draft view; None: it cannot
+    def attach_draft(self, model, view, context=None)      # default: attach(model, view, context)
+    def detach_draft(self) -> None                         # default: detach()
+    def draft_policy(self) -> LayerPolicy | None           # default: layer_policy()
+    def draft_skips(self) -> frozenset[int]                # layers draft_policy skips, for the cost log
+    wraps_cache: bool                                      # default: KV_CACHE in capabilities
 ```
+
+A draft view (`techniques/draft_with`, `DraftWith(*configs)`) is a DRAFTER that holds other techniques and runs
+them on the draft path of a `SelfDrafter` only. `draft_copies` declares what the view hands a held technique:
+`SHARED` (shallow copies of the decoder layers sharing every tensor, for hooks), `OWNED` (deep copies the technique
+rewrites; tensors left unchanged are shared with the base again) or `NONE` (the base layers; the technique acts
+through `draft_policy`). `ArchAdapter.with_layers(copies)` returns the `_LayerView` adapter the held technique
+attaches to, whose `model_layers` are the verifier's layers. The held techniques attach in `attach_rank` order and
+pass the recipe's compatibility checks among themselves; the view refuses drafters, techniques with
+`draft_copies = None`, a technique held and applied at once, and an OWNED transform ordered before an outer WEIGHTS
+technique. Held KV-cache techniques wrap the cache with `draft_only=True` (`CacheWrapper`), so their masks apply
+in the `"draft"` phase and exact passes read the full cache. Attach compares a fingerprint of the base parameters
+and buffers before and after and raises if the verifier changed. The view reports the first simulation of its held
+techniques as its own and delegates `unsupported_for` and `conflict` to them.
 
 Techniques are found through `TECHNIQUES` (`@register_technique`), which `economize.techniques` fills by importing
 every subpackage with `economize.registry.import_submodules`; third-party packages use the `economize.techniques` entry-point group.

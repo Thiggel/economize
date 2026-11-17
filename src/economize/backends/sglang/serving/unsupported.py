@@ -65,6 +65,8 @@ UNSUPPORTED: dict[str, tuple[Role, str]] = {
     "teal": (Role.FORWARD, "TEAL's activation sparsity runs as a linear method; SGLang has no plugin point for a "
                            "custom linear method" + _VLLM),
     # ---- per-token computation inside the target's forward ----
+    "draft_with": (Role.DRAFTER, "a draft view runs its held techniques on copies of the decoder layers next to the "
+                                 "exact verifier layers, which SGLang's model runner does not build" + _HF),
     "calm": (Role.FORWARD, "per-token early exit: every token of an SGLang batch runs every layer, and an exited "
                            "token's KV entries in the skipped layers must be filled in later" + _HF),
     "skipdecode": (Role.FORWARD, "per-position layer skipping inside one captured forward" + _HF),

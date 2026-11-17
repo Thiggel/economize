@@ -4,6 +4,13 @@
 
 ### Added
 
+- Draft views: `draft_with` (`DraftWith(TealConfig(), QuantConfig(), ...)`) runs any technique that declares
+  `draft_copies` on the draft path of a self-speculative drafter and verifies with the unmodified model, so a
+  lossy technique decodes losslessly. `teal`, `kv_evict` (shared layer copies), `quant`, `prune`, `lowrank`
+  (owned copies) and `depth_prune` (skipped on draft steps, equal to `layer_skip` for the same set) opt in.
+  New hooks on `Technique`: `draft_copies`, `attach_draft`, `detach_draft`, `draft_policy`, `draft_skips`,
+  `wraps_cache`; `ArchAdapter.with_layers` and `CacheWrapper(draft_only=True)` back them. A held `kv_evict`
+  keeps its entries in masked storage, since the verifying model reads every entry.
 - `mod` takes an inference `threshold` on the router logit (a token runs a routed layer when its logit exceeds it).
   The default `0` is the paper's rule and the previous behaviour.
 - `economize.train` exports the `LogitDistill` objective.
@@ -86,7 +93,7 @@
 
 ## 0.4.0 (2026-11-04)
 
-54 techniques (28 new), 21 training objectives, 46 model types.
+55 techniques (29 new), 21 training objectives, 46 model types.
 
 ### New techniques
 

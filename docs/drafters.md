@@ -22,6 +22,7 @@ All drafters share these properties, tested per drafter in `tests/techniques/tes
 | Medusa | `medusa` | yes | `medusa_ce` | FasterDecoding | `test_drafter_medusa_oracle.py` |
 | Early exit / LayerSkip | `early_exit` | yes | `early_exit_kl`, `distill_kl`, `layerskip` | economize's own | `test_drafter_early_exit_oracle.py` |
 | Layer skipping (Draft & Verify, SWIFT, CLaSp) | `layer_skip` | no | | | `test_drafter_layer_skip_oracle.py` |
+| Draft views (Draft & Verify, SWIFT, QSpec, MagicDec) | `draft_with` | no | | | none |
 | Two-model speculative decoding | `draft_model` | no | | any HF causal LM | `test_drafter_draft_model_oracle.py` |
 | PARD parallel draft LM | `pard` | no | | PARD draft LMs (any HF causal LM with a mask token) | none |
 | DFlash block drafter | `dflash` | with a custom objective | | z-lab/dflash, vLLM speculators | none |
@@ -131,6 +132,19 @@ minus a set of layers. economize takes a given skip set or searches one offline 
 or greedy-token mismatch, or `uniform`). Draft & Verify uses Bayesian optimization, SWIFT an online search during
 decoding and CLaSp a per-step dynamic-programming search; these searches are not implemented (new searches
 register in `SKIP_SEARCHES`). Skipped layers write no K/V and the next exact pass recomputes the drafted positions.
+
+## Draft views (`draft_with`)
+
+`DraftWith(config, ...)` drafts with the model under other techniques and verifies with the model as it is. Each
+held technique runs on the draft path only: TEAL hooks shallow copies of the decoder layers, quantization, pruning
+and low-rank factorization transform deep copies, `depth_prune` skips its layers on draft steps, and `kv_evict`
+masks the evicted entries of the cache that draft steps read. With `DepthPruneConfig(layers=S)` the drafter decodes
+the tokens of `LayerSkipConfig(skip_layers=S)` with the same cost log. The other held techniques correspond to
+QSpec [@zhao2025qspec] (quantized drafting, there with W4A4 against W4A16) and to MagicDec's StreamingLLM
+drafter [@sadhukhan2025magicdec], which reads a gathered cache where `draft_with` masks the full one, so the
+acceptance is that of MagicDec and the saving is not. A technique joins the views by declaring `draft_copies`
+(see [Writing a technique](writing_a_technique.md)); drafters and techniques without a draft path are refused.
+The tutorial [Draft views](tutorials/draft_with.md) compares lossy use of a technique with its use in a draft view.
 
 ## Two-model speculative decoding (`draft_model`)
 

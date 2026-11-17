@@ -10,6 +10,10 @@ other columns come from the technique's metadata, the class attribute `info` (a 
 - **Lossless**: greedy decoding with the technique reproduces the base model's greedy output exactly.
 - **Trainable**: the components the technique trains, or "no" for a training-free technique.
 
+A technique marked lossy can still decode losslessly as a draft view: `DraftWith(TealConfig(), QuantConfig())` runs
+the held techniques on the draft path of a self-speculative drafter and verifies with the unmodified model (see
+[Draft views](tutorials/draft_with.md)). Applied directly, the same configurations change every forward pass.
+
 The last section shows how each backend, the Hugging Face path `transformers` and the serving engines, runs every
 technique.
 

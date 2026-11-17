@@ -19,6 +19,7 @@ towers alone. :func:`adapter_for` looks up the wrapper's ``model_type`` first an
 from __future__ import annotations
 
 import contextlib
+import copy
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
@@ -167,6 +168,36 @@ class ArchAdapter(ABC):
         if not 1 <= index <= self.num_layers:
             raise IndexError(f"layer index {index} outside 1..{self.num_layers}")
         return self.layers[index - 1]
+
+    @property
+    def model_layers(self) -> nn.ModuleList:
+        """The decoder layers the wrapped model runs in its own forward. They are :attr:`layers`, except on an
+        adapter from :meth:`with_layers`, whose :attr:`layers` are other modules."""
+        return self.layers
+
+    @property
+    def base_adapter(self) -> ArchAdapter:
+        """The adapter of the wrapped model: this adapter, or the one :meth:`with_layers` was called on."""
+        return self
+
+    def with_layers(self, layers: Sequence[nn.Module]) -> ArchAdapter:
+        """A view of this adapter whose :attr:`layers` are ``layers`` (one module per decoder layer, such as copies
+        of the base layers that a draft path runs) and whose other members are this adapter's.
+
+        The view's :attr:`model_layers` and :attr:`base_adapter` still name the base model's layers and this adapter,
+        so code that must reach the model's own forward (input capture for calibration) uses them. The view is a
+        shallow copy of the adapter under a subclass of its class; building it changes nothing on the model.
+
+        Raises:
+            ConfigError: ``layers`` does not hold one module per decoder layer.
+        """
+        base = self.base_adapter
+        if len(layers) != base.num_layers:
+            raise ConfigError(f"a layer view needs {base.num_layers} layers, got {len(layers)}")
+        view = copy.copy(base)
+        view.__class__ = _layer_view_class(type(base))
+        cast(_LayerView, view).bind_view(base, nn.ModuleList(layers))
+        return view
 
     def module_path(self, module: nn.Module) -> str:
         """The dotted name of ``module`` inside :attr:`model` (``"model.layers.3"``, ``"lm_head"``), as a state dict
@@ -639,3 +670,39 @@ def adapter_for(model: nn.Module) -> ArchAdapter:
     raise UnsupportedModelError(
         f"no economize adapter for model_type {candidates[0]!r}; registered: {ARCHITECTURES.names()}"
     )
+
+
+class _LayerView(ArchAdapter):
+    """Mixin of the adapters :meth:`ArchAdapter.with_layers` builds: :attr:`layers` are other modules than the
+    model's own."""
+
+    _view_base: ArchAdapter
+    _view_layers: nn.ModuleList
+
+    def bind_view(self, base: ArchAdapter, layers: nn.ModuleList) -> None:
+        self._view_base = base
+        self._view_layers = layers
+
+    @property
+    def layers(self) -> nn.ModuleList:
+        return self._view_layers
+
+    @property
+    def model_layers(self) -> nn.ModuleList:
+        return self._view_base.model_layers
+
+    @property
+    def base_adapter(self) -> ArchAdapter:
+        return self._view_base
+
+
+_VIEW_CLASSES: dict[type[ArchAdapter], type[ArchAdapter]] = {}
+
+
+def _layer_view_class(cls: type[ArchAdapter]) -> type[ArchAdapter]:
+    """The subclass of adapter class ``cls`` that :meth:`ArchAdapter.with_layers` gives its views (one per class)."""
+    view = _VIEW_CLASSES.get(cls)
+    if view is None:
+        view = type(f"{cls.__name__}LayerView", (_LayerView, cls), {"__module__": cls.__module__})
+        _VIEW_CLASSES[cls] = view
+    return view
