@@ -12,7 +12,7 @@ import math
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from functools import partial
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import torch
 import torch.nn.functional as F
@@ -21,6 +21,9 @@ from torch.utils.hooks import RemovableHandle
 
 from ..errors import ConfigError
 from .sharding import is_sharded, sharded_dim, tensor_parallel_group
+
+if TYPE_CHECKING:
+    from torch.distributed import ProcessGroup
 
 __all__ = ["LayerLoRA", "LoRADelta"]
 
@@ -42,21 +45,20 @@ class LoRADelta(nn.Module):
         self.lora_B = nn.Parameter(torch.zeros(out_features, rank))
         self.scale = scale
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
-        self._reduce_group: object | None = None  # the processes of a row-parallel split, which sum ``A x``
+        self._reduce_group: ProcessGroup | None = None  # the processes of a row-parallel split, which sum ``A x``
 
     def shard_like(self, weight: torch.Tensor) -> None:
         """Shard the factors like ``weight``, the ``[out, in]`` weight of the adapted map, if it is a ``DTensor``
         split along one dimension (a collective call: the first process's factors are scattered, so every process
         starts from the same update). Factors that are sharded already stay as they are."""
         dim = sharded_dim(weight)
-        if dim is None or is_sharded(self.lora_A) or is_sharded(self.lora_B):
+        if dim is None or not is_sharded(weight) or is_sharded(self.lora_A) or is_sharded(self.lora_B):
             return
         from torch.distributed.tensor import distribute_tensor
 
         name = "lora_B" if dim == 0 else "lora_A"
         factor = getattr(self, name)
-        sharded = distribute_tensor(factor.detach(), weight.device_mesh, weight.placements,  # type: ignore[attr-defined]
-                                    src_data_rank=0)
+        sharded = distribute_tensor(factor.detach(), weight.device_mesh, weight.placements, src_data_rank=0)
         setattr(self, name, nn.Parameter(sharded, requires_grad=factor.requires_grad))
         if dim == 1:
             self._reduce_group = tensor_parallel_group(weight)
@@ -72,16 +74,16 @@ class LoRADelta(nn.Module):
 
 
 def _local(tensor: torch.Tensor) -> torch.Tensor:
-    return tensor.to_local() if is_sharded(tensor) else tensor  # type: ignore[attr-defined]
+    return tensor.to_local() if is_sharded(tensor) else tensor
 
 
-def _all_reduce(tensor: torch.Tensor, group: object) -> torch.Tensor:
+def _all_reduce(tensor: torch.Tensor, group: ProcessGroup) -> torch.Tensor:
     """Sum ``tensor`` over ``group``; differentiable when gradients are recorded."""
     if torch.is_grad_enabled() and tensor.requires_grad:
         from torch.distributed.nn.functional import all_reduce
 
         return all_reduce(tensor, group=group)
-    torch.distributed.all_reduce(tensor, group=group)  # type: ignore[call-overload]
+    torch.distributed.all_reduce(tensor, group=group)
     return tensor
 
 

@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import torch
@@ -151,7 +151,7 @@ class RotaryTable(nn.Module):
         )
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
-    def _apply(self, fn: Any, recurse: bool = True) -> RotaryTable:
+    def _apply(self, fn: Callable[[torch.Tensor], torch.Tensor], recurse: bool = True) -> RotaryTable:
         inv_freq = self.inv_freq
         super()._apply(fn, recurse)
         self.inv_freq = inv_freq.to(self.inv_freq.device)

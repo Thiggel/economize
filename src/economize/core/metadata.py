@@ -30,9 +30,12 @@ from __future__ import annotations
 import enum
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from ..registry import Registry
+
+if TYPE_CHECKING:
+    from .config import TechniqueConfig
 
 __all__ = [
     "SINGLE_OWNER",
@@ -249,24 +252,24 @@ class KernelChoice:
     field: str
     registry: Registry[Any]
 
-    def entry(self, config: Any) -> Any:
+    def entry(self, config: TechniqueConfig | type[TechniqueConfig]) -> object:
         """The registry entry ``config`` selects (``config`` may be a config class: its default), ``None`` if the
         name is not registered."""
         name = getattr(config, self.field)
         return self.registry.get(name) if name in self.registry else None
 
-    def simulation(self, config: Any) -> Simulation | None:
+    def simulation(self, config: TechniqueConfig | type[TechniqueConfig]) -> Simulation | None:
         """The simulation of the kernel ``config`` selects (``config`` may be a config class: its default)."""
         simulation = getattr(self.entry(config), "simulation", None)
         return simulation if isinstance(simulation, Simulation) else None
 
-    def storage(self, config: Any) -> WeightStorage | None:
+    def storage(self, config: TechniqueConfig | type[TechniqueConfig]) -> WeightStorage | None:
         """The :class:`WeightStorage` the selected kernel leaves the base weights in (its ``storage`` attribute),
         ``None`` if it declares none."""
         storage = getattr(self.entry(config), "storage", None)
         return storage if isinstance(storage, WeightStorage) else None
 
-    def weight_access(self, config: Any) -> WeightAccess | None:
+    def weight_access(self, config: TechniqueConfig | type[TechniqueConfig]) -> WeightAccess | None:
         """How the selected kernel reads the base weights (its ``weight_access`` attribute), ``None`` if it reads
         them through the modules' own forward."""
         access = getattr(self.entry(config), "weight_access", None)
@@ -300,7 +303,7 @@ class TechniqueInfo:
     kernel: KernelChoice | None = None
     listed: bool = True
 
-    def simulation(self, config: Any) -> Simulation | None:
+    def simulation(self, config: TechniqueConfig | type[TechniqueConfig]) -> Simulation | None:
         """How the Hugging Face path with ``config`` (an instance or the config class) simulates the technique."""
         simulation = (self.kernel.simulation(config) if self.kernel is not None else None) or self.simulated
         return simulation.within(self.saves) if simulation is not None else None
@@ -311,7 +314,7 @@ class TechniqueInfo:
 SINGLE_OWNER = Capability.DRAFTER | Capability.DEPTH
 
 
-def check_declaration(owner: str, capabilities: Capability, info: Any) -> None:
+def check_declaration(owner: str, capabilities: Capability, info: object) -> None:
     """Raise ``TypeError`` unless ``info`` is a :class:`TechniqueInfo` that fits the class's ``capabilities``."""
     if not isinstance(info, TechniqueInfo):
         raise TypeError(f"{owner}.info must be a TechniqueInfo, got {type(info).__name__}")

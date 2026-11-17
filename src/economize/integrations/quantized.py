@@ -20,12 +20,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from torch import nn
+
 from ..core.hub import describe_quantization  # lives in the core, which records it in checkpoints
 
 __all__ = ["describe_quantization", "is_quantized", "same_quantization"]
 
 
-def is_quantized(model: Any) -> bool:
+def is_quantized(model: nn.Module) -> bool:
     """Whether ``model``'s base was loaded through a ``transformers`` quantizer."""
     return describe_quantization(model) is not None
 

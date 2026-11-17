@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from huggingface_hub import ModelCard, ModelCardData, ModelHubMixin
 from torch import nn
@@ -98,7 +98,7 @@ class EconomizeHubMixin(
     model.
     """
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> EconomizeHubMixin:
+    def __new__(cls, *args: object, **kwargs: object) -> EconomizeHubMixin:
         instance = super().__new__(cls, *args, **kwargs)
         # economize_config.json is the configuration: no config.json. Third-party private field
         # huggingface_hub.ModelHubMixin._hub_mixin_config (in every release tested, up to 1.23; read by
@@ -111,7 +111,8 @@ class EconomizeHubMixin(
 
     def _economize_model(self) -> EfficientModel:
         """The :class:`~economize.EfficientModel` to save."""
-        return self  # type: ignore[return-value]
+        # EfficientModel is the only class that mixes this in without overriding the method (HubModel overrides it).
+        return cast("EfficientModel", self)
 
     def _save_pretrained(self, save_directory: Path) -> None:
         model = self._economize_model()
@@ -206,7 +207,7 @@ def read_meta(folder: str | Path) -> dict[str, Any]:
 
 
 # ---- base model metadata ------------------------------------------------------------------------------------------
-def describe_quantization(model: Any) -> dict[str, Any] | None:
+def describe_quantization(model: nn.Module) -> dict[str, Any] | None:
     """The quantization a ``transformers`` quantizer applied to ``model``'s base, or ``None`` for an unquantized
     base. Checkpoints record it next to the weight fingerprint; :mod:`economize.integrations.quantized` re-exports it.
 
@@ -231,7 +232,7 @@ def describe_quantization(model: Any) -> dict[str, Any] | None:
     }
 
 
-def _as_dict(qconfig: Any) -> dict[str, Any]:
+def _as_dict(qconfig: object) -> dict[str, Any]:
     """A JSON-safe dict of a ``QuantizationConfigMixin`` or plain dict (unserialisable values become ``repr``)."""
     if qconfig is None:
         return {}
@@ -244,7 +245,7 @@ def _as_dict(qconfig: Any) -> dict[str, Any]:
     return json.loads(json.dumps(raw, default=repr, sort_keys=True))
 
 
-def base_metadata(model: Any) -> dict[str, Any]:
+def base_metadata(model: nn.Module) -> dict[str, Any]:
     """The entries of ``economize_config.json`` that describe the base model beyond its name: its revision, the
     :func:`~economize.teacher_fingerprint` of its weights (``None`` on a tensor-parallel shard) and its quantization."""
     base = base_model_of(model)
@@ -256,7 +257,7 @@ def base_metadata(model: Any) -> dict[str, Any]:
     }
 
 
-def check_base_model(model: Any, meta: dict[str, Any]) -> bool:
+def check_base_model(model: nn.Module, meta: dict[str, Any]) -> bool:
     """Warn (:class:`~economize.TeacherMismatchWarning`) when ``model``'s base weights differ from those the checkpoint
     was saved with; the warning names the revision and the quantization of both. Returns whether they match
     (``True`` when the checkpoint records no fingerprint or ``model`` is a tensor-parallel shard)."""

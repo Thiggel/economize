@@ -73,7 +73,7 @@ def attach_techniques(
     configs: Sequence[TechniqueConfig],
     *,
     states: States | None = None,
-    calibration: Any = None,
+    calibration: object = None,
     options: Mapping[str, Any] | None = None,
 ) -> list[Technique]:
     """Build the techniques of ``configs``, load ``states`` (before anything attaches) and attach them in order.
@@ -202,7 +202,7 @@ def _add_note(error: BaseException, note: str) -> None:
     if sys.version_info >= (3, 11):
         error.add_note(note)
     else:
-        error.__notes__ = [*getattr(error, "__notes__", []), note]  # type: ignore[attr-defined]
+        error.__notes__ = [*getattr(error, "__notes__", []), note]  # type: ignore[attr-defined]  # declared from 3.11
 
 
 def _roll_back(attached: list[Technique], failed: Technique | None, error: BaseException) -> None:

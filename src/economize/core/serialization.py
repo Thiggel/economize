@@ -39,6 +39,8 @@ from ..unwrap import base_model_of, peft_base
 from .config import TechniqueConfig, nested_config, nested_dict
 
 if TYPE_CHECKING:
+    from transformers import PreTrainedModel
+
     from .model import EfficientModel
 
 __all__ = [
@@ -302,7 +304,7 @@ def attach(
     checkpoint: Checkpoint,
     decoding: DecodeConfig | None = None,
     *,
-    calibration: Any = None,
+    calibration: object = None,
     check_teacher: bool = True,
 ) -> EfficientModel:
     """Apply the techniques of ``checkpoint`` to ``model``, loading their weights before they attach.
@@ -344,7 +346,7 @@ def load(
     *,
     format: str | None = None,
     decoding: DecodeConfig | None = None,
-    calibration: Any = None,
+    calibration: object = None,
     check_teacher: bool = True,
 ) -> EfficientModel:
     """Attach the techniques stored at ``path`` to ``model``.
@@ -368,7 +370,7 @@ def from_pretrained(
     *,
     format: str | None = None,
     decoding: DecodeConfig | None = None,
-    calibration: Any = None,
+    calibration: object = None,
     check_teacher: bool = True,
     **model_kwargs: Any,
 ) -> EfficientModel:
@@ -385,7 +387,7 @@ def from_pretrained(
     return attach(base, checkpoint, decoding, calibration=calibration, check_teacher=check_teacher)
 
 
-def load_base_model(name: str | Path, **model_kwargs: Any) -> Any:
+def load_base_model(name: str | Path, **model_kwargs: Any) -> PreTrainedModel:
     """Load a base model with ``AutoModelForCausalLM``, or with the class its config names.
 
     Multimodal wrappers such as ``Mistral3ForConditionalGeneration`` have no ``AutoModelForCausalLM`` mapping. For

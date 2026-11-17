@@ -29,9 +29,11 @@ __all__ = ["SLOT_GATHER", "gather_slots", "gather_slots_reference"]
 #: it off.
 SLOT_GATHER = os.environ.get("ECONOMIZE_SLOT_GATHER", "1") != "0"
 
+#: A buffer's identity for the pointer tables: its address, shape and dtype.
+_BufferKey = tuple[int, tuple[int, ...], torch.dtype]
 #: Pointer tables kept on the device, keyed by the buffers' addresses and shapes. Static caches keep their buffers,
 #: so a decoder reuses one table for its whole life; the dict is cleared when it grows past :data:`_MAX_TABLES`.
-_TABLES: dict[tuple[Any, ...], torch.Tensor] = {}
+_TABLES: dict[tuple[_BufferKey, ...], torch.Tensor] = {}
 _MAX_TABLES = 64
 
 
@@ -101,7 +103,7 @@ def _triton_available() -> bool:
 
 def _table(buffers: list[torch.Tensor], device: torch.device) -> torch.Tensor | None:
     """``[N, 4]`` int64 on ``device``: base address, heads, slots and 32-bit words per slot of every buffer."""
-    key = tuple((b.data_ptr(), tuple(b.shape), b.dtype) for b in buffers)
+    key: tuple[_BufferKey, ...] = tuple((b.data_ptr(), tuple(b.shape), b.dtype) for b in buffers)
     table = _TABLES.get(key)
     if table is not None:
         return table
