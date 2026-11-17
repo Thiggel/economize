@@ -7,11 +7,7 @@ import triton
 import triton.language as tl
 
 from ._decode_kernels import _accumulate, _online_softmax, _scores
-
-try:
-    from triton.language.extra.cuda import libdevice as _ld
-except ImportError:  # pragma: no cover - older triton
-    from triton.language.extra import libdevice as _ld
+from ._libdevice import libdevice as _ld
 
 
 @triton.jit
