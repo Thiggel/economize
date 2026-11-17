@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 (unreleased)
 
 ### Added
 
@@ -11,6 +11,10 @@
   gemma-4-26B-A4B-it, and speedup figures at every measured decoding setting ([docs/model_zoo.md](docs/model_zoo.md)).
 - The `all` extra also installs the export runtimes `gguf`, `onnx` and `mlx` (macOS only). It still leaves out the
   serving engines, which pin their own torch build, and `llama-cpp`, which compiles from source.
+- Unsloth `FastLanguageModel` bases: economize applies to them once their modules run the transformers forward
+  (documented in [docs/ecosystem.md](docs/ecosystem.md), GPU test skipped without `unsloth`).
+- Documentation: a page for choosing a technique by situation ([docs/choosing.md](docs/choosing.md)) and a
+  reproductions page whose tables are generated from the validated data file `docs/data/reproductions.yaml`.
 
 ### Changed
 
@@ -39,6 +43,19 @@
 - Documentation: citations in APA style from one bibliography, per-family technique tables, a backend support
   matrix, and README / tutorial combination examples restricted to stacks that save for real and pass
   `economize.compatible` (checked by `tests/docs/test_doc_combinations.py`).
+- `kv_evict` with `method="streaming"` frees the evicted entries: the default `storage="compact"` keeps the sinks
+  and a ring of `recent + headroom` entries per covered layer (`CompactWindowCache`), under spec decoding, trees,
+  batching, chunked prefill and CUDA graphs, with the tokens of the masked storage. `storage="masked"` is the
+  simulated reference, which the score-based methods keep; compact storage falls back to it next to another KV
+  technique, under other attention implementations and for shared or copied KV layers. A chunked prompt must fit
+  into `recent + headroom` entries and a verify pass into `headroom`, or a `ConfigError` names the headroom.
+- StreamingLLM trims the cache to the window at the end of the prompt pass, so draft steps after the prompt see
+  only the sinks and the window, as in the reference (outputs at `cycle_length=1` are unchanged).
+- `import economize` no longer imports `transformers.cache_utils` (which loads `hqq`, `torch._dynamo` and Triton when
+  `hqq` is installed); the cache probe runs on first use.
+- The `ECONOMIZE_*` environment variables (`ECONOMIZE_FLASH_PREFILL`, `ECONOMIZE_FLASH_DECODE`,
+  `ECONOMIZE_HUB_KERNELS`, `ECONOMIZE_SLOT_GATHER`) are documented as debug overrides of kernel paths that do not
+  change results; options belong to the typed config of their technique.
 
 ### Fixed
 
@@ -50,6 +67,9 @@
 - MInference prefill falls back to smaller Triton tiles when the device's shared memory cannot hold the tuned tile
   (L40, A6000).
 - The ONNX graph writer refuses non-integer zero points instead of rounding them.
+- Fused slot gathers (tree compaction, speculation adoption) launch on the device of their buffers, so two-GPU
+  speculative-speculative decoding with CUDA graphs no longer hits an illegal memory access, and the pointer tables
+  that captured graphs read stay alive as long as their buffers.
 
 ## 0.4.0 (2026-11-04)
 
@@ -96,14 +116,6 @@
 
 ### Decoding
 
-- `kv_evict` with `method="streaming"` frees the evicted entries: the default `storage="compact"` keeps the sinks
-  and a ring of `recent + headroom` entries per covered layer (`CompactWindowCache`), under spec decoding, trees,
-  batching, chunked prefill and CUDA graphs, with the tokens of the masked storage. `storage="masked"` is the
-  simulated reference, which the score-based methods keep; compact storage falls back to it next to another KV
-  technique, under other attention implementations and for shared or copied KV layers. A chunked prompt must fit
-  into `recent + headroom` entries and a verify pass into `headroom`, or a `ConfigError` names the headroom.
-- StreamingLLM trims the cache to the window at the end of the prompt pass, so draft steps after the prompt see
-  only the sinks and the window, as in the reference (outputs at `cycle_length=1` are unchanged).
 - `draft_policy="dynamic_tree"`: EAGLE-2 dynamic draft trees for every drafter that implements tree steps
   (EAGLE-3, early exit, FR-Spec), under CUDA graphs ([docs/dynamic_tree.md](docs/dynamic_tree.md)).
 - `draft_policy="sequoia"` (static trees from Sequoia's dynamic program, with the hardware-aware size and depth and
