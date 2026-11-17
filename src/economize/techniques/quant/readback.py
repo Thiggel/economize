@@ -1,11 +1,11 @@
 """Read the codes back out of a kernel weight, so that a model quantized for one kernel can be exported for another.
 
-The ``"marlin"``, ``"machete"``, ``"cutlass"`` and ``"torchao"`` backends replace a module's weight by a kernel tensor
-and keep no :class:`~.grid.QuantizedWeight`. Exporters that write codes (the compressed-tensors checkpoint vLLM
-serves, :func:`economize.integrations.compressed_tensors.export_compressed_tensors`) recover them here instead of
-asking the user to quantize again. A reader returns the codes, scales and zero points the backend was given; the
-scales come back rounded to the kernel's compute dtype (bfloat16 or float16), since that is what the kernel stores
-(the CUTLASS weight keeps fp32 scales).
+The ``"marlin"``, ``"machete"``, ``"cutlass"``, ``"triton"`` and ``"torchao"`` backends replace a module's weight by a
+kernel tensor and keep no :class:`~.grid.QuantizedWeight`. Exporters that write codes (the compressed-tensors
+checkpoint vLLM serves, :func:`economize.integrations.compressed_tensors.export_compressed_tensors`) recover them here
+instead of asking the user to quantize again. A reader returns the codes, scales and zero points the backend was
+given; the scales come back rounded to the kernel's compute dtype (bfloat16 or float16), since that is what the
+kernel stores (the CUTLASS and Triton weights keep fp32 scales).
 
   ======================  =========================================================================================
   weight                  how the codes are recovered
@@ -15,6 +15,7 @@ scales come back rounded to the kernel's compute dtype (bfloat16 or float16), si
   ``MacheteWeight``       scales as stored, zero points from ``-scale * zero`` (int4 only: the backend refuses
                           affine int8, whose bf16 shift loses the zero point), codes as for Marlin
   ``CutlassInt8Weight``   the stored int8 codes (shifted by 128) and fp32 per-channel scales
+  ``TritonWeight``        the stored codes (signed int8 shifted by 128), fp32 scales and int16 zero points
   torchao int8/fp8        the tensor's ``qdata``, ``scale`` and ``zero_point``
   torchao int4            tinygemm's dequantized weight (``_weight_int4pack_mm`` against an identity) and its
                           packed scales and zeros
@@ -181,6 +182,35 @@ class CutlassReader(CodeReader):
         scale = weight.scales[0, : lay.size_n, None].contiguous()  # type: ignore[attr-defined]
         zero = torch.full_like(scale, 128)
         return QuantizedWeight(make_grid("int8", True), codes.contiguous(), scale, zero, lay.size_k)
+
+
+@CODE_READERS.register("triton")
+class TritonReader(CodeReader):
+    """:class:`~.triton_gemm.TritonWeight`: the stored codes, fp32 scales and int16 zero points as they are (fp8
+    scales without the kernel's factor 256)."""
+
+    def accepts(self, weight: Tensor) -> bool:
+        from .triton_gemm import TritonWeight
+
+        return type(weight) is TritonWeight
+
+    @torch.no_grad()
+    def read(self, weight: Tensor) -> QuantizedWeight:
+        from .triton_gemm import _FP8_SCALE
+
+        lay = weight.packing  # type: ignore[attr-defined]
+        group_size = lay.size_k if lay.group_size < 0 else lay.group_size
+        scale = weight.scales.float()  # type: ignore[attr-defined]
+        if lay.type_name == "float8_e4m3fn":
+            codes = weight.qweight.view(torch.float8_e4m3fn).clone()  # type: ignore[attr-defined]
+            return QuantizedWeight(make_grid("fp8"), codes, scale / _FP8_SCALE, None, group_size)
+        stored = weight.qweight  # type: ignore[attr-defined]
+        symmetric = lay.type_name == "int8"
+        if symmetric:
+            codes, zero = (stored.to(torch.int16) + 128).to(torch.uint8), torch.full_like(scale, 128)
+        else:
+            codes, zero = stored.clone(), weight.zeros.float()  # type: ignore[attr-defined]
+        return QuantizedWeight(make_grid("int8", symmetric), codes, scale, zero, group_size)
 
 
 @CODE_READERS.register("marlin")

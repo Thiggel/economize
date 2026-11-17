@@ -22,6 +22,9 @@
   (documented in [docs/ecosystem.md](docs/ecosystem.md), GPU test skipped without `unsloth`).
 - Documentation: a page for choosing a technique by situation ([docs/choosing.md](docs/choosing.md)) and a
   reproductions page whose tables are generated from the validated data file `docs/data/reproductions.yaml`.
+- Quantization backend `triton`: a weight-only int8 / fp8 GEMM in Triton that decodes the 8-bit codes in registers
+  (sm80+, bf16 or fp16, no vLLM needed). `auto` picks it before `torchao`, whose weight-only int8 and weight-only fp8
+  dequantize the whole weight on every eager call.
 
 ### Changed
 

@@ -256,8 +256,9 @@ Backends (`backend=`):
 
 | backend | storage | speed | hardware |
 |---|---|---|---|
-| `auto` (default) | the best installed real kernel: `machete`, `marlin`, `cutlass` (vLLM's kernels), then `torchao`, the first that stores the format on this device; the summary key `kernel` names it, and with none installed the error names the extras to install (`economize[vllm]`, `economize[quant]`) | that kernel's | that kernel's |
+| `auto` (default) | the best installed real kernel: `machete`, `marlin`, `cutlass` (vLLM's kernels), `triton`, then `torchao`, the first that stores the format on this device; the summary key `kernel` names it, and with none installed the error names the extras to install (`economize[vllm]`, `economize[quant]`) | that kernel's | that kernel's |
 | `fake` | dequantized weights in the model dtype (the explicit simulated reference) | none (quality reference) | any |
+| `triton` | 8-bit codes with fp32 scales (`TritonWeight`); int8 per channel or groups of 32-256 with or without zero points, weight-only fp8 | a Triton GEMM that decodes the codes in registers for inputs of up to 64 rows (decoding, verification), so eager CUDA-graph decoding reads half the weight bytes; longer inputs dequantize and call the dense GEMM | CUDA sm80+, bf16 or fp16 |
 | `torchao`, int8 | `Int8Tensor` | about 2x fewer weight bytes; the scaled GEMM fuses only under `torch.compile` | any CUDA GPU, CPU |
 | `torchao`, int8 + `activations="int8"` | `Int8Tensor` with per-row activation quantization | int8 x int8 `torch._int_mm` (W8A8) | CUDA sm75+, CPU |
 | `torchao`, int4 | `Int4TilePackedTo4dTensor`, tinygemm | about 4x fewer weight bytes; fused int4 GEMV | CUDA sm80+, bf16, group 32/64/128/256 |

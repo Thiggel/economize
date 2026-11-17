@@ -22,12 +22,14 @@
 
   The decoders run eagerly (under CUDA graphs, without ``torch.compile``), so torchao int8 and weight-only fp8
   save memory but decode slower than the dense model; :func:`warn_eager_dequant` says so when such a model is
-  built on a GPU.
+  built on a GPU. ``"auto"`` prefers ``"triton"`` for these layouts.
 
 * ``"marlin"`` (:mod:`.marlin`): vLLM's Marlin weight-only GEMM for int4, int8 and fp8 (sm80+). On Ampere it is
   the fast path for int8 and fp8, which torchao runs by dequantizing the weight on every eager call.
 * ``"machete"`` (:mod:`.machete`): vLLM's Machete weight-only GEMM for int4 and int8 on Hopper (sm90), the
   CUTLASS 3 kernel that vLLM prefers over Marlin on H100.
+* ``"triton"`` (:mod:`.triton_gemm`): a weight-only int8 / fp8 GEMM in Triton that decodes the codes in registers
+  (sm80+, no vLLM needed), the eager fast path for the layouts torchao runs by dequantizing.
 * ``"cutlass"`` (:mod:`.cutlass`): vLLM's CUTLASS int8 x int8 GEMM for W8A8 (``activations="int8"``, sm75+), with
   the per-token input quantization on the GPU, so it is captured in CUDA graphs (torchao's int8 path is not).
 
@@ -254,7 +256,7 @@ def warn_eager_dequant(modules: Mapping[str, nn.Linear], config: QuantSpec) -> b
     logger.warning(
         "torchao %s with these settings dequantizes the weight on every eager call: it saves memory but decodes "
         "slower than the dense model unless the linear maps are compiled (torch.compile). For speed use "
-        "backend='marlin' (sm80+) or backend='machete' (int4/int8, sm90)%s.",
+        "backend='triton' or backend='marlin' (sm80+), or backend='machete' (int4/int8, sm90)%s.",
         config.format, ", or fp8_activations=True (sm89+)" if config.format == "fp8" else "",
     )
     return True
