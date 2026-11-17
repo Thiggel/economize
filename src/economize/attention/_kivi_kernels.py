@@ -174,7 +174,7 @@ def _kivi_block(
     block of values read entirely from one source skips the merge of the two. With ``HAS_RING`` the dense entries
     live in a ring of ``ring`` slots: slot ``s`` is read at ``s % ring``."""
     offs = first + tl.arange(0, BLOCK_N)
-    if HAS_RING:
+    if HAS_RING:  # noqa: SIM108 (a branch on a constexpr, resolved at compile time)
         dense = offs % ring
     else:
         dense = offs
