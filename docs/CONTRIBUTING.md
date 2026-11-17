@@ -81,3 +81,12 @@ These rules are explained in `docs/ARCHITECTURE.md`; the tests named here enforc
 
 - **Errors** derive from `economize.errors.EconomizeError` (and from the built-in exception they refine, such as
   `ValueError` for `ConfigError`), so callers can catch economize's errors as a group.
+
+## Adding a reproduction
+
+A reproduction compares a number from a technique's paper with the same quantity measured with economize, and appears
+on the [Reproductions](reproductions.md) page. It is one entry in `docs/data/reproductions.yaml` plus the result file
+of the run under `docs/data/results/` (or a URL). `docs/reproductions.md` describes the schema and the steps. Every
+economize number is a measurement from the result file, and the paper's number is quoted with its table in the
+technique's tutorial or in `docs/weights.md`. The hook `docs/hooks/reproductions.py` validates the data file during
+`mkdocs build --strict`, and `pytest tests/docs/test_reproductions.py` runs the same checks without building the site.

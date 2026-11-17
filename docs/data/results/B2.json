@@ -1,0 +1,209 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0). The groups hold calibration seed 0; 'calibration_seeds' holds the reruns of the calibrated variants with seeds 1 and 2.",
+ "id": "B2",
+ "title": "RTN / GPTQ / GPTQ-R / AWQ INT3 g128 (quant, backend fake), Llama-2-7B, WikiText-2 ppl at 2048",
+ "paper": "2306.00978 (AWQ Tab. 4)",
+ "date": "2026-10-09T16:01:17+00:00",
+ "gpu": "NVIDIA A100-SXM4-40GB",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "Llama-2-7b-hf",
+   "model": "meta-llama/Llama-2-7b-hf",
+   "dtype": "float16",
+   "baseline": "fp16",
+   "variants": {
+    "fp16": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 5.472115466922817
+     }
+    },
+    "rtn_w3g128": {
+     "techniques": [
+      {
+       "technique": "quant",
+       "format": "int3",
+       "method": "rtn",
+       "group_size": 128,
+       "symmetric": false
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 6.661115282986279
+     }
+    },
+    "gptq_w3g128": {
+     "techniques": [
+      {
+       "technique": "quant",
+       "format": "int3",
+       "method": "gptq",
+       "group_size": 128,
+       "symmetric": false,
+       "act_order": false,
+       "true_sequential": true,
+       "percdamp": 0.01
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 6.405734295520056
+     }
+    },
+    "gptq_r_w3g128": {
+     "techniques": [
+      {
+       "technique": "quant",
+       "format": "int3",
+       "method": "gptq",
+       "group_size": 128,
+       "symmetric": false,
+       "act_order": true,
+       "static_groups": true,
+       "true_sequential": true,
+       "percdamp": 0.01
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 6.299431676793427
+     }
+    },
+    "awq_w3g128": {
+     "techniques": [
+      {
+       "technique": "quant",
+       "format": "int3",
+       "method": "awq",
+       "group_size": 128,
+       "symmetric": false,
+       "awq_grid": 20,
+       "awq_clip": true
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 6.322801092533067
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "rtn_w3g128",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 6.661115282986279,
+   "paper": 6.66,
+   "baseline": 5.472115466922817,
+   "paper_baseline": 5.47,
+   "delta": 1.188999816063462,
+   "paper_delta": 1.1900000000000004,
+   "status": "pass",
+   "tolerance": 0.059500000000000025,
+   "error": -0.0010001839365383347
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "gptq_w3g128",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 6.405734295520056,
+   "paper": 6.43,
+   "baseline": 5.472115466922817,
+   "paper_baseline": 5.47,
+   "delta": 0.9336188285972389,
+   "paper_delta": 0.96,
+   "status": "pass",
+   "tolerance": 0.05,
+   "error": -0.026381171402761083
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "gptq_r_w3g128",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 6.299431676793427,
+   "paper": 6.42,
+   "baseline": 5.472115466922817,
+   "paper_baseline": 5.47,
+   "delta": 0.8273162098706095,
+   "paper_delta": 0.9500000000000002,
+   "status": "fail",
+   "tolerance": 0.05,
+   "error": -0.12268379012939068
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "awq_w3g128",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 6.322801092533067,
+   "paper": 6.24,
+   "baseline": 5.472115466922817,
+   "paper_baseline": 5.47,
+   "delta": 0.8506856256102493,
+   "paper_delta": 0.7700000000000005,
+   "status": "fail",
+   "tolerance": 0.05,
+   "error": 0.08068562561024883
+  }
+ ],
+ "calibration_seeds": [
+  {
+   "calibration_seed": 1,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-40GB",
+   "date": "2026-10-12T03:17:18+00:00",
+   "groups": {
+    "Llama-2-7b-hf": {
+     "gptq_w3g128": {
+      "wikitext2_test": 6.517130789343905
+     },
+     "gptq_r_w3g128": {
+      "wikitext2_test": 6.285334223627619
+     },
+     "awq_w3g128": {
+      "wikitext2_test": 6.288346536944257
+     }
+    }
+   }
+  },
+  {
+   "calibration_seed": 2,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-40GB",
+   "date": "2026-10-12T08:30:52+00:00",
+   "groups": {
+    "Llama-2-7b-hf": {
+     "gptq_w3g128": {
+      "wikitext2_test": 6.496679736571611
+     },
+     "gptq_r_w3g128": {
+      "wikitext2_test": 6.319689654325475
+     },
+     "awq_w3g128": {
+      "wikitext2_test": 6.314583650907609
+     }
+    }
+   }
+  }
+ ]
+}

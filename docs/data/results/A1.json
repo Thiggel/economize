@@ -1,0 +1,207 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0).",
+ "id": "A1",
+ "title": "EAGLE-3 head on Llama-3.1-8B-Instruct, chain k=3 and k=5, five EAGLE prompt sets, tau and speedup",
+ "paper": "2503.01840 (EAGLE-3 Tab. 1, tree drafting)",
+ "date": "2026-10-09T13:36:04+00:00",
+ "gpu": "NVIDIA A100-SXM4-40GB",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "Llama-3.1-8B-Instruct",
+   "model": "meta-llama/Llama-3.1-8B-Instruct",
+   "dtype": "float16",
+   "baseline": "plain",
+   "variants": {
+    "plain": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "tau/eagle_mtbench": null,
+      "rate/eagle_mtbench": null,
+      "mat/eagle_mtbench": 1.0,
+      "tok_s/eagle_mtbench": 19.215473699282214,
+      "tau/eagle_humaneval": null,
+      "rate/eagle_humaneval": null,
+      "mat/eagle_humaneval": 1.0,
+      "tok_s/eagle_humaneval": 19.07014565169165,
+      "tau/eagle_gsm8k": null,
+      "rate/eagle_gsm8k": null,
+      "mat/eagle_gsm8k": 1.0,
+      "tok_s/eagle_gsm8k": 18.888311552496933,
+      "tau/alpaca": null,
+      "rate/alpaca": null,
+      "mat/alpaca": 1.0,
+      "tok_s/alpaca": 19.082462917560143,
+      "tau/eagle_sum": null,
+      "rate/eagle_sum": null,
+      "mat/eagle_sum": 1.0,
+      "tok_s/eagle_sum": 19.18677939110286,
+      "mat/mean": 1.0,
+      "tok_s/mean": 19.08863464242676
+     }
+    },
+    "eagle3_k3": {
+     "techniques": [],
+     "checkpoint": {
+      "repo": "yuhuili/EAGLE3-LLaMA3.1-Instruct-8B",
+      "revision": null,
+      "format": "eagle3",
+      "overrides": {},
+      "allow_patterns": null
+     },
+     "decoding": {
+      "cycle_length": 4
+     },
+     "metrics": {
+      "tau/eagle_mtbench": 3.008291636883488,
+      "rate/eagle_mtbench": 0.6694305456278294,
+      "mat/eagle_mtbench": 3.00228734810579,
+      "tok_s/eagle_mtbench": 47.29069650103917,
+      "tau/eagle_humaneval": 3.252010420206139,
+      "rate/eagle_humaneval": 0.7506701400687129,
+      "mat/eagle_humaneval": 3.2452146335938385,
+      "tok_s/eagle_humaneval": 50.64954987060736,
+      "tau/eagle_gsm8k": 3.02249408050513,
+      "rate/eagle_gsm8k": 0.67416469350171,
+      "mat/eagle_gsm8k": 3.0108524072612473,
+      "tok_s/eagle_gsm8k": 47.057680480130045,
+      "tau/alpaca": 3.0574952232065313,
+      "rate/alpaca": 0.6858317410688437,
+      "mat/alpaca": 3.0467257252040993,
+      "tok_s/alpaca": 47.93785121711836,
+      "tau/eagle_sum": 2.735017399149375,
+      "rate/eagle_sum": 0.5783391330497917,
+      "mat/eagle_sum": 2.727284443871633,
+      "tok_s/eagle_sum": 42.52462288519535,
+      "tau/mean": 3.0150617519901326,
+      "rate/mean": 0.6716872506633775,
+      "mat/mean": 3.0064729116073217,
+      "tok_s/mean": 47.09208019081806,
+      "speedup/eagle_mtbench": 2.4610736764093253,
+      "speedup/eagle_humaneval": 2.6559603054795966,
+      "speedup/eagle_gsm8k": 2.4913651148405203,
+      "speedup/alpaca": 2.5121417200818867,
+      "speedup/eagle_sum": 2.21635022837207,
+      "speedup/mean": 2.46702192550484
+     }
+    },
+    "eagle3_k5": {
+     "techniques": [],
+     "checkpoint": {
+      "repo": "yuhuili/EAGLE3-LLaMA3.1-Instruct-8B",
+      "revision": null,
+      "format": "eagle3",
+      "overrides": {},
+      "allow_patterns": null
+     },
+     "decoding": {
+      "cycle_length": 6
+     },
+     "metrics": {
+      "tau/eagle_mtbench": 3.710340775558167,
+      "rate/eagle_mtbench": 0.5420681551116334,
+      "mat/eagle_mtbench": 3.7017038777908344,
+      "tok_s/eagle_mtbench": 53.7527839313326,
+      "tau/eagle_humaneval": 4.220311581422693,
+      "rate/eagle_humaneval": 0.6440623162845385,
+      "mat/eagle_humaneval": 4.211052322163433,
+      "tok_s/eagle_humaneval": 60.95779537920823,
+      "tau/eagle_gsm8k": 3.7113801452784503,
+      "rate/eagle_gsm8k": 0.5422760290556901,
+      "mat/eagle_gsm8k": 3.694673123486683,
+      "tok_s/eagle_gsm8k": 53.58457446415312,
+      "tau/alpaca": 3.7782786005580595,
+      "rate/alpaca": 0.5556557201116119,
+      "mat/alpaca": 3.7647563854904487,
+      "tok_s/alpaca": 54.575477046554525,
+      "tau/eagle_sum": 3.2210590198755877,
+      "rate/eagle_sum": 0.44421180397511756,
+      "mat/eagle_sum": 3.210590198755879,
+      "tok_s/eagle_sum": 46.49081110167547,
+      "tau/mean": 3.7282740245385915,
+      "rate/mean": 0.5456548049077183,
+      "mat/mean": 3.716555181537456,
+      "tok_s/mean": 53.87228838458479,
+      "speedup/eagle_mtbench": 2.797369701759708,
+      "speedup/eagle_humaneval": 3.196503922548744,
+      "speedup/eagle_gsm8k": 2.8369171228049512,
+      "speedup/alpaca": 2.859980773044388,
+      "speedup/eagle_sum": 2.423064869512901,
+      "speedup/mean": 2.8222180053070542
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "Llama-3.1-8B-Instruct",
+   "variant": "eagle3_k5",
+   "metric": "tau/eagle_mtbench",
+   "kind": "info",
+   "economize": 3.710340775558167,
+   "paper": 6.13,
+   "status": "info",
+   "tolerance": null
+  },
+  {
+   "group": "Llama-3.1-8B-Instruct",
+   "variant": "eagle3_k5",
+   "metric": "tau/eagle_humaneval",
+   "kind": "info",
+   "economize": 4.220311581422693,
+   "paper": 6.74,
+   "status": "info",
+   "tolerance": null
+  },
+  {
+   "group": "Llama-3.1-8B-Instruct",
+   "variant": "eagle3_k5",
+   "metric": "tau/eagle_gsm8k",
+   "kind": "info",
+   "economize": 3.7113801452784503,
+   "paper": 6.23,
+   "status": "info",
+   "tolerance": null
+  },
+  {
+   "group": "Llama-3.1-8B-Instruct",
+   "variant": "eagle3_k5",
+   "metric": "tau/alpaca",
+   "kind": "info",
+   "economize": 3.7782786005580595,
+   "paper": 6.7,
+   "status": "info",
+   "tolerance": null
+  },
+  {
+   "group": "Llama-3.1-8B-Instruct",
+   "variant": "eagle3_k5",
+   "metric": "tau/eagle_sum",
+   "kind": "info",
+   "economize": 3.2210590198755877,
+   "paper": 5.34,
+   "status": "info",
+   "tolerance": null
+  },
+  {
+   "group": "Llama-3.1-8B-Instruct",
+   "variant": "eagle3_k5",
+   "metric": "speedup/mean",
+   "kind": "info",
+   "economize": 2.8222180053070542,
+   "paper": 4.44,
+   "status": "info",
+   "tolerance": null
+  }
+ ]
+}

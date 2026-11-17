@@ -13,6 +13,8 @@ other columns come from the technique's metadata, the class attribute `info` (a 
 The last section shows how each backend, the Hugging Face path `transformers` and the serving engines, runs every
 technique.
 
+[Choosing a technique](choosing.md) recommends techniques for common deployment situations.
+
 <!-- technique-table -->
 
 The same information is available at run time, also for a configuration other than the defaults:

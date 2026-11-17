@@ -1,0 +1,296 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0). The groups hold calibration seed 0; 'calibration_seeds' holds the reruns of the calibrated variants with seeds 1 and 2.",
+ "id": "B19",
+ "title": "SVD-LLM (W) at 20 % compression, LLaMA-7B / Llama-2-7B / Mistral-7B / Vicuna-7B, WikiText-2 and C4 ppl",
+ "paper": "2403.07378 v5 (SVD-LLM Tab. 1 and the model-generalization table, (W) rows)",
+ "date": "2026-10-09T17:56:44+00:00",
+ "gpu": "NVIDIA A100-SXM4-80GB",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "llama-7b",
+   "model": "huggyllama/llama-7b",
+   "dtype": "float16",
+   "baseline": "dense",
+   "variants": {
+    "dense": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2": 5.581252792088376,
+      "c4": 7.3388646139323725
+     }
+    },
+    "svdllm_w_20": {
+     "techniques": [
+      {
+       "technique": "lowrank",
+       "method": "svd_llm",
+       "compression": 0.2,
+       "sequential": false,
+       "offload": true
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2": 7.636371182501784,
+      "c4": 16.13661828925011
+     }
+    }
+   }
+  },
+  {
+   "name": "Llama-2-7b-hf",
+   "model": "meta-llama/Llama-2-7b-hf",
+   "dtype": "float16",
+   "baseline": "dense",
+   "variants": {
+    "dense": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2": 5.393484907200584,
+      "c4": 7.286087785934073
+     }
+    },
+    "svdllm_w_20": {
+     "techniques": [
+      {
+       "technique": "lowrank",
+       "method": "svd_llm",
+       "compression": 0.2,
+       "sequential": false,
+       "offload": true
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2": 8.090997278255356,
+      "c4": null
+     }
+    }
+   }
+  },
+  {
+   "name": "Mistral-7B-v0.1",
+   "model": "mistralai/Mistral-7B-v0.1",
+   "dtype": "float16",
+   "baseline": "dense",
+   "variants": {
+    "dense": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2": 5.148734093187412,
+      "c4": 8.107166186923628
+     }
+    },
+    "svdllm_w_20": {
+     "techniques": [
+      {
+       "technique": "lowrank",
+       "method": "svd_llm",
+       "compression": 0.2,
+       "sequential": false,
+       "offload": true
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2": 7.287162913331604,
+      "c4": 23.925150250236907
+     }
+    }
+   }
+  },
+  {
+   "name": "vicuna-7b-v1.3",
+   "model": "lmsys/vicuna-7b-v1.3",
+   "dtype": "float16",
+   "baseline": "dense",
+   "variants": {
+    "dense": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2": 6.773175264209365,
+      "c4": 9.035729224239114
+     }
+    },
+    "svdllm_w_20": {
+     "techniques": [
+      {
+       "technique": "lowrank",
+       "method": "svd_llm",
+       "compression": 0.2,
+       "sequential": false,
+       "offload": true
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2": 9.468327825272766,
+      "c4": 20.71039872734162
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "llama-7b",
+   "variant": "svdllm_w_20",
+   "metric": "wikitext2",
+   "kind": "ppl",
+   "economize": 7.636371182501784,
+   "paper": 7.94,
+   "baseline": 5.581252792088376,
+   "paper_baseline": 5.68,
+   "delta": 2.0551183904134076,
+   "paper_delta": 2.2600000000000007,
+   "status": "above",
+   "tolerance": 0.11300000000000004,
+   "error": -0.20488160958659307
+  },
+  {
+   "group": "llama-7b",
+   "variant": "svdllm_w_20",
+   "metric": "c4",
+   "kind": "ppl",
+   "economize": 16.13661828925011,
+   "paper": 15.84,
+   "baseline": 7.3388646139323725,
+   "paper_baseline": 7.34,
+   "delta": 8.797753675317736,
+   "paper_delta": 8.5,
+   "status": "pass",
+   "tolerance": 0.42500000000000004,
+   "error": 0.2977536753177361
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "svdllm_w_20",
+   "metric": "wikitext2",
+   "kind": "ppl",
+   "economize": 8.090997278255356,
+   "paper": 8.5,
+   "baseline": 5.393484907200584,
+   "paper_baseline": 5.47,
+   "delta": 2.6975123710547724,
+   "paper_delta": 3.0300000000000002,
+   "status": "above",
+   "tolerance": 0.15150000000000002,
+   "error": -0.3324876289452279
+  },
+  {
+   "group": "Mistral-7B-v0.1",
+   "variant": "svdllm_w_20",
+   "metric": "wikitext2",
+   "kind": "ppl",
+   "economize": 7.287162913331604,
+   "paper": 10.21,
+   "baseline": 5.148734093187412,
+   "paper_baseline": 5.25,
+   "delta": 2.138428820144192,
+   "paper_delta": 4.960000000000001,
+   "status": "above",
+   "tolerance": 0.24800000000000005,
+   "error": -2.821571179855809
+  },
+  {
+   "group": "vicuna-7b-v1.3",
+   "variant": "svdllm_w_20",
+   "metric": "wikitext2",
+   "kind": "ppl",
+   "economize": 9.468327825272766,
+   "paper": 8.41,
+   "baseline": 6.773175264209365,
+   "paper_baseline": null,
+   "delta": 2.6951525610634013,
+   "paper_delta": null,
+   "status": "no_target",
+   "tolerance": null
+  }
+ ],
+ "calibration_seeds": [
+  {
+   "calibration_seed": 1,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-80GB",
+   "date": "2026-10-12T06:33:40+00:00",
+   "groups": {
+    "llama-7b": {
+     "svdllm_w_20": {
+      "wikitext2": 7.700638400188656,
+      "c4": 16.139309206327905
+     }
+    },
+    "Llama-2-7b-hf": {
+     "svdllm_w_20": {
+      "wikitext2": 8.169629605405586,
+      "c4": 19.763915050662362
+     }
+    },
+    "Mistral-7B-v0.1": {
+     "svdllm_w_20": {
+      "wikitext2": 7.344380594701169,
+      "c4": 23.48975741056338
+     }
+    },
+    "vicuna-7b-v1.3": {
+     "svdllm_w_20": {
+      "wikitext2": 9.523786758626056,
+      "c4": 20.483043715392206
+     }
+    }
+   }
+  },
+  {
+   "calibration_seed": 2,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-80GB",
+   "date": "2026-10-12T11:40:01+00:00",
+   "groups": {
+    "llama-7b": {
+     "svdllm_w_20": {
+      "wikitext2": 7.642837909157043,
+      "c4": 15.961141757863471
+     }
+    },
+    "Llama-2-7b-hf": {
+     "svdllm_w_20": {
+      "wikitext2": 8.072809149993365,
+      "c4": 19.422957235721217
+     }
+    },
+    "Mistral-7B-v0.1": {
+     "svdllm_w_20": {
+      "wikitext2": 7.268771701406645,
+      "c4": 23.42075614148951
+     }
+    },
+    "vicuna-7b-v1.3": {
+     "svdllm_w_20": {
+      "wikitext2": 9.465882243493782,
+      "c4": 20.374787853591357
+     }
+    }
+   }
+  }
+ ]
+}

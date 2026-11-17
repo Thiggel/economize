@@ -1,0 +1,542 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0). The groups hold calibration seed 0; 'calibration_seeds' holds the reruns of the calibrated variants with seeds 1 and 2.",
+ "id": "B21",
+ "title": "TEAL activation sparsity 25 / 40 / 50 / 65 %, Llama-2-7B / Llama-3-8B / Mistral-7B, ppl (2048 context + 512 scored)",
+ "paper": "2408.14690 (TEAL Tab. 1)",
+ "date": "2026-10-10T01:56:16+00:00",
+ "gpu": "NVIDIA A100-SXM4-40GB",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "Llama-2-7b-hf",
+   "model": "meta-llama/Llama-2-7b-hf",
+   "dtype": "float16",
+   "baseline": "dense",
+   "variants": {
+    "dense": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "ppl": 4.483948077850697
+     }
+    },
+    "teal_25": {
+     "techniques": [
+      {
+       "technique": "teal",
+       "sparsity": 0.25,
+       "allocation": "greedy",
+       "greedy_step": 0.05,
+       "prefill": "second_half"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "ppl": 4.516241120892603
+     }
+    },
+    "teal_40": {
+     "techniques": [
+      {
+       "technique": "teal",
+       "sparsity": 0.4,
+       "allocation": "greedy",
+       "greedy_step": 0.05,
+       "prefill": "second_half"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "ppl": 4.644230579754652
+     }
+    },
+    "teal_50": {
+     "techniques": [
+      {
+       "technique": "teal",
+       "sparsity": 0.5,
+       "allocation": "greedy",
+       "greedy_step": 0.05,
+       "prefill": "second_half"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "ppl": 4.8509614737584155
+     }
+    },
+    "teal_65": {
+     "techniques": [
+      {
+       "technique": "teal",
+       "sparsity": 0.65,
+       "allocation": "greedy",
+       "greedy_step": 0.05,
+       "prefill": "second_half"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "ppl": 6.022241570738219
+     }
+    }
+   }
+  },
+  {
+   "name": "Meta-Llama-3-8B",
+   "model": "meta-llama/Meta-Llama-3-8B",
+   "dtype": "float16",
+   "baseline": "dense",
+   "variants": {
+    "dense": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "ppl": 5.041479223913156
+     }
+    },
+    "teal_25": {
+     "techniques": [
+      {
+       "technique": "teal",
+       "sparsity": 0.25,
+       "allocation": "greedy",
+       "greedy_step": 0.05,
+       "prefill": "second_half"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "ppl": 5.113542980689526
+     }
+    },
+    "teal_40": {
+     "techniques": [
+      {
+       "technique": "teal",
+       "sparsity": 0.4,
+       "allocation": "greedy",
+       "greedy_step": 0.05,
+       "prefill": "second_half"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "ppl": 5.323741151597755
+     }
+    },
+    "teal_50": {
+     "techniques": [
+      {
+       "technique": "teal",
+       "sparsity": 0.5,
+       "allocation": "greedy",
+       "greedy_step": 0.05,
+       "prefill": "second_half"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "ppl": 5.740348355279877
+     }
+    },
+    "teal_65": {
+     "techniques": [
+      {
+       "technique": "teal",
+       "sparsity": 0.65,
+       "allocation": "greedy",
+       "greedy_step": 0.05,
+       "prefill": "second_half"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "ppl": 7.587450458406958
+     }
+    }
+   }
+  },
+  {
+   "name": "Mistral-7B-v0.1",
+   "model": "mistralai/Mistral-7B-v0.1",
+   "dtype": "float16",
+   "baseline": "dense",
+   "variants": {
+    "dense": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "ppl": 4.345127669907306
+     }
+    },
+    "teal_25": {
+     "techniques": [
+      {
+       "technique": "teal",
+       "sparsity": 0.25,
+       "allocation": "greedy",
+       "greedy_step": 0.05,
+       "prefill": "second_half"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "ppl": 4.431201364417325
+     }
+    },
+    "teal_40": {
+     "techniques": [
+      {
+       "technique": "teal",
+       "sparsity": 0.4,
+       "allocation": "greedy",
+       "greedy_step": 0.05,
+       "prefill": "second_half"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "ppl": 4.517479312158706
+     }
+    },
+    "teal_50": {
+     "techniques": [
+      {
+       "technique": "teal",
+       "sparsity": 0.5,
+       "allocation": "greedy",
+       "greedy_step": 0.05,
+       "prefill": "second_half"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "ppl": 4.681956983571412
+     }
+    },
+    "teal_65": {
+     "techniques": [
+      {
+       "technique": "teal",
+       "sparsity": 0.65,
+       "allocation": "greedy",
+       "greedy_step": 0.05,
+       "prefill": "second_half"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "ppl": 5.461656739694717
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "teal_25",
+   "metric": "ppl",
+   "kind": "ppl",
+   "economize": 4.516241120892603,
+   "paper": 5.09,
+   "baseline": 4.483948077850697,
+   "paper_baseline": 5.07,
+   "delta": 0.032293043041906166,
+   "paper_delta": 0.019999999999999574,
+   "status": "pass",
+   "tolerance": 0.05,
+   "error": 0.012293043041906593
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "teal_40",
+   "metric": "ppl",
+   "kind": "ppl",
+   "economize": 4.644230579754652,
+   "paper": 5.22,
+   "baseline": 4.483948077850697,
+   "paper_baseline": 5.07,
+   "delta": 0.16028250190395443,
+   "paper_delta": 0.14999999999999947,
+   "status": "pass",
+   "tolerance": 0.05,
+   "error": 0.010282501903954966
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "teal_50",
+   "metric": "ppl",
+   "kind": "ppl",
+   "economize": 4.8509614737584155,
+   "paper": 5.43,
+   "baseline": 4.483948077850697,
+   "paper_baseline": 5.07,
+   "delta": 0.3670133959077182,
+   "paper_delta": 0.35999999999999943,
+   "status": "pass",
+   "tolerance": 0.05,
+   "error": 0.007013395907718767
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "teal_65",
+   "metric": "ppl",
+   "kind": "ppl",
+   "economize": 6.022241570738219,
+   "paper": 6.62,
+   "baseline": 4.483948077850697,
+   "paper_baseline": 5.07,
+   "delta": 1.5382934928875214,
+   "paper_delta": 1.5499999999999998,
+   "status": "pass",
+   "tolerance": 0.0775,
+   "error": -0.011706507112478448
+  },
+  {
+   "group": "Meta-Llama-3-8B",
+   "variant": "teal_25",
+   "metric": "ppl",
+   "kind": "ppl",
+   "economize": 5.113542980689526,
+   "paper": 5.94,
+   "baseline": 5.041479223913156,
+   "paper_baseline": 5.87,
+   "delta": 0.07206375677636956,
+   "paper_delta": 0.07000000000000028,
+   "status": "pass",
+   "tolerance": 0.05,
+   "error": 0.0020637567763692743
+  },
+  {
+   "group": "Meta-Llama-3-8B",
+   "variant": "teal_40",
+   "metric": "ppl",
+   "kind": "ppl",
+   "economize": 5.323741151597755,
+   "paper": 6.21,
+   "baseline": 5.041479223913156,
+   "paper_baseline": 5.87,
+   "delta": 0.28226192768459857,
+   "paper_delta": 0.33999999999999986,
+   "status": "above",
+   "tolerance": 0.05,
+   "error": -0.05773807231540129
+  },
+  {
+   "group": "Meta-Llama-3-8B",
+   "variant": "teal_50",
+   "metric": "ppl",
+   "kind": "ppl",
+   "economize": 5.740348355279877,
+   "paper": 6.67,
+   "baseline": 5.041479223913156,
+   "paper_baseline": 5.87,
+   "delta": 0.6988691313667204,
+   "paper_delta": 0.7999999999999998,
+   "status": "above",
+   "tolerance": 0.05,
+   "error": -0.10113086863327947
+  },
+  {
+   "group": "Meta-Llama-3-8B",
+   "variant": "teal_65",
+   "metric": "ppl",
+   "kind": "ppl",
+   "economize": 7.587450458406958,
+   "paper": 9.06,
+   "baseline": 5.041479223913156,
+   "paper_baseline": 5.87,
+   "delta": 2.545971234493802,
+   "paper_delta": 3.1900000000000004,
+   "status": "above",
+   "tolerance": 0.15950000000000003,
+   "error": -0.6440287655061985
+  },
+  {
+   "group": "Mistral-7B-v0.1",
+   "variant": "teal_25",
+   "metric": "ppl",
+   "kind": "ppl",
+   "economize": 4.431201364417325,
+   "paper": 5.01,
+   "baseline": 4.345127669907306,
+   "paper_baseline": 4.92,
+   "delta": 0.08607369451001912,
+   "paper_delta": 0.08999999999999986,
+   "status": "pass",
+   "tolerance": 0.05,
+   "error": -0.0039263054899807415
+  },
+  {
+   "group": "Mistral-7B-v0.1",
+   "variant": "teal_40",
+   "metric": "ppl",
+   "kind": "ppl",
+   "economize": 4.517479312158706,
+   "paper": 5.13,
+   "baseline": 4.345127669907306,
+   "paper_baseline": 4.92,
+   "delta": 0.17235164225139954,
+   "paper_delta": 0.20999999999999996,
+   "status": "pass",
+   "tolerance": 0.05,
+   "error": -0.037648357748600425
+  },
+  {
+   "group": "Mistral-7B-v0.1",
+   "variant": "teal_50",
+   "metric": "ppl",
+   "kind": "ppl",
+   "economize": 4.681956983571412,
+   "paper": 5.31,
+   "baseline": 4.345127669907306,
+   "paper_baseline": 4.92,
+   "delta": 0.33682931366410607,
+   "paper_delta": 0.3899999999999997,
+   "status": "above",
+   "tolerance": 0.05,
+   "error": -0.05317068633589361
+  },
+  {
+   "group": "Mistral-7B-v0.1",
+   "variant": "teal_65",
+   "metric": "ppl",
+   "kind": "ppl",
+   "economize": 5.461656739694717,
+   "paper": 6.23,
+   "baseline": 4.345127669907306,
+   "paper_baseline": 4.92,
+   "delta": 1.1165290697874104,
+   "paper_delta": 1.3100000000000005,
+   "status": "above",
+   "tolerance": 0.06550000000000003,
+   "error": -0.1934709302125901
+  }
+ ],
+ "calibration_seeds": [
+  {
+   "calibration_seed": 1,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-40GB",
+   "date": "2026-10-12T07:04:12+00:00",
+   "groups": {
+    "Llama-2-7b-hf": {
+     "teal_25": {
+      "ppl": 4.516241120892603
+     },
+     "teal_40": {
+      "ppl": 4.644230579754652
+     },
+     "teal_50": {
+      "ppl": 4.8509614737584155
+     },
+     "teal_65": {
+      "ppl": 6.022241570738219
+     }
+    },
+    "Meta-Llama-3-8B": {
+     "teal_25": {
+      "ppl": 5.113542980689526
+     },
+     "teal_40": {
+      "ppl": 5.323741151597755
+     },
+     "teal_50": {
+      "ppl": 5.740348355279877
+     },
+     "teal_65": {
+      "ppl": 7.587450458406958
+     }
+    },
+    "Mistral-7B-v0.1": {
+     "teal_25": {
+      "ppl": 4.431201364417325
+     },
+     "teal_40": {
+      "ppl": 4.517479312158706
+     },
+     "teal_50": {
+      "ppl": 4.681956983571412
+     },
+     "teal_65": {
+      "ppl": 5.461656739694717
+     }
+    }
+   }
+  },
+  {
+   "calibration_seed": 2,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-40GB",
+   "date": "2026-10-12T12:25:32+00:00",
+   "groups": {
+    "Llama-2-7b-hf": {
+     "teal_25": {
+      "ppl": 4.516241120892603
+     },
+     "teal_40": {
+      "ppl": 4.644230579754652
+     },
+     "teal_50": {
+      "ppl": 4.8509614737584155
+     },
+     "teal_65": {
+      "ppl": 6.022241570738219
+     }
+    },
+    "Meta-Llama-3-8B": {
+     "teal_25": {
+      "ppl": 5.113542980689526
+     },
+     "teal_40": {
+      "ppl": 5.323741151597755
+     },
+     "teal_50": {
+      "ppl": 5.740348355279877
+     },
+     "teal_65": {
+      "ppl": 7.587450458406958
+     }
+    },
+    "Mistral-7B-v0.1": {
+     "teal_25": {
+      "ppl": 4.431201364417325
+     },
+     "teal_40": {
+      "ppl": 4.517479312158706
+     },
+     "teal_50": {
+      "ppl": 4.681956983571412
+     },
+     "teal_65": {
+      "ppl": 5.461656739694717
+     }
+    }
+   }
+  }
+ ]
+}

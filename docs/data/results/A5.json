@@ -1,0 +1,105 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0).",
+ "id": "A5",
+ "title": "Medusa-1 heads with the mc_sim_7b_63 tree, Vicuna-7B-v1.3, Spec-Bench MAT and speedup",
+ "paper": "2401.10774 (Medusa); Spec-Bench leaderboard (2401.07851)",
+ "date": "2026-10-09T22:07:50+00:00",
+ "gpu": "NVIDIA A100-SXM4-40GB",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "vicuna-7b-v1.3",
+   "model": "lmsys/vicuna-7b-v1.3",
+   "dtype": "float16",
+   "baseline": "plain",
+   "variants": {
+    "plain": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "tau/specbench": null,
+      "rate/specbench": null,
+      "mat/specbench": 1.0,
+      "tok_s/specbench": 53.078495826559056
+     }
+    },
+    "medusa_tree63": {
+     "techniques": [],
+     "checkpoint": {
+      "repo": "FasterDecoding/medusa-vicuna-7b-v1.3",
+      "revision": null,
+      "format": "medusa",
+      "overrides": {
+       "tree": "mc_sim_7b_63",
+       "param_dtype": "model"
+      },
+      "allow_patterns": null
+     },
+     "decoding": {
+      "cycle_length": 5
+     },
+     "metrics": {
+      "tau/specbench": 2.310361618698583,
+      "rate/specbench": 0.02079939077299338,
+      "mat/specbench": 2.3010328301596656,
+      "tok_s/specbench": 80.34491593917008,
+      "speedup/specbench": 1.5136999398345354
+     }
+    },
+    "medusa_chain5": {
+     "techniques": [],
+     "checkpoint": {
+      "repo": "FasterDecoding/medusa-vicuna-7b-v1.3",
+      "revision": null,
+      "format": "medusa",
+      "overrides": {
+       "param_dtype": "model"
+      },
+      "allow_patterns": null
+     },
+     "decoding": {
+      "cycle_length": 6
+     },
+     "metrics": {
+      "tau/specbench": 1.6596513213667023,
+      "rate/specbench": 0.13193026427334045,
+      "mat/specbench": 1.6557627805830968,
+      "tok_s/specbench": 74.95637236597233,
+      "speedup/specbench": 1.412179663321698
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "vicuna-7b-v1.3",
+   "variant": "medusa_tree63",
+   "metric": "mat/specbench",
+   "kind": "tau",
+   "economize": 2.3010328301596656,
+   "paper": 2.31,
+   "status": "pass",
+   "tolerance": 0.0693,
+   "error": -0.00896716984033441
+  },
+  {
+   "group": "vicuna-7b-v1.3",
+   "variant": "medusa_tree63",
+   "metric": "speedup/specbench",
+   "kind": "info",
+   "economize": 1.5136999398345354,
+   "paper": 1.71,
+   "status": "info",
+   "tolerance": null
+  }
+ ]
+}

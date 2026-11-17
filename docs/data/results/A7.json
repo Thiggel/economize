@@ -1,0 +1,80 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0).",
+ "id": "A7",
+ "title": "Two-model speculative sampling (draft_model vicuna-68m), Vicuna-7B-v1.3, Spec-Bench MAT and speedup",
+ "paper": "2211.17192, 2302.01318; Spec-Bench leaderboard (2401.07851)",
+ "date": "2026-10-09T21:46:20+00:00",
+ "gpu": "NVIDIA A100-SXM4-40GB",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "vicuna-7b-v1.3",
+   "model": "lmsys/vicuna-7b-v1.3",
+   "dtype": "float16",
+   "baseline": "plain",
+   "variants": {
+    "plain": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "tau/specbench": null,
+      "rate/specbench": null,
+      "mat/specbench": 1.0,
+      "tok_s/specbench": 53.11287205900159
+     }
+    },
+    "sps_68m_k5": {
+     "techniques": [
+      {
+       "technique": "draft_model",
+       "model": "double7/vicuna-68m",
+       "dtype": "float16"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {
+      "cycle_length": 6
+     },
+     "metrics": {
+      "tau/specbench": 2.4884177355152586,
+      "rate/specbench": 0.2976835471030517,
+      "mat/specbench": 2.4835526315789473,
+      "tok_s/specbench": 84.10070493602207,
+      "speedup/specbench": 1.5834335760001261
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "vicuna-7b-v1.3",
+   "variant": "sps_68m_k5",
+   "metric": "mat/specbench",
+   "kind": "tau",
+   "economize": 2.4835526315789473,
+   "paper": 2.28,
+   "status": "above",
+   "tolerance": 0.06839999999999999,
+   "error": 0.20355263157894754
+  },
+  {
+   "group": "vicuna-7b-v1.3",
+   "variant": "sps_68m_k5",
+   "metric": "speedup/specbench",
+   "kind": "info",
+   "economize": 1.5834335760001261,
+   "paper": 1.52,
+   "status": "info",
+   "tolerance": null
+  }
+ ]
+}

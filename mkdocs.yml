@@ -79,9 +79,12 @@ plugins:
             show_symbol_type_toc: true
             heading_level: 2
 
-# Generates the technique table of docs/techniques.md from every registered technique's metadata.
+# Generates the technique table of docs/techniques.md from every registered technique's metadata and the tables of
+# docs/reproductions.md from docs/data/reproductions.yaml, then renders the APA citations of every page (last, so
+# that generated tables may cite too).
 hooks:
   - docs/hooks/techniques.py
+  - docs/hooks/reproductions.py
   - docs/hooks/citations.py
 
 nav:
@@ -89,8 +92,10 @@ nav:
   - Getting started: getting_started.md
   - Model zoo: model_zoo.md
   - Benchmarks: benchmarks.md
+  - Reproductions: reproductions.md
   - User guide:
       - Techniques: techniques.md
+      - Choosing a technique: choosing.md
       - Drafters: drafters.md
       - Dynamic draft trees: dynamic_tree.md
       - Sequoia and SpecExec trees: tree_search.md
