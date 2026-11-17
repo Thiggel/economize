@@ -16,6 +16,7 @@ the kernel attends over exactly the values that :func:`dequantize` (and a cache 
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 import torch
@@ -91,6 +92,14 @@ class KIVIPacked:
         value_zero: Like ``value_scale``.
         keys_quantized: ``int32`` ``[B]`` on the device: keys ``< keys_quantized[b]`` of row ``b`` are packed.
         values_quantized: ``int32`` ``[B]``: likewise for values.
+        key_ring: For a cache that holds no dense buffer (``ring > 0``), the full-precision keys ``[B, Hkv, W,
+            D]`` (``W >= ring``; a cache may keep a trash slot past ``ring``) in the query's dtype: slot ``s`` that
+            is not packed lives at ``s % ring``. ``None``: the dense key buffer the cache returns holds every slot.
+        value_ring: Like ``key_ring``, for values.
+        ring: Slots of the rings, ``0`` without them.
+        materialize: For a cache without dense buffers, a function that returns the layer's dense keys and values
+            (the codes dequantized, the rings at their slots) for attention functions that do not read the format;
+            ``None`` when the buffers the cache returns are dense.
     """
 
     bits: int
@@ -104,6 +113,10 @@ class KIVIPacked:
     value_zero: torch.Tensor
     keys_quantized: torch.Tensor
     values_quantized: torch.Tensor
+    key_ring: torch.Tensor | None = None
+    value_ring: torch.Tensor | None = None
+    ring: int = 0
+    materialize: Callable[[], tuple[torch.Tensor, torch.Tensor]] | None = None
     format: str = "kivi"
 
     def attend(
@@ -199,7 +212,10 @@ def kivi_decode_attention(
     Args:
         query: ``[B, Hq, Q, D]``, bf16, fp16 or fp32.
         key: Dense ``[B, Hkv, S, D]`` in the query's dtype; read only at slots ``>= packed.keys_quantized[b]``.
-        value: Dense ``[B, Hkv, S, Dv]``; read only at slots ``>= packed.values_quantized[b]``.
+            With ``packed.ring`` it is not read at all (only its shape is a stand-in); the full-precision keys
+            come from ``packed.key_ring``.
+        value: Dense ``[B, Hkv, S, Dv]``; read only at slots ``>= packed.values_quantized[b]`` (or not at all with
+            ``packed.ring``).
         mask: Boolean ``[B, 1 or Hq, Q, S]`` or ``None``.
         scale: Multiplier of the scores.
         packed: The codes, scales and zero points (see :class:`KIVIPacked`).
@@ -215,6 +231,14 @@ def kivi_decode_attention(
     batch, q_heads, queries, head_dim = query.shape
     _, kv_heads, keys, _ = key.shape
     head_dv = value.shape[-1]
+    ring = int(packed.ring)
+    if ring:
+        if packed.key_ring is None or packed.value_ring is None:
+            raise ConfigError("KIVI packed K/V with ring > 0 needs key_ring and value_ring")
+        if packed.key_ring.shape[2] < ring or packed.value_ring.shape[2] < ring:
+            raise ConfigError(f"KIVI rings hold {packed.key_ring.shape[2]} / {packed.value_ring.shape[2]} slots, "
+                              f"need at least {ring}")
+        key, value = packed.key_ring, packed.value_ring
     if q_heads % kv_heads:
         raise ConfigError(f"{q_heads} query heads are not a multiple of {kv_heads} KV heads")
     if query.dtype not in _DOT_DTYPES or key.dtype != query.dtype or value.dtype != query.dtype:
@@ -269,12 +293,12 @@ def kivi_decode_attention(
             vc.stride(0), vc.stride(1), vc.stride(2),
             vs.stride(0), vs.stride(1), vs.stride(2),
             *mask_strides,
-            keys, queries, rows, kv_heads, p.m_tiles, p.splits, float(scale), float(softcap or 1.0),
+            keys, queries, rows, kv_heads, p.m_tiles, p.splits, float(scale), float(softcap or 1.0), max(ring, 1),
             GROUPS=groups, HEAD_D=head_dim, HEAD_DV=head_dv, BLOCK_M=p.block_m, BLOCK_N=p.block_n, BLOCK_D=block_d,
             BLOCK_DV=block_dv, SPLIT_LEN=p.split_len, HAS_MASK=mask is not None, MASK_PER_HEAD=per_head,
             HAS_SOFTCAP=softcap is not None, IEEE=query.dtype == torch.float32, DOT_DTYPE=_DOT[query.dtype],
-            BITS=bits, KEY_GROUP=kg, VALUE_GROUP=vg, KEY_ROWS=key_rows, VALUE_COLS=value_cols, num_warps=num_warps,
-            num_stages=1,
+            BITS=bits, KEY_GROUP=kg, VALUE_GROUP=vg, KEY_ROWS=key_rows, VALUE_COLS=value_cols, HAS_RING=ring > 0,
+            num_warps=num_warps, num_stages=1,
         )
         _merge_kernel[(programs, p.block_m)](
             part_o, part_m, part_l, out, part_m if sinks is None else sinks, *out.stride(),

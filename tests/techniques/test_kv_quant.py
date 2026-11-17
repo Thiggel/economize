@@ -379,7 +379,7 @@ def test_kivi_cache_with_huge_keys_stays_finite() -> None:
 
 @pytest.mark.parametrize(
     "config",
-    [KIVIConfig(bits=2, group_size=4, residual_length=4), FP8KVConfig(), KVEvictConfig(recent=4)],
+    [KIVIConfig(bits=2, group_size=4, residual_length=4), FP8KVConfig(), KVEvictConfig(recent=4, storage="masked")],
     ids=["kivi", "fp8", "kv_evict"],
 )
 def test_padding_only_rows_are_not_accounted(config: object) -> None:
@@ -404,7 +404,7 @@ def test_padding_only_rows_are_not_accounted(config: object) -> None:
 
 @pytest.mark.parametrize(
     "config",
-    [KIVIConfig(bits=2, group_size=4, residual_length=4), FP8KVConfig(), KVEvictConfig(recent=4)],
+    [KIVIConfig(bits=2, group_size=4, residual_length=4), FP8KVConfig(), KVEvictConfig(recent=4, storage="masked")],
     ids=["kivi", "fp8", "kv_evict"],
 )
 def test_wrapper_exposes_the_buffers_and_length_of_the_wrapped_cache(config: object) -> None:

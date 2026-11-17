@@ -148,7 +148,7 @@ def _kivi_block(
     vcb, vch, vcs,
     vsb, vsh, vss,
     smb, smh, smq, sms,
-    keys, qk_scale, softcap,
+    keys, qk_scale, softcap, ring,
     HEAD_D: tl.constexpr,
     HEAD_DV: tl.constexpr,
     BLOCK_M: tl.constexpr,
@@ -167,11 +167,17 @@ def _kivi_block(
     VALUE_COLS: tl.constexpr,
     KEY_READ: tl.constexpr,
     VALUE_READ: tl.constexpr,
+    HAS_RING: tl.constexpr,
 ):
     """The online-softmax update of ``(acc, m_i, l_i)`` by the block of keys at ``first``. ``KEY_READ`` and
     ``VALUE_READ`` say where its keys and values come from (:data:`DENSE`, :data:`PACKED` or :data:`MIXED`); a
-    block of values read entirely from one source skips the merge of the two."""
+    block of values read entirely from one source skips the merge of the two. With ``HAS_RING`` the dense entries
+    live in a ring of ``ring`` slots: slot ``s`` is read at ``s % ring``."""
     offs = first + tl.arange(0, BLOCK_N)
+    if HAS_RING:
+        dense = offs % ring
+    else:
+        dense = offs
     in_range = offs < keys
     if HAS_MASK:
         if MASK_PER_HEAD:
@@ -182,7 +188,7 @@ def _kivi_block(
     else:
         vis = r_ok[:, None] & in_range[None, :]
     if tl.max(vis.to(tl.int32)) > 0:
-        k_ptr = K + b * skb + kvh * skh + offs[:, None] * sks + d[None, :] * skd
+        k_ptr = K + b * skb + kvh * skh + dense[:, None] * sks + d[None, :] * skd
         if KEY_READ == DENSE:
             k = tl.load(k_ptr, mask=in_range[:, None] & d_ok[None, :], other=0).to(DOT_DTYPE)
         else:
@@ -201,7 +207,7 @@ def _kivi_block(
                 k = tl.where(packed[:, None] & d_ok[None, :], kd.to(DOT_DTYPE), k)
         s = _scores(q, k, qk_scale, softcap, HAS_SOFTCAP, IEEE)
         p, alpha, m_new, l_i = _online_softmax(s, vis, m_i, l_i)
-        v_ptr = V + b * svb + kvh * svh + offs[:, None] * svs + dv[None, :] * svd
+        v_ptr = V + b * svb + kvh * svh + dense[:, None] * svs + dv[None, :] * svd
         if VALUE_READ == DENSE:
             v = tl.load(v_ptr, mask=in_range[:, None] & dv_ok[None, :], other=0).to(DOT_DTYPE)
         elif VALUE_READ == PACKED:
@@ -236,7 +242,7 @@ def _kivi_split_kernel(
     vcb, vch, vcs,
     vsb, vsh, vss,
     smb, smh, smq, sms,
-    keys, queries, rows, kv_heads, m_tiles, splits, qk_scale, softcap,
+    keys, queries, rows, kv_heads, m_tiles, splits, qk_scale, softcap, ring,
     GROUPS: tl.constexpr,
     HEAD_D: tl.constexpr,
     HEAD_DV: tl.constexpr,
@@ -255,6 +261,7 @@ def _kivi_split_kernel(
     VALUE_GROUP: tl.constexpr,
     KEY_ROWS: tl.constexpr,
     VALUE_COLS: tl.constexpr,
+    HAS_RING: tl.constexpr,
 ):
     pid = tl.program_id(0)
     split = tl.program_id(1)
@@ -293,27 +300,27 @@ def _kivi_split_kernel(
                 q, acc, m_i, l_i, first, h, qi, r_ok, d, dv, d_ok, dv_ok, kq, vq, b, kvh,
                 K, V, KC, KS, KZ, VC, VS, VZ, Mask,
                 skb, skh, sks, skd, svb, svh, svs, svd, kcb, kch, kcs, ksb, ksh, kss, vcb, vch, vcs, vsb, vsh, vss,
-                smb, smh, smq, sms, keys, qk_scale, softcap,
+                smb, smh, smq, sms, keys, qk_scale, softcap, ring,
                 HEAD_D, HEAD_DV, BLOCK_M, BLOCK_N, BLOCK_D, BLOCK_DV, HAS_MASK, MASK_PER_HEAD, HAS_SOFTCAP, IEEE,
-                DOT_DTYPE, BITS, KEY_GROUP, VALUE_GROUP, KEY_ROWS, VALUE_COLS, PACKED, PACKED,
+                DOT_DTYPE, BITS, KEY_GROUP, VALUE_GROUP, KEY_ROWS, VALUE_COLS, PACKED, PACKED, HAS_RING,
             )
         elif first >= high:
             acc, m_i, l_i = _kivi_block(
                 q, acc, m_i, l_i, first, h, qi, r_ok, d, dv, d_ok, dv_ok, kq, vq, b, kvh,
                 K, V, KC, KS, KZ, VC, VS, VZ, Mask,
                 skb, skh, sks, skd, svb, svh, svs, svd, kcb, kch, kcs, ksb, ksh, kss, vcb, vch, vcs, vsb, vsh, vss,
-                smb, smh, smq, sms, keys, qk_scale, softcap,
+                smb, smh, smq, sms, keys, qk_scale, softcap, ring,
                 HEAD_D, HEAD_DV, BLOCK_M, BLOCK_N, BLOCK_D, BLOCK_DV, HAS_MASK, MASK_PER_HEAD, HAS_SOFTCAP, IEEE,
-                DOT_DTYPE, BITS, KEY_GROUP, VALUE_GROUP, KEY_ROWS, VALUE_COLS, DENSE, DENSE,
+                DOT_DTYPE, BITS, KEY_GROUP, VALUE_GROUP, KEY_ROWS, VALUE_COLS, DENSE, DENSE, HAS_RING,
             )
         else:
             acc, m_i, l_i = _kivi_block(
                 q, acc, m_i, l_i, first, h, qi, r_ok, d, dv, d_ok, dv_ok, kq, vq, b, kvh,
                 K, V, KC, KS, KZ, VC, VS, VZ, Mask,
                 skb, skh, sks, skd, svb, svh, svs, svd, kcb, kch, kcs, ksb, ksh, kss, vcb, vch, vcs, vsb, vsh, vss,
-                smb, smh, smq, sms, keys, qk_scale, softcap,
+                smb, smh, smq, sms, keys, qk_scale, softcap, ring,
                 HEAD_D, HEAD_DV, BLOCK_M, BLOCK_N, BLOCK_D, BLOCK_DV, HAS_MASK, MASK_PER_HEAD, HAS_SOFTCAP, IEEE,
-                DOT_DTYPE, BITS, KEY_GROUP, VALUE_GROUP, KEY_ROWS, VALUE_COLS, MIXED, MIXED,
+                DOT_DTYPE, BITS, KEY_GROUP, VALUE_GROUP, KEY_ROWS, VALUE_COLS, MIXED, MIXED, HAS_RING,
             )
 
     base = (pid * splits + split) * BLOCK_M

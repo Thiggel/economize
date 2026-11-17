@@ -116,7 +116,8 @@ class EvictionMethod(ABC):  # noqa: B024  (every hook has a default; ABC marks i
 
     def window_cut(self, frontier: int) -> int:
         """A :attr:`positional` method: the first slot kept after the sinks once an exact pass starts at
-        ``frontier`` (every slot from the sinks up to it is evicted). It must agree with :meth:`before_pass`."""
+        ``frontier``, and once a prompt pass ends at ``frontier`` (every slot from the sinks up to it is evicted). It
+        must agree with :meth:`before_pass` and :meth:`after_pass`."""
         raise NotImplementedError(f"{type(self).__name__} is not a positional eviction method")
 
     def describe(self) -> dict[str, Any]:
@@ -172,6 +173,10 @@ class StreamingEviction(EvictionMethod):
 
     def before_pass(self, keep: torch.Tensor, scores: torch.Tensor | None, info: PassInfo) -> None:
         keep &= ~candidates(keep, self.sinks, info.frontier - self.config.recent)
+
+    def after_pass(self, keep: torch.Tensor, scores: torch.Tensor | None, info: PassInfo) -> None:
+        if info.prefill:  # every prompt token is committed: trim to the window before the first draft step
+            keep &= ~candidates(keep, self.sinks, info.end - self.config.recent)
 
     def window_cut(self, frontier: int) -> int:
         return frontier - self.config.recent

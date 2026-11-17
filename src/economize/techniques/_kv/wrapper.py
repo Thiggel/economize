@@ -100,8 +100,10 @@ class KVStats:
 class CacheWrapper(KVCache):
     """A :class:`~economize.runtime.KVCache` that forwards to ``inner`` and adds behaviour around it.
 
-    The wrapper owns no K/V of its own: shape, slots, row selection and buffers live in the inner cache, which may
-    itself be a wrapper. Subclasses override :meth:`transform_update`, :meth:`transform_read`,
+    By default the wrapper owns no K/V of its own: shape, slots, row selection and buffers live in the inner cache,
+    which may itself be a wrapper. A wrapper that stores some layers itself (in a packed or compacted form) keeps
+    their writes away from the inner cache, so that no dense buffer is allocated for them, and reports them in
+    :meth:`owned_buffers`. Subclasses override :meth:`transform_update`, :meth:`transform_read`,
     :meth:`pass_begin`, :meth:`pass_end`, :meth:`on_gather` and :meth:`on_reorder`.
 
     Recurrent (hybrid) caches are rejected: their states cannot be compressed or evicted per slot.
@@ -344,13 +346,38 @@ class CacheWrapper(KVCache):
         return (self.layers is None or layer_idx in self.layers) and layer_idx not in self._ring_layers
 
     def positional_buffers(self) -> dict[int, torch.Tensor]:
-        """The innermost cache's per-layer key buffers ``[B, H_kv, slots, D]``, in layer order."""
+        """The per-layer key buffers ``[B, H_kv, slots, D]`` of the cache, in layer order.
+
+        A layer some wrapper of the chain :meth:`owns <owned_buffers>` is listed with that wrapper's stand-in (the
+        innermost cache holds no buffer for it); every other layer with the innermost cache's buffer.
+        """
         base = innermost(self.inner)
         keys = getattr(base, "keys", None)
         if not isinstance(keys, dict):
             name = type(self).__name__
             raise IncompatibleTechniquesError(f"{name} needs a positional cache, got {type(base).__name__}")
-        return dict(sorted(keys.items()))
+        buffers = dict(keys)
+        cache: KVCache = self
+        while isinstance(cache, CacheWrapper):
+            buffers.update(cache.owned_buffers())
+            cache = cache.inner
+        return dict(sorted(buffers.items()))
+
+    def owned_buffers(self) -> dict[int, torch.Tensor]:
+        """Stand-ins ``[B, H_kv, slots, D]`` of the layers whose K/V this wrapper stores itself (default: none).
+
+        A wrapper that owns a layer (a packed or compacted cache) never lets its writes reach the inner cache, so
+        the innermost cache allocates no buffer for it. The stand-in has the shape, dtype and device such a buffer
+        would have and holds no memory (an expanded scalar): it serves the memory accounting and the wrappers that
+        need a layer's geometry, never as data.
+        """
+        return {}
+
+    @staticmethod
+    def stand_in(batch: int, heads: int, slots: int, dim: int, dtype: torch.dtype,
+                 device: torch.device) -> torch.Tensor:
+        """A zero-memory tensor shaped like a ``[batch, heads, slots, dim]`` buffer (see :meth:`owned_buffers`)."""
+        return torch.empty((), dtype=dtype, device=device).expand(batch, heads, slots, dim)
 
     @staticmethod
     def dense_bytes(keys: torch.Tensor, committed: torch.Tensor, dtype: torch.dtype | None = None) -> torch.Tensor:

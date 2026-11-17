@@ -21,6 +21,7 @@ from economize.backends.sglang.serving.base import SGLANG_TECHNIQUES
 from economize.backends.sglang.serving.weights import DelegatedSglang
 from economize.core.metadata import saving_names
 from economize.techniques.jump import JumpConfig
+from economize.techniques.kv_evict import KVEvictConfig
 from economize.techniques.kv_quant import KIVIConfig
 from economize.techniques.mlp_sparsity import CatsConfig, DejaVuConfig
 from economize.techniques.prune import PruneConfig
@@ -191,12 +192,14 @@ def test_backends_are_reported() -> None:
 
 
 SIMULATED_REFERENCES = [
-    TealConfig(backend="dense"), "kivi", "kv_evict", PruneConfig(semi_structured=False), QuantConfig(backend="fake")
+    TealConfig(backend="dense"), "kivi", KVEvictConfig(storage="masked"), KVEvictConfig(method="h2o", heavy=4),
+    PruneConfig(semi_structured=False), QuantConfig(backend="fake"),
 ]
 
 
 @pytest.mark.parametrize(
-    "name", SIMULATED_REFERENCES, ids=["teal-dense", "kivi", "kv_evict", "prune-masked", "quant-fake"]
+    "name", SIMULATED_REFERENCES,
+    ids=["teal-dense", "kivi", "kv_evict-masked", "h2o", "prune-masked", "quant-fake"],
 )
 def test_simulated_hugging_face_paths_are_reported(name: object) -> None:
     support = economize.backend_support(name)["transformers"]  # type: ignore[arg-type]
@@ -219,6 +222,7 @@ def test_the_kernel_decides_whether_a_path_is_simulated() -> None:
     assert _status(PruneConfig(), "transformers") is SupportStatus.REAL  # 2:4 sparse tensors
     assert _status(PruneConfig(semi_structured=False), "transformers") is SupportStatus.SIMULATED  # masked dense
     assert _status(PruneConfig(sparsity=0.5), "transformers") is SupportStatus.UNSUPPORTED  # no unstructured kernel
+    assert _status("kv_evict", "transformers") is SupportStatus.REAL  # streaming in compact storage
 
 
 def test_serving_backends_report_dense_and_missing_paths() -> None:

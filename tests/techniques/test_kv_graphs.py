@@ -33,6 +33,8 @@ GRAPH_SAFE = {
     "kv_evict_fused": (FusedKVEvictConfig(method="snapkv", heavy=4, observation_window=4), "economize"),
     # StreamingLLM (a positional method): 2 sinks and a window of 6 evict in every row of 13 to 29 tokens.
     "streaming": (KVEvictConfig(method="streaming", recent=6, sinks=2), "economize"),
+    # The same on sdpa, where its storage is compact: a ring of 6 + 8 entries that wraps in the longer rows.
+    "streaming_compact": (KVEvictConfig(method="streaming", recent=6, sinks=2, headroom=8), "sdpa"),
 }
 KERNEL_PATHS = {"kivi_fused": "kernel_kivi", "kv_evict_fused": "kernel_gathered"}
 # Rows of different lengths that stop at different times, so that finished rows leave the batch (cache reorders).

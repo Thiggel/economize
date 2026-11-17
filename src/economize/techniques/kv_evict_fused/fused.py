@@ -36,6 +36,7 @@ class FusedKVEvictConfig(KVEvictConfig):
     """
 
     technique: ClassVar[str] = "kv_evict_fused"
+    compactable: ClassVar[bool] = False  # its cache keeps the dense buffers, see the technique's simulation
     method: str = "snapkv"
 
     def __post_init__(self) -> None:
@@ -332,7 +333,11 @@ class FusedKVEvictTechnique(KVEvictTechnique):
                 "the quantizer rewrites the dense prompt entries, which the compact copies miss; use kv_evict with it",
             ),
         ),
-        simulated=Simulation(Saving.KV_MEMORY, "compacts the kept entries but keeps the dense buffers"),
+        simulated=Simulation(
+            Saving.KV_MEMORY,
+            "copies the kept prompt entries into compact buffers next to the dense cache, which still holds every "
+            "entry (the score-based selection needs the whole prompt pass, and decoding appends to the dense buffers)",
+        ),
     )
     graph_safe: ClassVar[bool] = True  # see FusedEvictionCache: fixed buffers per batch size over a static cache
     config: FusedKVEvictConfig

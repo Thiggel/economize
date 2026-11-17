@@ -8,12 +8,14 @@
     model.techniques["kv_evict"].cost_summary(result)  # layer applications plus KV bytes held and read
 
 The technique wraps every generation's cache, evicts only committed entries at the boundaries of exact passes, and
-masks evicted entries out of every attention call, drafts included. New eviction rules are registered in
-:data:`EVICTION_METHODS` (see :mod:`.policies`). Lossy and training-free.
+masks evicted entries out of every attention call, drafts included. Positional methods store only the kept entries
+by default (``storage="compact"``, :class:`CompactWindowCache`); ``storage="masked"`` keeps the dense buffers. New
+eviction rules are registered in :data:`EVICTION_METHODS` (see :mod:`.policies`). Lossy and training-free.
 """
 
 from __future__ import annotations
 
+from .compact import CompactWindowCache
 from .policies import (
     EVICTION_METHODS,
     EvictionMethod,
@@ -26,16 +28,20 @@ from .policies import (
     candidates,
     keep_top,
 )
+from .storage import EVICTION_STORAGES, EvictionStorage
 from .tap import AttentionSink, AttentionTap, attention_probs, iter_attention_probs
 from .technique import POOLINGS, EvictionCache, KVEvictConfig, KVEvictTechnique, PendingScores, WindowEvictionCache
 
 __all__ = [
     "EVICTION_METHODS",
+    "EVICTION_STORAGES",
     "POOLINGS",
     "AttentionSink",
     "AttentionTap",
+    "CompactWindowCache",
     "EvictionCache",
     "EvictionMethod",
+    "EvictionStorage",
     "H2OEviction",
     "H2OPrefillEviction",
     "KVEvictConfig",
