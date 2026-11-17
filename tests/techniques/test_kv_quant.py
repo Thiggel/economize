@@ -360,8 +360,8 @@ def test_fake_quantize_in_the_fp16_range_rounds_scales_to_fp16() -> None:
 
 
 def test_kivi_cache_with_huge_keys_stays_finite() -> None:
-    base = make_tiny_model()
-    model = economize.apply(base, KIVIConfig(bits=2, group_size=4, residual_length=4))
+    base = make_tiny_model()  # the simulated storage clamps scales beyond the fp16 range; the packed one refuses them
+    model = economize.apply(base, KIVIConfig(bits=2, group_size=4, residual_length=4, storage="simulated"))
     runner = model.runner
     cache = model.techniques["kivi"].wrap_cache(runner.new_cache(64))
     seq = torch.randint(0, VOCAB, (1, PREFIX), generator=torch.Generator().manual_seed(0))
@@ -404,7 +404,11 @@ def test_padding_only_rows_are_not_accounted(config: object) -> None:
 
 @pytest.mark.parametrize(
     "config",
-    [KIVIConfig(bits=2, group_size=4, residual_length=4), FP8KVConfig(), KVEvictConfig(recent=4, storage="masked")],
+    [
+        KIVIConfig(bits=2, group_size=4, residual_length=4, storage="simulated"),
+        FP8KVConfig(),
+        KVEvictConfig(recent=4, storage="masked"),
+    ],
     ids=["kivi", "fp8", "kv_evict"],
 )
 def test_wrapper_exposes_the_buffers_and_length_of_the_wrapped_cache(config: object) -> None:

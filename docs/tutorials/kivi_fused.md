@@ -12,7 +12,8 @@ about as many bytes as the quantized cache holds. The output is the same as that
 `kivi` the method is lossy and trains nothing.
 
 The dense buffers stay allocated next to the codes, so the KV memory saving is still counted from the codes and not
-realized on the device. Prefer `kivi_fused` on a CUDA GPU when decoding speed matters. Prefer `kivi` on other
+realized on the device; `kivi`, whose default storage keeps only the codes and a short full-precision ring, realizes
+it. Prefer `kivi_fused` on a CUDA GPU when decoding speed matters. Prefer `kivi` when memory matters, on other
 devices, with other attention implementations, and in combinations that `kivi_fused` refuses (Quest and the compacted
 cache of `kv_evict_fused`, which attach their own data to the same key tensor).
 

@@ -6,28 +6,37 @@ consecutive tokens gets one scale and zero point per channel. Values are quantiz
 ``residual_length`` tokens once a block is complete, values once a token is more than ``residual_length``
 tokens old. With ``l`` committed tokens, ``floor(l / R) * R`` keys and ``max(0, l - R)`` values are quantized.
 
-economize simulates the quantization in the cache's own dtype (quantize, then dequantize in place), which reproduces
-the numerics of the integer kernels without them. The prompt is quantized at the end of its pass, later entries at
-the start of each exact pass, and only committed ones (see :mod:`.wrapper`); draft K/V written between exact passes
-stay in full precision, so draft rollback and tree compaction need no extra work. The byte accounting counts
-``bits / 8`` bytes per quantized element plus an fp16 scale and zero point per group, as the paper's kernels store
-them.
+The prompt is quantized at the end of its pass, later entries at the start of each exact pass, and only committed
+ones (see :mod:`.wrapper`); draft K/V written between exact passes stay in full precision, so draft rollback and
+tree compaction need no extra work. The byte accounting counts ``bits / 8`` bytes per quantized element plus an
+fp16 scale and zero point per group, as the paper's kernels store them.
+
+How the cache holds the entries is a storage of :data:`~.storage.KIVI_STORAGES`. The default ``"packed"`` storage
+(:class:`~.packed.PackedKIVICache`) keeps the quantized entries as packed codes with fp16 scales and zero points and
+the recent ones in a short full-precision ring, so the memory really shrinks. ``"simulated"`` (:class:`KIVICache`)
+quantizes in the cache's own dtype and writes the dequantized values back into the dense buffers: the same numerics
+with the full dense memory, graph-safe, and the storage used when another KV technique wraps the same cache.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, ClassVar, overload
+from typing import TYPE_CHECKING, Any, ClassVar, overload
 
 import torch
+from torch import nn
 
 from ...core.config import TechniqueConfig
 from ...core.metadata import Family, Saving, Simulation, TechniqueInfo
-from ...core.technique import register_technique
+from ...core.technique import AttachContext, register_technique
 from ...errors import ConfigError
 from ...runtime import KVCache, current_phase
 from ...validation import check_choice, check_layers, check_positive
-from .._kv import CacheWrapper, KVCacheTechnique, check_positional, innermost, layer_indices
+from .._kv import CacheWrapper, KVCacheTechnique, check_positional, innermost
+from .storage import KIVI_STORAGES
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
 
 __all__ = ["KIVI_BITS", "KIVICache", "KIVIConfig", "KIVITechnique", "fake_quantize", "kivi_bytes", "quantize"]
 
@@ -44,13 +53,25 @@ class KIVIConfig(TechniqueConfig):
         residual_length: Most recent tokens kept in full precision (``R``, a multiple of ``group_size``; 128 in
             the paper). A residual at least as long as the generation quantizes nothing, which is exact.
         layers: 1-indexed layers whose cache is quantized (empty: every layer).
+        storage: How the cache stores its entries (:data:`~.storage.KIVI_STORAGES`): ``"packed"`` keeps packed
+            codes and a full-precision ring and no dense buffer, so the memory really shrinks; ``"simulated"``
+            quantizes in place inside the dense buffers. ``None`` (the default) picks ``"packed"`` and falls back
+            to ``"simulated"`` where packed storage cannot run (another KV-cache technique, shared layer caches,
+            trainable layer copies); an explicit ``"packed"`` raises there instead.
+        headroom: Ring slots of the packed storage beyond ``residual_length``: room for the uncommitted tokens of
+            one cycle (draft steps and a verify pass). Passes of at most this many queries read the packed codes
+            directly in an attention kernel that supports them.
     """
 
     technique: ClassVar[str] = "kivi"
+    #: Whether the configuration may use another storage than ``"simulated"``.
+    packable: ClassVar[bool] = True
     bits: int = 2
     group_size: int = 32
     residual_length: int = 128
     layers: tuple[int, ...] = ()
+    storage: str | None = None
+    headroom: int = 256
 
     def __post_init__(self) -> None:
         check_choice("bits", self.bits, KIVI_BITS)
@@ -61,6 +82,19 @@ class KIVIConfig(TechniqueConfig):
                 f"residual_length ({self.residual_length}) must be a multiple of group_size ({self.group_size})"
             )
         check_layers(self.layers)
+        check_positive("headroom", self.headroom)
+        if self.storage is not None:
+            check_choice("storage", self.storage, tuple(KIVI_STORAGES.names()))
+            if not self.packable and self.storage != "simulated":
+                raise ConfigError(f"{self.technique} supports only storage='simulated', got {self.storage!r}")
+
+    @property
+    def kivi_storage(self) -> str:
+        """The storage in use when nothing blocks it: :attr:`storage`, else ``"packed"`` (``"simulated"`` for a
+        configuration that is not :attr:`packable`)."""
+        if self.storage is not None:
+            return self.storage
+        return "packed" if self.packable else "simulated"
 
     def validate(self, adapter: Any) -> None:
         check_layers(self.layers, adapter)
@@ -153,7 +187,16 @@ class KIVICache(CacheWrapper):
 
     def _quantize_committed(self, committed: list[int | None]) -> None:
         """Quantize what KIVI quantizes once row ``b`` holds ``committed[b]`` committed entries."""
-        base = innermost(self.inner)
+        jobs = self._plan(committed)
+        for (kind, _, stop), rows in jobs.items():
+            counts = self.keys_quantized if kind == "k" else self.values_quantized
+            for b in rows:
+                counts[b] = stop
+        self._apply_jobs(jobs)
+
+    def _plan(self, committed: list[int | None]) -> dict[tuple[str, int, int], list[int]]:
+        """The blocks :meth:`_quantize_committed` quantizes: ``(kind, start, stop)`` (``kind`` ``"k"`` or ``"v"``)
+        mapped to the rows that quantize slots ``start:stop``."""
         r = self.config.residual_length
         jobs: dict[tuple[str, int, int], list[int]] = {}
         for b, c in enumerate(committed):
@@ -162,10 +205,13 @@ class KIVICache(CacheWrapper):
             k_to, v_to = (c // r) * r, max(0, c - r)
             if k_to > self.keys_quantized[b]:
                 jobs.setdefault(("k", self.keys_quantized[b], k_to), []).append(b)
-                self.keys_quantized[b] = k_to
             if v_to > self.values_quantized[b]:
                 jobs.setdefault(("v", self.values_quantized[b], v_to), []).append(b)
-                self.values_quantized[b] = v_to
+        return jobs
+
+    def _apply_jobs(self, jobs: dict[tuple[str, int, int], list[int]]) -> None:
+        """Quantize the blocks of :meth:`_plan` in place in the dense buffers of every covered layer."""
+        base = innermost(self.inner)
         layers = [i for i in self.positional_buffers() if self.covers(i)]
         for (kind, start, stop), rows in jobs.items():
             for layer_idx in layers:
@@ -216,7 +262,9 @@ class KIVICache(CacheWrapper):
 class KIVITechnique(KVCacheTechnique):
     """KIVI: the KV cache in low-bit codes, keys quantized per channel and values per token.
 
-    See :class:`KIVIConfig`. Training-free; no parameters."""
+    See :class:`KIVIConfig`. Training-free; no parameters. :attr:`storage` is the storage in use; under
+    ``"packed"`` decoding runs eagerly (no CUDA graphs).
+    """
 
     name: ClassVar[str] = KIVIConfig.technique
     config_class: ClassVar[type[KIVIConfig]] = KIVIConfig
@@ -227,8 +275,67 @@ class KIVITechnique(KVCacheTechnique):
         simulated=Simulation(Saving.KV_MEMORY, "writes the dequantized entries back into the dense cache"),
     )
     order: ClassVar[int] = 10
-    graph_safe: ClassVar[bool] = True  # quantizes in place at the pass boundaries; layers read the dense buffers
+    graph_safe: ClassVar[bool] = True  # simulated: quantizes in place at the pass boundaries
     config: KIVIConfig
 
+    def __init__(self, config: KIVIConfig, adapter: ArchAdapter) -> None:
+        super().__init__(config, adapter)
+        self.storage = config.kivi_storage
+        self._sync_graph_safe()
+
+    def _sync_graph_safe(self) -> None:
+        # The packed storage hands layers fresh tensors on every pass, so it decodes eagerly.
+        self.graph_safe = type(self).graph_safe and self.storage == "simulated"  # type: ignore[misc]
+
+    @classmethod
+    def simulation_for(cls, config: TechniqueConfig | None = None) -> Simulation | None:
+        resolved = config if config is not None else cls.config_class
+        if not getattr(resolved, "packable", False):
+            return super().simulation_for(config)
+        if isinstance(resolved, type):
+            resolved = resolved()
+        assert isinstance(resolved, KIVIConfig)
+        return cls._storage_simulation(resolved.kivi_storage)
+
+    def simulation(self) -> Simulation | None:
+        if not self.config.packable:
+            return super().simulation()
+        return self._storage_simulation(self.storage)
+
+    @classmethod
+    def _storage_simulation(cls, storage: str) -> Simulation | None:
+        simulation = KIVI_STORAGES.get(storage).simulation
+        return simulation.within(cls.info.saves) if simulation is not None else None
+
+    def reads_packed(self) -> bool:
+        """Whether the model's attention implementation reads the ``"kivi"`` packed format."""
+        from ...attention.registry import accepts_packed_kv
+
+        implementation = str(getattr(self.adapter.config, "_attn_implementation", None) or "eager")
+        return accepts_packed_kv(implementation, "kivi")
+
     def make_wrapper(self, cache: KVCache) -> CacheWrapper:
-        return KIVICache(cache, self.config, layer_indices(self.config.layers, self.adapter))
+        storage = self.storage
+        if isinstance(cache, CacheWrapper) and storage != "simulated":  # another wrapper owns the buffers
+            storage = "simulated"
+        return KIVI_STORAGES.get(storage).factory(cache, self)
+
+    def attach(self, model: nn.Module, adapter: ArchAdapter, context: AttachContext | None = None) -> None:
+        if self.storage != "simulated":
+            reason = self._storage_blocker(adapter, context or AttachContext())
+            if reason is not None and self.config.storage is not None:
+                raise ConfigError(f"storage={self.storage!r} cannot run here: {reason}; use storage='simulated'")
+            if reason is not None:
+                self.storage = "simulated"
+                self._sync_graph_safe()
+
+    def _storage_blocker(self, adapter: ArchAdapter, context: AttachContext) -> str | None:
+        """Why the storage cannot run on this model and recipe (``None`` if it can)."""
+        others = [t.name for t in context.techniques if t is not self and isinstance(t, KVCacheTechnique)]
+        if others:
+            return f"another KV-cache technique ({', '.join(others)}) wraps the same cache"
+        if any(adapter.kv_source(index) != index for index in range(1, adapter.num_layers + 1)):
+            return "layers share caches"
+        if context.layer_copies():
+            return "the recipe runs trainable layer copies, which write the cache outside its layers"
+        return None

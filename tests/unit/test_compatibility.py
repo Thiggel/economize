@@ -111,7 +111,8 @@ def test_backends_are_reported() -> None:
 
 
 SIMULATED_REFERENCES = [
-    TealConfig(backend="dense"), "kivi", KVEvictConfig(storage="masked"), KVEvictConfig(method="h2o", heavy=4),
+    TealConfig(backend="dense"), KIVIConfig(storage="simulated"), KVEvictConfig(storage="masked"),
+    KVEvictConfig(method="h2o", heavy=4),
     PruneConfig(semi_structured=False), QuantConfig(backend="fake"),
 ]
 
@@ -142,6 +143,7 @@ def test_the_kernel_decides_whether_a_path_is_simulated() -> None:
     assert _status(PruneConfig(semi_structured=False), "transformers") is SupportStatus.SIMULATED  # masked dense
     assert _status(PruneConfig(sparsity=0.5), "transformers") is SupportStatus.UNSUPPORTED  # no unstructured kernel
     assert _status("kv_evict", "transformers") is SupportStatus.REAL  # streaming in compact storage
+    assert _status("kivi", "transformers") is SupportStatus.REAL  # packed codes
 
 
 def test_serving_backends_report_dense_and_missing_paths() -> None:

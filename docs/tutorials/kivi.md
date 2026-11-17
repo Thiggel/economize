@@ -9,11 +9,13 @@ most recent tokens stay in full precision. Keys are quantized in whole blocks of
 block is complete, and values once a token is more than `residual_length` tokens old, so with `l` cached tokens
 `floor(l / R) * R` keys and `max(0, l - R)` values are quantized. The method is lossy and trains nothing.
 
-economize simulates the quantization in the cache's own dtype: it quantizes the entries and writes the dequantized
-values back into the dense cache, which reproduces the numerics of KIVI's integer kernels. The memory it reports is
-what those kernels store (`bits / 8` bytes per quantized element plus an fp16 scale and zero point per group), while
-the dense buffers stay allocated. [KIVI with a fused kernel](kivi_fused.md) keeps the packed codes and lets the
-attention kernel read them.
+economize stores the quantized entries as packed codes (`bits / 8` bytes per element) with an fp16 scale and zero
+point per group, and the recent entries in a short full-precision ring of `residual_length + headroom` slots. No
+dense buffer stays allocated for the quantized layers, so with bf16 entries the cache holds about
+`bits / 16 + 2 / group_size` of the plain cache's bytes. The economize attention kernel reads the codes directly;
+`sdpa` and `eager` read a dense copy of one layer at a time. `KIVIConfig(storage="simulated")` instead writes the
+dequantized values back into dense buffers: the same tokens with the full memory, which is what the technique uses
+next to another KV technique.
 
 ## Setup
 
@@ -74,7 +76,9 @@ for config in (KIVIConfig(bits=4), KIVIConfig(bits=2, residual_length=256), KIVI
 ```
 
 `residual_length` must be a multiple of `group_size`. `layers=(...)` restricts quantization to some layers
-(1-indexed), for example to keep the first layers exact.
+(1-indexed), for example to keep the first layers exact. `headroom` (256 by default) is the room the ring keeps for
+the uncommitted tokens of one cycle: a speculative cycle that writes more tokens than that between two exact passes
+is refused, and a larger `headroom` costs `2 * headroom * head_dim` full-precision values per KV head and layer.
 
 ## Speculative decoding
 
@@ -85,7 +89,8 @@ output with KIVI depends on the cycle length and on the acceptance. At `cycle_le
 ## Combining with other techniques
 
 KIVI is the model's one KV quantizer, so it refuses `kv_fp8`. It composes with an eviction policy, which then
-quantizes only the entries it keeps, and with every drafter:
+quantizes only the entries it keeps, and with every drafter. Next to an eviction policy KIVI uses the simulated
+storage, since both techniques wrap the same dense cache:
 
 <!-- test-substitute: heavy=1024 => heavy=96 -->
 ```python

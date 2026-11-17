@@ -26,7 +26,7 @@ from helpers import VOCAB, make_tiny_model, perturb
 # Head dim 16: groups of 8 tokens / channels and a residual of 8 tokens quantize most of a 16-token generation.
 KIVI = {"group_size": 8, "residual_length": 8}
 GRAPH_SAFE = {
-    "kivi": (KIVIConfig(bits=2, **KIVI), "sdpa"),
+    "kivi": (KIVIConfig(bits=2, storage="simulated", **KIVI), "sdpa"),  # packed storage decodes eagerly
     "kivi_fused": (FusedKIVIConfig(bits=2, **KIVI), "economize"),
     "kv_fp8_fused": (FusedFP8KVConfig(), "economize"),
     # A budget of 8 prompt entries: the prompts of 13, 9 and 11 tokens are evicted, those of 5 and 7 are not.
@@ -75,7 +75,7 @@ def test_graph_safety_of_the_kv_techniques() -> None:
         model = _model(name, "cpu", jump=False)
         wrapping = model.decoder(DecodeConfig(cycle_length=1)).wrap_cache
         assert isinstance(wrapping, CacheWrapping) and wrapping.graph_safe, name
-    for config in (FP8KVConfig(), KVEvictConfig(method="h2o", recent=4, heavy=4)):
+    for config in (FP8KVConfig(), KVEvictConfig(method="h2o", recent=4, heavy=4), KIVIConfig(**KIVI)):
         model = economize.apply(make_tiny_model(), config)
         assert not model.decoder(DecodeConfig(cycle_length=1)).wrap_cache.graph_safe
 

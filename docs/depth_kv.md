@@ -134,8 +134,10 @@ to the paper's choice, every layer except the first three and the last, and `red
 the cosine similarity of layer input and output, as the paper does. Unlike the paper, dropped tokens still write the
 K/V of the layers they skip.
 
-**KIVI.** Quantization is simulated (quantize, then dequantize in place in the cache dtype), which reproduces
-the numerics of the integer kernels without their speed. Entries are quantized at the start of each exact pass,
+**KIVI.** By default the cache stores the quantized entries as packed codes with fp16 scales and zero points and
+the recent ones in a full-precision ring (`storage="packed"`), so the memory really shrinks; the economize attention
+kernel reads the codes and other attention implementations a dense copy of one layer at a time.
+`storage="simulated"` quantizes and dequantizes in place in the dense cache, with the same tokens. Entries are quantized at the start of each exact pass,
 so the K/V of a pass are read in full precision by the pass that wrote them, as in the paper's prefill. With `l`
 committed tokens, `floor(l / R) * R` keys and `max(0, l - R)` values are quantized.
 

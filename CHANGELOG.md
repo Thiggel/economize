@@ -29,6 +29,20 @@ the simulated paths remain as explicit references that `economize.backend_suppor
   factor), `economize.backends.onnx.factored`.
 - The ONNX graph writer refuses non-integer zero points instead of rounding them.
 
+### Packed KIVI cache
+
+- `kivi` stores its covered layers packed by default (`KIVIConfig(storage="packed")`): `bits`-bit codes, fp16
+  scales and zero points (keys per channel, values per token) and a full-precision ring of `residual_length +
+  headroom` recent entries. The inner cache allocates no dense buffer for these layers, so the cache holds about
+  `bits / 16 + 2 / group_size` of the bf16 bytes (`PackedKIVICache.allocated_bytes`), and the decoded tokens equal
+  those of the simulated storage. Attention kernels that read the `"kivi"` packed format get the codes, others a
+  transient dense copy per layer. `backend_support("kivi")` reports the Transformers path as real.
+- `storage="simulated"` keeps the previous in-place reference with dense buffers. The default falls back to it next
+  to another KV technique on the same cache, and under `kivi_fused`. Storages are a registry (`KIVI_STORAGES`,
+  entry-point group `economize.kivi_storages`).
+- The packed storage decodes eagerly (no CUDA graphs) and refuses a cycle that writes past its ring (raise
+  `headroom`) and scales beyond the fp16 range.
+
 ### New techniques
 
 - Drafters: `dflash` (DFlash block drafter with z-lab and speculators checkpoint readers), `pard` (parallel

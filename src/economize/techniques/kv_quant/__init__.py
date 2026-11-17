@@ -9,7 +9,9 @@
 
 Both techniques wrap the cache of every generation (:class:`~economize.techniques._kv.CacheWrapper`), act only on
 committed entries, and compose with drafters, dynamic depth and weight techniques. They are lossy and
-training-free. The shared base (:mod:`economize.techniques._kv`) also serves the KV eviction techniques of
+training-free. KIVI stores its covered layers as packed codes by default (``storage="packed"``, see
+:mod:`.packed`), so the cache really holds fewer bytes; ``storage="simulated"`` keeps dense buffers. The shared
+base (:mod:`economize.techniques._kv`) also serves the KV eviction techniques of
 :mod:`economize.techniques.kv_evict`; it is re-exported here.
 """
 
@@ -30,20 +32,25 @@ from .._kv import (  # re-exported: the shared KV-cache base lives in economize.
 )
 from .fp8 import FP8_FORMATS, FP8_SCALES, FP8Cache, FP8KVConfig, FP8KVTechnique, fp8_round_trip
 from .kivi import KIVI_BITS, KIVICache, KIVIConfig, KIVITechnique, fake_quantize, kivi_bytes, quantize
+from .packed import PackedKIVICache
+from .storage import KIVI_STORAGES, KIVIStorage
 
 __all__ = [
     "FP8_FORMATS",
     "FP8_SCALES",
     "KIVI_BITS",
+    "KIVI_STORAGES",
     "CacheWrapper",
     "FP8Cache",
     "FP8KVConfig",
     "FP8KVTechnique",
     "KIVICache",
     "KIVIConfig",
+    "KIVIStorage",
     "KIVITechnique",
     "KVCacheTechnique",
     "KVStats",
+    "PackedKIVICache",
     "RowStats",
     "SlotStore",
     "check_positional",
