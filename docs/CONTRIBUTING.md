@@ -67,5 +67,17 @@ These rules are explained in `docs/ARCHITECTURE.md`; the tests named here enforc
   path assert the `DeprecationWarning`.
 - **Numerics and formats are fixed.** Refactors keep logits bit-identical (the oracle tests under `tests/oracle/`)
   and keep every checkpoint format readable.
+- **No environment variables as configuration.** An option belongs to the technique or config object that owns it,
+  as a typed field. An `ECONOMIZE_*` environment variable is allowed only as a debug override of a kernel path that
+  leaves the results unchanged, documented at the constant or function that reads it. The complete list
+  (`tests/unit/test_env_overrides.py` keeps it in sync with `src/`):
+
+  | Variable | Default | Effect |
+  | --- | --- | --- |
+  | `ECONOMIZE_FLASH_PREFILL` | `1` | `0`: long queries of the `economize` attention skip FlashAttention and run on `sdpa` (`economize.attention.interface.FLASH_PREFILL`) |
+  | `ECONOMIZE_FLASH_DECODE` | `auto` | `0`: hinted short queries never run on FlashAttention; `1`: whenever expressible, ignoring the shape policy (`economize.attention.flash.FLASH_DECODE`) |
+  | `ECONOMIZE_HUB_KERNELS` | `1` | `0` / `false` / `no` / `off`: never load kernels from the Hub, every op runs its pure-torch fallback (`economize.integrations.kernels.ENV_VAR`) |
+  | `ECONOMIZE_SLOT_GATHER` | `1` | `0`: tree compaction moves every buffer with advanced indexing instead of the fused Triton kernel (`economize.modules.slot_gather.SLOT_GATHER`) |
+
 - **Errors** derive from `economize.errors.EconomizeError` (and from the built-in exception they refine, such as
   `ValueError` for `ConfigError`), so callers can catch economize's errors as a group.
