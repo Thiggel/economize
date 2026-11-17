@@ -412,7 +412,7 @@ def capture_inputs(
 
         return hook
 
-    layers = adapter.layers
+    layers = adapter.model_layers  # the hooks must catch the model's own forward, also on a layer view
     handles = [layers[i].register_forward_pre_hook(make_hook(i), with_kwargs=True) for i in sorted(set(first.values()))]
     try:
         for batch in batches:

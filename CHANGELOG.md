@@ -2,7 +2,7 @@
 
 ## 0.4.0 (unreleased)
 
-54 techniques (28 new), 21 training objectives, 46 model types.
+55 techniques (29 new), 21 training objectives, 46 model types.
 
 ### Real weight compression by default (breaking)
 
@@ -43,6 +43,12 @@ the simulated paths remain as explicit references that `economize.backend_suppor
   `kangaroo` (shallow sub-network plus an attention adapter), `knapspec` (sublayer skip sets chosen by a knapsack
   search), `lookahead` (Lookahead decoding as a single-pass tree drafter), `rest` and `suffix_decoding` (retrieval
   over a suffix-array datastore), `placed_draft_model` (a draft model on its own device) and `gemma4_assistant`.
+- Draft views: `draft_with` (`DraftWith(TealConfig(), QuantConfig(), ...)`) runs any technique that declares
+  `draft_copies` on the draft path of a self-speculative drafter and verifies with the unmodified model, so a
+  lossy technique decodes losslessly. `teal`, `kv_evict` (shared layer copies), `quant`, `prune`, `lowrank`
+  (owned copies) and `depth_prune` (skipped on draft steps, equal to `layer_skip` for the same set) opt in.
+  New hooks on `Technique`: `draft_copies`, `attach_draft`, `detach_draft`, `draft_policy`, `draft_skips`,
+  `wraps_cache`; `ArchAdapter.with_layers` and `CacheWrapper(draft_only=True)` back them.
 - Dynamic depth: `free`, `dmtd` and `hidden_transfer` as drafting-cycle techniques with their objectives.
 - Weights: `littlebit` (bit-packed binary low-rank linears below one bit per weight, with a Triton kernel).
 - Weights: `slicegpt` (SliceGPT orthogonal slicing of the residual stream; `rotation="global"` writes a plain

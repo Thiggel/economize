@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 import torch
 from torch import nn
 
+from ...core.cache_wrapping import NestedCacheWrapping
 from ...core.config import TechniqueConfig, nested_config, nested_dict
 from ...core.technique import TECHNIQUES, AttachContext, Capability, Technique
 from ...decoding.protocols import Draft, Drafter, Verifier, WrappableDrafter, draft_footprint
@@ -145,6 +146,7 @@ class WrappingTechnique(Technique):
             cls = drafting_class(sub, self.name, attribute, wrappable=self.wraps_drafter(attribute))
             setattr(self, attribute, cls(sub, adapter))
         self.graph_safe = all(t.graph_safe for t in self.wrapped_techniques())  # type: ignore[misc]
+        self._nested_cache: NestedCacheWrapping | None = None
 
     def wrapped_config(self, attribute: str) -> TechniqueConfig:
         """The configuration of the wrapped technique held as ``attribute``."""
@@ -182,6 +184,18 @@ class WrappingTechnique(Technique):
     def refresh(self) -> None:
         for technique in self.wrapped_techniques():
             technique.refresh()
+
+    @property
+    def wraps_cache(self) -> bool:
+        """Whether a wrapped technique wraps the KV cache (a drafter that reads a sparse view of it)."""
+        return any(t.wraps_cache for t in self.wrapped_techniques())
+
+    def wrap_cache(self, cache: KVCache, previous: KVCache | None = None) -> KVCache:
+        """The wrapped techniques' wrappers of ``cache`` (see
+        :class:`~economize.core.cache_wrapping.NestedCacheWrapping`)."""
+        if self._nested_cache is None:
+            self._nested_cache = NestedCacheWrapping(self.wrapped_techniques())
+        return self._nested_cache(cache, previous)
 
     def draft_modules(self) -> dict[str, nn.Module]:
         """The wrapped techniques' own draft modules (for draft-only transforms), under their attribute names. A

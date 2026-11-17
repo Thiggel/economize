@@ -8,7 +8,7 @@ from .config import DepthPruneConfig, PruneConfig
 from .depth import DEPTH_CRITERIA, DepthCriterion, block_influence, remove_layers, shortgpt_select, sleb_select
 from .masks import SparsityPattern, check_nm, nm_mask, parse_pattern, unstructured_mask
 from .methods import PRUNE_METHODS, Pruner
-from .model import depth_prune_model, prune_model
+from .model import depth_prune_model, prune_model, select_depth_layers
 from .semi_kernels import SEMI_STRUCTURED_KERNELS, SemiStructuredKernel
 from .sparsegpt import sparsegpt_prune
 from .technique import DepthPruneTechnique, PruneTechnique
@@ -36,6 +36,7 @@ __all__ = [
     "parse_pattern",
     "prune_model",
     "remove_layers",
+    "select_depth_layers",
     "shortgpt_select",
     "sleb_select",
     "sparsegpt_prune",

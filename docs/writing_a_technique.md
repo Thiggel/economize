@@ -221,6 +221,42 @@ model.detach()
 A backend that serves economize techniques (vLLM, SGLang) runs a technique only if it has an adapter registered for
 it, so the bigram drafter is `unsupported` there until one is added (see [Ecosystem](ecosystem.md)).
 
+## Running it on a draft path
+
+A technique that is not a drafter can also run inside a draft view, `DraftWith(MyConfig())`, which applies it to
+the draft path of a self-speculative drafter and verifies with the unmodified model (see
+[Draft views](tutorials/draft_with.md)). The technique opts in with the class attribute `draft_copies`, which says
+what the view gives it as layer modules:
+
+- `DraftCopies.SHARED`: shallow copies of the decoder layers that share every parameter and buffer, for a technique
+  that adds hooks (TEAL);
+- `DraftCopies.OWNED`: deep copies, for a technique that rewrites weights in place (quantization, pruning, low
+  rank); the view shares every tensor the transform leaves unchanged with the model again;
+- `DraftCopies.NONE`: the model's own layers, for a technique that changes no layer module and acts through a layer
+  policy (depth pruning skips its layers on draft steps).
+
+The view calls `attach_draft(model, view, context)`, whose default is `attach` with `view` as the adapter, so a
+technique that only touches `adapter.layers` needs nothing else. `view.model_layers` are the layers the verifying
+model runs. A technique with another installation path overrides `attach_draft` and `detach_draft`, and a layer
+policy for the draft path is returned by `draft_policy` (default `layer_policy`), with the skipped layers in
+`draft_skips` for the cost log. A KV-cache technique's wrapper is built by the view with `draft_only=True`, so it
+masks entries on draft steps and leaves the exact passes the full cache:
+
+<!-- not run: an outline of the hooks -->
+```python
+from economize.core.technique import DraftCopies
+
+
+@register_technique
+class MySparsity(Technique):
+    name = "my_sparsity"
+    capabilities = Capability.ACTIVATIONS
+    draft_copies = DraftCopies.SHARED  # hooks on shallow copies of the layers
+```
+
+The view applies the same compatibility rules between its held techniques as a model does, and refuses a technique
+held and applied to the model at once.
+
 ## Shipping it as a package
 
 A package makes its technique available to economize through the `economize.techniques` entry-point group. The entry

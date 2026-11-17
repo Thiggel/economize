@@ -4,21 +4,25 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Sequence
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
-from torch import Tensor
+from torch import Tensor, nn
 
 from ...core.config import TechniqueConfig
 from ...core.metadata import Family, KernelChoice, Saving, Simulation, TechniqueInfo, WeightStorage
-from ...core.technique import Capability, Technique, register_technique
+from ...core.technique import AttachContext, Capability, DraftCopies, Technique, register_technique
 from ...registry import Registry
 from .._weights.technique import CalibratedWeightTransform
+from ..layer_skip.policy import SkipLayers
 from .config import DepthPruneConfig, PruneConfig
 from .depth import remove_layers
 from .methods import PRUNE_METHODS
-from .model import depth_prune_model, prune_model
+from .model import prune_model, select_depth_layers
 from .semi_kernels import SEMI_STRUCTURED_KERNELS
 from .semi_structured import storage_reason
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
 
 __all__ = ["DepthPruneTechnique", "PruneTechnique"]
 
@@ -35,6 +39,7 @@ class PruneTechnique(CalibratedWeightTransform):
     info = TechniqueInfo(family=Family.WEIGHT_COMPRESSION, saves=Saving.WEIGHT_MEMORY | Saving.COMPUTE, lossless=False)
     capabilities: ClassVar[Capability] = Capability.WEIGHTS
     order: ClassVar[int] = 10
+    draft_copies: ClassVar[DraftCopies | None] = DraftCopies.OWNED
     methods: ClassVar[Registry[Any]] = PRUNE_METHODS
     config: PruneConfig
 
@@ -100,19 +105,40 @@ class DepthPruneTechnique(CalibratedWeightTransform):
     )
     capabilities: ClassVar[Capability] = Capability.WEIGHTS
     order: ClassVar[int] = 5
+    draft_copies: ClassVar[DraftCopies | None] = DraftCopies.NONE
     config: DepthPruneConfig
+    _draft_skip: SkipLayers | None = None
 
     def needs_calibration(self) -> bool:
         """The criterion reads calibration data unless the config names the layers to remove."""
         return not self.config.layers
 
     def transform(self, adapter: Any, batches: Sequence[Tensor] | None) -> dict[str, Any]:
-        if self.config.layers:
-            removed = sorted(self.config.layers)
-            remove_layers(adapter, removed)
-        else:
-            assert batches is not None
-            removed = depth_prune_model(adapter, self.config, batches)
-            # record the choice, so that a saved checkpoint removes the same layers without calibration
-            self.config = dataclasses.replace(self.config, layers=tuple(removed))
+        removed = self._choose(adapter, batches)
+        remove_layers(adapter, removed)
         return {"method": self.config.method, "removed_layers": removed, "num_layers": adapter.num_layers}
+
+    def attach_draft(self, model: nn.Module, view: ArchAdapter, context: AttachContext | None = None) -> None:
+        """On a draft path the chosen layers are skipped (:meth:`draft_policy`) and no layer is removed."""
+        self.config.validate(view)
+        chosen = self._choose(view, self.calibration_batches(context))
+        self.summary = {"method": self.config.method, "skipped_layers": chosen, "num_layers": view.num_layers}
+        self._draft_skip = SkipLayers(chosen)
+
+    def detach_draft(self) -> None:
+        self._draft_skip = None
+
+    def draft_policy(self) -> SkipLayers | None:
+        return self._draft_skip
+
+    def draft_skips(self) -> frozenset[int]:
+        return frozenset(self.config.layers) if self._draft_skip is not None else frozenset()
+
+    def _choose(self, adapter: Any, batches: Sequence[Tensor] | None) -> list[int]:
+        """The configured layers, else the criterion's choice on ``batches``, which is recorded in the config so that
+        a saved checkpoint drops the same layers without calibration."""
+        if not self.config.layers:
+            assert batches is not None
+            self.config = dataclasses.replace(self.config, layers=tuple(select_depth_layers(adapter, self.config,
+                                                                                            batches)))
+        return sorted(self.config.layers)

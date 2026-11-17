@@ -8,7 +8,7 @@ from typing import Any, ClassVar
 from torch import Tensor
 
 from ...core.metadata import Family, Saving, TechniqueInfo
-from ...core.technique import Capability, register_technique
+from ...core.technique import Capability, DraftCopies, register_technique
 from ...registry import Registry
 from .._weights.technique import CalibratedWeightTransform
 from .config import LowRankConfig
@@ -31,6 +31,7 @@ class LowRankTechnique(CalibratedWeightTransform):
     info = TechniqueInfo(family=Family.WEIGHT_COMPRESSION, saves=Saving.WEIGHT_MEMORY | Saving.COMPUTE, lossless=False)
     capabilities: ClassVar[Capability] = Capability.WEIGHTS
     order: ClassVar[int] = 20
+    draft_copies: ClassVar[DraftCopies | None] = DraftCopies.OWNED
     methods: ClassVar[Registry[Any]] = FACTORIZERS
     config: LowRankConfig
 

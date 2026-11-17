@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import enum
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
@@ -33,6 +34,7 @@ __all__ = [
     "TECHNIQUES",
     "AttachContext",
     "Capability",
+    "DraftCopies",
     "Technique",
     "attach_rank",
     "listed_techniques",
@@ -49,6 +51,26 @@ CAPABILITY_ORDER: tuple[Capability, ...] = (
     Capability.DEPTH,
     Capability.DRAFTER,
 )
+
+
+class DraftCopies(enum.Enum):
+    """How a technique runs inside a draft view (:class:`~economize.techniques.draft_with.DraftWith`), which
+    applies it to the drafter and leaves the verifying model unchanged.
+
+    Attributes:
+        NONE: The technique changes no layer module of the draft path: it hooks the base layers only to observe, or
+            acts through :meth:`Technique.draft_policy` (a skip set). The view runs the base layers.
+        SHARED: The technique adds hooks to the layers it runs on and leaves their weights alone. The view runs
+            shallow copies of the base layers that share every parameter and buffer, so hooks on the copies reach
+            the draft path only; no weight memory is added.
+        OWNED: The technique rewrites weights. The view runs deep copies of the base layers, which the technique
+            transforms in place; a copied tensor the transform leaves equal to the base tensor is shared again
+            afterwards. The added memory is the transformed weights of the copied layers.
+    """
+
+    NONE = "none"
+    SHARED = "shared"
+    OWNED = "owned"
 
 
 @dataclass(frozen=True)
@@ -111,6 +133,10 @@ class Technique(nn.Module):
     #: decode eagerly. A technique that wraps the KV cache (:meth:`wrap_cache`) is graph-safe only if its wrapper
     #: works under the graphs (see :class:`~economize.techniques._kv.CacheWrapper`).
     graph_safe: ClassVar[bool] = True
+    #: How the technique runs inside a draft view (:class:`~economize.techniques.draft_with.DraftWith`), ``None``
+    #: if it cannot. A technique opts in by setting it; it then attaches to the view through :meth:`attach_draft`,
+    #: whose default is :meth:`attach` on the view's adapter (see :class:`DraftCopies`).
+    draft_copies: ClassVar[DraftCopies | None] = None
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -260,6 +286,36 @@ class Technique(nn.Module):
         it and wrap anew, which only costs the decoder its recorded graphs.
         """
         return cache
+
+    @property
+    def wraps_cache(self) -> bool:
+        """Whether :meth:`wrap_cache` wraps the KV cache of a generation. Default: the technique has
+        :attr:`Capability.KV_CACHE`; a technique that wraps the cache on behalf of others (a draft view) overrides
+        it."""
+        return Capability.KV_CACHE in self.capabilities
+
+    def attach_draft(self, model: nn.Module, view: ArchAdapter, context: AttachContext | None = None) -> None:
+        """Install the technique on the draft path of a draft view (:attr:`draft_copies` set).
+
+        ``view`` is an adapter whose :attr:`~economize.arch.ArchAdapter.layers` are the draft path's layer modules
+        (copies of the base layers for :attr:`DraftCopies.SHARED` and :attr:`DraftCopies.OWNED`, the base layers
+        for :attr:`DraftCopies.NONE`); ``view.model_layers`` are the layers the verifying model runs. The technique's
+        :attr:`adapter` is the view while it is attached. Default: :meth:`attach` with the view.
+        """
+        self.attach(model, view, context)
+
+    def detach_draft(self) -> None:
+        """Undo :meth:`attach_draft`. Default: :meth:`detach`."""
+        self.detach()
+
+    def draft_policy(self) -> LayerPolicy | None:
+        """The layer policy the draft path applies (after :meth:`attach_draft`). Default: :meth:`layer_policy`."""
+        return self.layer_policy()
+
+    def draft_skips(self) -> frozenset[int]:
+        """The 1-based layers :meth:`draft_policy` skips on every draft step, for the drafter's cost accounting.
+        Default: none."""
+        return frozenset()
 
 
 def attach_rank(technique: Technique | type[Technique]) -> tuple[int, int]:

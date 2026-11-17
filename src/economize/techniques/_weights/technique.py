@@ -33,6 +33,9 @@ class WeightTransform(Technique):
             f"{self.name!r} rewrote the base weights in place and cannot be detached; reload the model"
         )
 
+    def detach_draft(self) -> None:
+        """Nothing to undo: on a draft path the transform rewrote the view's copies, which the view drops."""
+
 
 class CalibratedWeightTransform(WeightTransform):
     """A :class:`WeightTransform` whose ``attach`` validates the config against the model, draws calibration
@@ -52,7 +55,11 @@ class CalibratedWeightTransform(WeightTransform):
         """Rewrite the weights of ``adapter`` in place and return the summary."""
         raise NotImplementedError
 
+    def calibration_batches(self, context: Any) -> Sequence[Tensor] | None:
+        """The calibration batches of ``context`` (an :class:`~economize.core.AttachContext`) when
+        :meth:`needs_calibration`, else ``None``."""
+        return token_batches(calibration_source(context, self.name)) if self.needs_calibration() else None
+
     def attach(self, model: Any, adapter: Any, context: Any = None) -> None:
         self.config.validate(adapter)
-        batches = token_batches(calibration_source(context, self.name)) if self.needs_calibration() else None
-        self.summary = self.transform(adapter, batches)
+        self.summary = self.transform(adapter, self.calibration_batches(context))
