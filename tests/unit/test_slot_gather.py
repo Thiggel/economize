@@ -7,6 +7,8 @@ subsets, and inside a CUDA graph. The fallback cases run anywhere; the kernel te
 
 from __future__ import annotations
 
+import gc
+
 import pytest
 import torch
 
@@ -82,6 +84,7 @@ def test_static_cache_gather_matches_indexing_on_cpu():
 
 
 gpu = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA device")
+two_gpus = pytest.mark.skipif(torch.cuda.device_count() < 2, reason="needs two CUDA devices")
 
 
 @pytest.mark.gpu
@@ -135,6 +138,53 @@ def test_fused_kernel_replays_in_a_cuda_graph():
         assert torch.equal(got[:, :, :TRASH], want[:, :, :TRASH])
 
 
+def test_pointer_table_lives_as_long_as_its_buffers(monkeypatch):
+    """A captured graph reads its pointer table at replay, so creating many other tables must never evict it; the
+    table goes away with its buffers."""
+    monkeypatch.setattr(torch.cuda, "is_current_stream_capturing", lambda: False)  # CPU tensors stand in here
+    device = torch.device("cpu")
+    kept = _buffers("cpu")[:2]
+    table = slot_gather._table(kept, device)
+    others = [_buffers("cpu", batch=1)[:1] for _ in range(100)]
+    for buffers in others:
+        slot_gather._table(buffers, device)
+    assert slot_gather._table(kept, device) is table
+    before = len(slot_gather._TABLES)
+    del others, buffers
+    gc.collect()
+    assert len(slot_gather._TABLES) == before - 100
+    del kept
+    gc.collect()
+    assert all(entry is not table for entry in slot_gather._TABLES.values())
+
+
+@pytest.mark.gpu
+@gpu
+def test_captured_graph_survives_many_other_gathers():
+    """Gathers over many other buffer sets after a capture (other tests, other decoders) must leave the graph's
+    pointer table intact."""
+    buffers = _buffers("cuda")[:3]
+    rows, src, dst = _tree_moves("cuda")
+    gather_slots(buffers, rows, src, dst)
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        gather_slots(buffers, rows, src, dst)
+    others = [_buffers("cuda", batch=1)[:1] for _ in range(100)]
+    one_row = torch.zeros(1, dtype=torch.long, device="cuda")
+    for other in others:
+        gather_slots(other, one_row, src[:1], dst[:1])
+    del others
+    gc.collect()
+    torch.cuda.synchronize()
+    expected = [b.clone() for b in buffers]
+    for buffer in expected:
+        gather_slots_reference(buffer, rows, src, dst)
+    graph.replay()
+    torch.cuda.synchronize()
+    for got, want in zip(buffers, expected):
+        assert torch.equal(got[:, :, :TRASH], want[:, :, :TRASH])
+
+
 @pytest.mark.gpu
 @gpu
 def test_disabled_kernel_takes_the_indexing_path(monkeypatch):
@@ -144,3 +194,44 @@ def test_disabled_kernel_takes_the_indexing_path(monkeypatch):
     buffers = _buffers("cuda")
     _check(buffers, *_tree_moves("cuda"))
     assert not calls
+
+
+class _LaunchRecorder:
+    """Wraps the Triton kernel and records the current CUDA device at every launch."""
+
+    def __init__(self, kernel):
+        self.kernel = kernel
+        self.devices: list[int] = []
+
+    def __getitem__(self, grid):
+        self.devices.append(torch.cuda.current_device())
+        return self.kernel[grid]
+
+
+@pytest.mark.gpu
+@two_gpus
+def test_fused_kernel_runs_on_the_buffers_device_and_stream(monkeypatch):
+    """With another device current (the target's, in two-GPU speculative decoding), the kernel must still launch on
+    the buffers' device, behind the work its current stream has queued."""
+    recorder = _LaunchRecorder(slot_gather._kernel())
+    monkeypatch.setattr(slot_gather, "_kernel", lambda: recorder)
+    torch.cuda.set_device(0)
+    fresh = _buffers("cuda:1")[:5]
+    rows, src, dst = _tree_moves("cuda:1")
+    expected = [b.clone() for b in fresh]
+    for buffer in expected:
+        gather_slots_reference(buffer, rows, src, dst)
+    buffers = [torch.zeros_like(b) for b in fresh]
+    gather_slots(buffers, rows, src, dst)  # builds the pointer table, so the call below issues no blocking copy
+    torch.cuda.synchronize(1)
+    with torch.cuda.device(1):
+        torch.cuda._sleep(100_000_000)  # the writes below land long after the gather has been issued
+        for buffer, values in zip(buffers, fresh):
+            buffer.copy_(values)
+    gather_slots(buffers, rows, src, dst)
+    torch.cuda.synchronize(0)
+    torch.cuda.synchronize(1)
+    assert torch.cuda.current_device() == 0
+    assert recorder.devices == [1, 1]
+    for got, want in zip(buffers, expected):
+        assert torch.equal(got[:, :, :TRASH], want[:, :, :TRASH])

@@ -18,6 +18,7 @@ import functools
 import importlib.util
 import math
 import os
+import weakref
 from collections.abc import Sequence
 from typing import Any
 
@@ -29,10 +30,11 @@ __all__ = ["SLOT_GATHER", "gather_slots", "gather_slots_reference"]
 #: it off.
 SLOT_GATHER = os.environ.get("ECONOMIZE_SLOT_GATHER", "1") != "0"
 
-#: Pointer tables kept on the device, keyed by the buffers' addresses and shapes. Static caches keep their buffers,
-#: so a decoder reuses one table for its whole life; the dict is cleared when it grows past :data:`_MAX_TABLES`.
+#: Pointer tables kept on the device, keyed by the device and the buffers' addresses and shapes. Static caches keep
+#: their buffers, so a decoder reuses one table for its whole life. A CUDA graph that recorded a gather reads its
+#: table at replay without holding a reference to it, so a table lives exactly as long as its buffers: it is dropped
+#: when the first of them is garbage collected, never earlier (a size cap would free tables that live graphs replay).
 _TABLES: dict[tuple[Any, ...], torch.Tensor] = {}
-_MAX_TABLES = 64
 
 
 def gather_slots_reference(buffer: torch.Tensor, rows: torch.Tensor, src: torch.Tensor, dst: torch.Tensor) -> None:
@@ -60,21 +62,25 @@ def gather_slots(buffers: Sequence[torch.Tensor], rows: torch.Tensor, src: torch
     if rows.numel() == 0 or src.shape[1] == 0:
         return
     device = fused[0].device
-    table = _table(fused, device)
-    if table is None:  # recording a CUDA graph before the table exists: no host-to-device copy may be issued
-        for buffer in fused:
-            gather_slots_reference(buffer, rows, src, dst)
-        return
-    rows, src, dst = (t.to(device, torch.long).contiguous() for t in (rows, src, dst))
-    heads = max(b.shape[1] for b in fused)
-    words = max(_words(b) for b in fused)
-    span = src.shape[1]
-    block_j = max(2, 1 << (span - 1).bit_length())
-    chunk = max(16, min(1 << (words - 1).bit_length(), 4096 // block_j))
-    kernel = _kernel()
-    kernel[(len(fused) * heads, rows.shape[0])](
-        table, rows, src, dst, span, heads, BLOCK_J=block_j, CHUNK=chunk, num_warps=4
-    )
+    # Triton launches on the current device and its current stream, while the buffers may sit on another one (the
+    # drafter replica of two-GPU speculative decoding adopts its speculation while the target's device is current).
+    # Launched there, the kernel dereferences another device's memory without waiting for that device's stream.
+    with torch.cuda.device(device):
+        table = _table(fused, device)
+        if table is None:  # recording a CUDA graph before the table exists: no host-to-device copy may be issued
+            for buffer in fused:
+                gather_slots_reference(buffer, rows, src, dst)
+            return
+        rows, src, dst = (t.to(device, torch.long).contiguous() for t in (rows, src, dst))
+        heads = max(b.shape[1] for b in fused)
+        words = max(_words(b) for b in fused)
+        span = src.shape[1]
+        block_j = max(2, 1 << (span - 1).bit_length())
+        chunk = max(16, min(1 << (words - 1).bit_length(), 4096 // block_j))
+        kernel = _kernel()
+        kernel[(len(fused) * heads, rows.shape[0])](
+            table, rows, src, dst, span, heads, BLOCK_J=block_j, CHUNK=chunk, num_warps=4
+        )
 
 
 def _words(buffer: torch.Tensor) -> int:
@@ -101,18 +107,24 @@ def _triton_available() -> bool:
 
 def _table(buffers: list[torch.Tensor], device: torch.device) -> torch.Tensor | None:
     """``[N, 4]`` int64 on ``device``: base address, heads, slots and 32-bit words per slot of every buffer."""
-    key = tuple((b.data_ptr(), tuple(b.shape), b.dtype) for b in buffers)
+    key = (device, *((b.data_ptr(), tuple(b.shape), b.dtype) for b in buffers))
     table = _TABLES.get(key)
     if table is not None:
         return table
     if torch.cuda.is_current_stream_capturing():
         return None
-    if len(_TABLES) >= _MAX_TABLES:
-        _TABLES.clear()
     rows = [[b.data_ptr(), b.shape[1], b.shape[2], _words(b)] for b in buffers]
     table = torch.tensor(rows, dtype=torch.long).to(device)  # once per buffer set
     _TABLES[key] = table
+    for buffer in buffers:
+        weakref.finalize(buffer, _evict, key, table)
     return table
+
+
+def _evict(key: tuple[Any, ...], table: torch.Tensor) -> None:
+    """Drop ``key``'s table once one of its buffers dies, unless a newer buffer set at the same addresses rebuilt it."""
+    if _TABLES.get(key) is table:
+        del _TABLES[key]
 
 
 @functools.cache
