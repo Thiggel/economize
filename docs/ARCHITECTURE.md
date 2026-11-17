@@ -933,7 +933,8 @@ named in the unknown-key error. This table must name the same registries, module
 | `DECODER_LAYOUTS` | `economize.techniques._structured` | `economize.decoder_layouts` |
 | `TEAL_BACKENDS` | `economize.techniques.sparsity` | `economize.teal_backends` |
 | `MLP_SPARSITY_BACKENDS` | `economize.techniques.mlp_sparsity` | `economize.mlp_sparsity_backends` |
-| `EVICTION_METHODS` | `economize.techniques.kv_evict` | `economize.kv_eviction` |
+| `EVICTION_METHODS`, `EVICTION_STORAGES` | `economize.techniques.kv_evict` | `economize.kv_eviction`, `economize.kv_eviction_storages` |
+| `KIVI_STORAGES` | `economize.techniques.kv_quant` | `economize.kivi_storages` |
 | `KERNEL_OPS` | `economize.integrations.kernels` | `economize.kernel_ops` |
 | `OBJECTIVES`, `DIVERGENCES`, `SCHEDULES`, `STATE_LOSSES` | `economize.train` | `economize.objectives`, `economize.divergences`, `economize.schedules`, `economize.state_losses` |
 | `DRAFTER_WORKERS` | `economize.distributed` | `economize.drafter_workers` |

@@ -6,6 +6,7 @@ imports nothing from economize but :mod:`economize.errors`, so every layer of th
 
 from __future__ import annotations
 
+import math
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import fields, is_dataclass
 from numbers import Integral, Real
@@ -107,8 +108,8 @@ def check_number(
     closed_low: bool = True,
     closed_high: bool = True,
 ) -> None:
-    """``value`` must be a real number within the given bounds (``None``: unbounded on that side)."""
-    if not isinstance(value, bool) and isinstance(value, Real):
+    """``value`` must be a real number (not NaN) within the given bounds (``None``: unbounded on that side)."""
+    if not isinstance(value, bool) and isinstance(value, Real) and not math.isnan(float(value)):
         number = float(value)
         above = low is None or (number >= low if closed_low else number > low)
         below = high is None or (number <= high if closed_high else number < high)
