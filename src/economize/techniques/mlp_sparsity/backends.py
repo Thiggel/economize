@@ -20,6 +20,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
+from ..._identity import IdentityMap
 from ...core.metadata import Saving, Simulation, WeightAccess
 from ...registry import Registry
 from ..sparsity.teal_gemv import MAX_ROWS, GemvConfig, teal_gemv, triton_available
@@ -149,9 +150,11 @@ class TritonOps(DenseOps):
         self._down: nn.Linear | None = None
         self._storage_ptr = 0
         self.realized = all(backend.eligible(m) for m in (mlp.gate, mlp.up, mlp.down))
-        self._row_plans = {
-            id(m): backend.row_plan(cast(nn.Linear, m)) for m in (mlp.gate, mlp.up) if backend.eligible(m)
-        }
+        # per map object: a map that replaces gate or up later (and may reuse its address) gets no stale plan
+        self._row_plans: IdentityMap[nn.Module, KernelPlan[RowGemvConfig]] = IdentityMap()
+        for m in (mlp.gate, mlp.up):
+            if backend.eligible(m):
+                self._row_plans[m] = backend.row_plan(cast(nn.Linear, m))
         self._down_plan: KernelPlan[GemvConfig] = KernelPlan()
         down = mlp.down
         if backend.eligible(down):
@@ -173,7 +176,7 @@ class TritonOps(DenseOps):
         if not (isinstance(weight, Tensor) and self.backend.eligible(linear)):
             return super().rows(x, linear, keep)
         rows = self._small(x, weight)
-        plan = self._row_plans.get(id(linear))
+        plan = self._row_plans.get(linear)
         if not rows or plan is None or rows > plan.max_rows or weight.stride(1) != 1:
             return super().rows(x, linear, keep)
         out = row_masked_gemv(

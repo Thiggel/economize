@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 import torch
 from torch import nn
 
+from .._identity import IdentityMap
 from ..errors import ConfigError
 from .data.masks import loss_mask_from_labels
 from .objective import Batch, Objective, ParamGroup, trainable
@@ -57,7 +58,9 @@ class ObjectiveModule(nn.Module):
         if not self.groups:
             raise ConfigError(f"objective {objective.name!r} returned no parameters to train")
         self.params = trainable(self.groups)
-        self._requires_grad = {id(p): p.requires_grad for p in model.parameters()}
+        self._requires_grad: IdentityMap[nn.Parameter, bool] = IdentityMap()
+        for p in model.parameters():
+            self._requires_grad[p] = p.requires_grad
         for p in model.parameters():
             p.requires_grad_(False)
         for p in self.params:
@@ -119,6 +122,6 @@ class ObjectiveModule(nn.Module):
         self._closed = True
         self.objective.teardown(self.model)
         for p in self.model.parameters():
-            p.requires_grad_(self._requires_grad.get(id(p), p.requires_grad))
+            p.requires_grad_(self._requires_grad.get(p, p.requires_grad))
         self.model.base_model.train(self._modes[0])
         self.model.techniques.train(self._modes[1])

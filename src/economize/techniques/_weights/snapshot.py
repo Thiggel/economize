@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 import torch
 from torch import Tensor, nn
 
+from ..._identity import IdentityMap
+
 __all__ = ["ParameterSnapshot"]
 
 
@@ -34,7 +36,8 @@ class ParameterSnapshot:
 
     _saved: list[_Saved] = field(default_factory=list)
     _seen: dict[int, nn.Module] = field(default_factory=dict)  # holding the module keeps its id unique
-    _values: dict[int, tuple[weakref.ref[Tensor], Tensor]] = field(default_factory=dict)
+    # the CPU copy per parameter object, weakly keyed: replaced weights are freed as usual
+    _values: IdentityMap[Tensor, Tensor] = field(default_factory=IdentityMap)
 
     @torch.no_grad()
     def take(self, module: nn.Module) -> None:
@@ -44,12 +47,10 @@ class ParameterSnapshot:
                 continue
             self._seen[id(owner)] = owner
             for name, param in owner.named_parameters(recurse=False):
-                known = self._values.get(id(param))  # a weak reference: replaced weights are freed as usual
-                if known is not None and known[0]() is param:
-                    value = known[1]
-                else:
+                value = self._values.get(param)
+                if value is None:
                     value = param.detach().to("cpu", copy=True)
-                    self._values[id(param)] = (weakref.ref(param), value)
+                    self._values[param] = value
                 self._saved.append(
                     _Saved(owner, name, value, weakref.ref(param), param.device, param.requires_grad)
                 )
