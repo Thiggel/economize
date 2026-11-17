@@ -23,6 +23,8 @@ src/economize/
   __init__.py          public API only (apply, load, from_pretrained, save, EfficientModel, configs, registries, errors)
   _version.py          __version__, the single source (economize.__version__, checkpoints, pyproject's hatch version)
   _deprecation.py      warn_moved: the DeprecationWarning of every shim that keeps a moved or renamed name alive
+  _identity.py         IdentityMap: values keyed by the identity of live objects (tensors, modules), safe against
+                       id reuse; per-object state lives on its owner or in such a map, never under a bare id()
   _wiring.py           composition root: registers higher-layer implementations behind lower-layer registries (2.1)
   registry.py          Registry[T] with entry-point discovery and a list of plugins that failed to import
   errors.py            exception hierarchy
@@ -79,7 +81,7 @@ against the table below (it reads the table from this file, so a new package mus
 
 | Layer | Packages |
 |---|---|
-| 0 | `_version`, `_deprecation`, `errors`, `unwrap`, `validation` |
+| 0 | `_version`, `_deprecation`, `_identity`, `errors`, `unwrap`, `validation` |
 | 1 | `registry`, `modules`, `attention` |
 | 2 | `arch` |
 | 3 | `runtime` |

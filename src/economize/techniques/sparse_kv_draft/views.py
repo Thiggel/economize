@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import torch
 
+from ..._identity import IdentityMap
 from ...core.metadata import Saving, Simulation
 from ...errors import UnsupportedModelError
 from ...registry import Registry
@@ -107,6 +108,15 @@ class _GatheringCache:
         return getattr(self._cache, name)
 
 
+def _mask_memo(shared: dict[Any, Any], kind: str) -> IdentityMap[torch.Tensor, Any]:
+    """The step's ``kind`` entries keyed by the mask object: a layer whose mask was built after an earlier layer's
+    mask was freed may get that mask's ``id``, never its entry."""
+    memo = shared.get(kind)
+    if memo is None:
+        memo = shared[kind] = IdentityMap()
+    return memo
+
+
 class DraftView(ABC):
     """How a full-attention layer of a draft step is made to read the budget of its path."""
 
@@ -148,15 +158,15 @@ class MaskedView(DraftView):
     def call(self, path: SparseKVPath, index: int, layer: Any, hidden: torch.Tensor, args: tuple[Any, ...],
              kwargs: dict[str, Any], ctx: LayerContext, shared: dict[Any, Any]) -> Any:
         mask = self.mask_of(path, index, kwargs)
-        key = ("masked", id(mask))
-        restricted = shared.get(key) if path.layer_independent else None
+        memo = _mask_memo(shared, "masked")
+        restricted = memo.get(mask) if path.layer_independent else None
         if restricted is None:
             keep = path.keep(index, mask, ctx)
             if keep is None:
                 return path.call_dense(index, layer, hidden, args, kwargs, ctx)
             restricted = restrict(mask, keep)
             if path.layer_independent:
-                shared[key] = restricted
+                memo[mask] = restricted
         kwargs["attention_mask"] = restricted
         return layer(hidden, *args, **kwargs)
 
@@ -183,8 +193,8 @@ class GatheredView(DraftView):
     def call(self, path: SparseKVPath, index: int, layer: Any, hidden: torch.Tensor, args: tuple[Any, ...],
              kwargs: dict[str, Any], ctx: LayerContext, shared: dict[Any, Any]) -> Any:
         mask = self.mask_of(path, index, kwargs)
-        key = ("gathered", id(mask))
-        entry = shared.get(key) if path.layer_independent else None
+        memo = _mask_memo(shared, "gathered")
+        entry = memo.get(mask) if path.layer_independent else None
         if entry is None:
             budget = path.budget(index, mask, ctx)
             num_slots = ctx.cache.num_slots
@@ -192,7 +202,7 @@ class GatheredView(DraftView):
                 return self._fallback.call(path, index, layer, hidden, args, kwargs, ctx, shared)
             entry = (budget.slots, self._gathered_mask(mask, budget, path.group_size(index)))
             if path.layer_independent:
-                shared[key] = entry
+                memo[mask] = entry
         slots, gathered = entry
         kwargs["attention_mask"] = gathered
         kwargs["past_key_values"] = _GatheringCache(kwargs.get("past_key_values", ctx.cache), slots)

@@ -55,7 +55,10 @@ class CustomBackend:
 
 
 _BACKENDS: dict[str, CustomBackend] = {}
-_LAST: list[CustomBackend] = []  # the backend resolved last in this process
+# The backend resolved last in this process. It mirrors vLLM's own per-process cache of the selected backend class
+# (see the module docstring), so it is process-wide on purpose: a resolution outside an engine's config context must
+# return the class that process already runs.
+_LAST: list[CustomBackend] = []
 
 
 def register_custom_backend(key: str, path: str) -> CustomBackend:
