@@ -303,7 +303,7 @@ def test_quantization_sees_both_factors(tiny2, adapter_of, held_out) -> None:
     adapter = adapter_of(tiny2)
     lowrank_model(adapter, LowRankConfig(method="svd", compression=0.2))
     before = tiny2(held_out).logits
-    summary = quantize_model(adapter, QuantConfig(format="int8", symmetric=True, group_size=None))
+    summary = quantize_model(adapter, QuantConfig(format="int8", symmetric=True, group_size=None, backend="fake"))
     assert summary["modules"] == 28  # every compressed map is two plain linear maps
     assert not torch.equal(tiny2(held_out).logits, before)
 
