@@ -1,40 +1,59 @@
 # Changelog
 
-## 0.4.0 (unreleased)
+## Unreleased
+
+### Added
+
+- `mod` takes an inference `threshold` on the router logit (a token runs a routed layer when its logit exceeds it).
+  The default `0` is the paper's rule and the previous behaviour.
+- `economize.train` exports the `LogitDistill` objective.
+- Model zoo: EAGLE-3 draft heads for Llama-3.1-8B-Instruct and the mixture-of-experts models Qwen3.5-35B-A3B and
+  gemma-4-26B-A4B-it, and speedup figures at every measured decoding setting ([docs/model_zoo.md](docs/model_zoo.md)).
+- The `all` extra also installs the export runtimes `gguf`, `onnx` and `mlx` (macOS only). It still leaves out the
+  serving engines, which pin their own torch build, and `llama-cpp`, which compiles from source.
+
+### Changed
+
+- Weight compression runs on a real kernel by default or is refused with the reason (breaking). `quant` and
+  `draft_quant` default to `backend="auto"`, the best installed kernel (`machete`, `marlin`, `cutlass`, then
+  `torchao`; registry `AUTO_QUANT_CANDIDATES`, entry-point group `economize.auto_quant`), and the summary key `kernel`
+  names the choice; `backend="fake"` is the dequantized reference. `prune` stores its default 2:4 weights as
+  `SparseSemiStructuredTensor` (`semi_structured=None`; needs a CUDA sm80+ GPU and fp16 / bf16 weights) and refuses
+  other patterns unless `semi_structured=False` asks for the masked dense reference. `economize.backend_support`
+  reports the reference paths as simulated.
+- Techniques declare which weight layouts they store (`WeightStorage`) and read (`WeightAccess`), and
+  `Technique.conflict` compares them. The default `prune` therefore no longer combines with `quant` or `lowrank`, and
+  `teal`, `cats` and `dejavu` with their Triton kernels refuse `quant` with a real kernel and `prune` with 2:4
+  storage. Dense-weight references (`quant(backend="fake")`, compressed-tensors, `prune(semi_structured=False)`)
+  still combine.
+- vLLM and SGLang refuse `prune`, `littlebit` and `draft_quant` with a kernel backend (SGLang also `lowrank`). GGUF,
+  MLX, ONNX and TensorRT-LLM exports raise `UnsupportedBackendError` for layouts their format cannot store instead
+  of writing them dense. ONNX exports keep `lowrank` factored (two `MatMul` nodes per map).
+- `teal`, `cats` and `dejavu` default to `backend="auto"`: Triton kernels with launch parameters tuned per map shape
+  on the device, and a dense fallback for multi-row calls where the tuned kernel loses (`KernelPlan`). Without CUDA,
+  Triton or 16-bit weights they raise `ConfigError`; `backend="dense"` is the masked reference and reports SIMULATED.
+- `magicdec` and `triforce` default to `view="gathered"`: each draft layer attends over a gathered copy of its
+  budget's KV entries, so draft attention FLOPs and KV reads scale with the budget on every attention
+  implementation. `view="masked"` is the reference; TriForce falls back to it on multi-head latent attention caches.
+  The GGUF and MLX backends refuse both drafters.
+- Documentation: citations in APA style from one bibliography, per-family technique tables, a backend support
+  matrix, and README / tutorial combination examples restricted to stacks that save for real and pass
+  `economize.compatible` (checked by `tests/docs/test_doc_combinations.py`).
+
+### Fixed
+
+- The default configs of `teal`, `cats` and `dejavu` saved nothing: the former default `backend="dense"` only masked
+  the activations while the transformers support entry reported REAL.
+- KnapSpec no longer hits an illegal memory access after searching more than `max_graphs` skip sets. The first
+  `max_graphs` skip sets per decoder cache are graphed and later ones draft eagerly, no graphed step is reset in the
+  middle of a generation, and latency measurement times sublayers eagerly instead of capturing a CUDA graph.
+- MInference prefill falls back to smaller Triton tiles when the device's shared memory cannot hold the tuned tile
+  (L40, A6000).
+- The ONNX graph writer refuses non-integer zero points instead of rounding them.
+
+## 0.4.0 (2026-11-04)
 
 54 techniques (28 new), 21 training objectives, 46 model types.
-
-### Real weight compression by default (breaking)
-
-The default configuration of every weight compression now runs on a real kernel or is refused with the reason;
-the simulated paths remain as explicit references that `economize.backend_support` reports as simulated.
-
-- `quant` and `draft_quant`: the default backend is `auto`, the best installed real kernel (`machete`, `marlin`,
-  `cutlass`, then `torchao`; registry `AUTO_QUANT_CANDIDATES`, entry-point group `economize.auto_quant`). The
-  summary key `kernel` names the choice, and without a fitting kernel the error names the extras to install
-  (`economize[vllm]`, `economize[quant]`). `backend="fake"` is the explicit dequantized reference.
-- `prune`: `semi_structured` is now `None` by default, which stores the default 2:4 weights as
-  `SparseSemiStructuredTensor` (refused before any weight changes without a CUDA sm80+ GPU and fp16 / bf16 weights).
-  Unstructured and other N:M patterns are refused unless `semi_structured=False` asks for the masked dense
-  reference. Sparse storage cannot be quantized or factorized, so the default `prune` no longer combines with `quant`
-  or `lowrank` (`economize.compatible("prune", "quant")` is `False`); use `semi_structured=False` for that recipe.
-- `teal`, `cats` and `dejavu` with their Triton kernels refuse `quant` with a real kernel and `prune` with sparse
-  2:4 storage, since the sparse GEMVs read dense floating-point weights (`economize.compatible("teal", "quant")` is
-  `False`, and the reason names `backend="dense"`). `quant(backend="fake")`, compressed-tensors and the masked
-  `prune(semi_structured=False)` keep dense weights and still combine. The rule is declared by the kernels: a weight
-  kernel names what it stores (`storage`, a `WeightStorage`) and an activation kernel what it reads
-  (`weight_access`, a `WeightAccess`), and `Technique.conflict` compares the two, so a new kernel takes part by
-  declaring them.
-- vLLM and SGLang refuse `prune` (no 2:4 GEMM), `littlebit` and `draft_quant` with kernel backends; SGLang also
-  refuses `lowrank` (vLLM serves the factors). The references `prune(semi_structured=False)` and
-  `draft_quant(backend="fake")` are served dense and reported as densified.
-- GGUF, MLX, ONNX and TensorRT-LLM exports refuse `prune`, `littlebit`, `lowrank` (except ONNX) and quantized codes
-  their format cannot store, with an `UnsupportedBackendError` that names the storable layouts; only
-  `quant(backend="fake")` and `prune(semi_structured=False)` are written dense. TensorRT-LLM refuses the default
-  asymmetric int4 codes (`W4A16_AWQ` has no zero points).
-- ONNX exports keep `lowrank` factored: each factored map is two `MatMul` nodes (`MatMulNBits` for a quantized
-  factor), `economize.backends.onnx.factored`.
-- The ONNX graph writer refuses non-integer zero points instead of rounding them.
 
 ### New techniques
 
@@ -84,14 +103,9 @@ the simulated paths remain as explicit references that `economize.backend_suppor
   drafters, under CUDA graphs ([docs/tree_search.md](docs/tree_search.md)). `DecodeConfig.draft_policy_options`
   now stores lists as tuples.
 - `magicdec` and `triforce`: long-context self-speculation, the base model drafting on a StreamingLLM or a
-  chunk-retrieval view of its own KV cache (full-attention layers only), lossless, with tree steps and CUDA graphs.
-  By default (`view="gathered"`) each draft layer attends over a gathered copy of its view's entries (MagicDec's sinks
-  and window, TriForce's chunks and a tail of the prompt rest and the generated slots), so the draft's attention
-  FLOPs and KV reads scale with the budget on every attention implementation; the full cache stays for the exact
-  pass. `view="masked"` is the reference that masks the other entries (real on `attn_implementation="economize"`,
-  simulated on sdpa / eager). TriForce falls back to the masked view on multi-head latent attention caches
-  (DeepSeek-V2/V3), which share every entry between the heads. Not served on vLLM, SGLang, llama.cpp or mlx_lm
-  ([docs/long_context_draft.md](docs/long_context_draft.md)).
+  chunk-retrieval view of its own KV cache (full-attention layers only), lossless, with tree steps and CUDA graphs;
+  the saving is real on `attn_implementation="economize"` and simulated on sdpa / eager. Not served on vLLM or
+  SGLang ([docs/long_context_draft.md](docs/long_context_draft.md)).
 - Tensor parallelism: economize decodes transformers `tp_plan` models (`torch.distributed`). The exact path, the
   early-exit drafters (frozen, LoRA and full copy) and chain verification run on the sharded layers,
   lossless against whole-model greedy decoding (tested in fp32 over two CPU processes). CUDA graphs over NCCL
@@ -118,14 +132,6 @@ the simulated paths remain as explicit references that `economize.backend_suppor
   on vLLM's FlashAttention (FA3 on Hopper, FA2 on Ampere / Ada) when the mask is causal over a prefix.
 - `quant` backend `machete` (vLLM's Machete int4 / int8 weight-only GEMM on Hopper; affine int8 refused).
 - TEAL backends `triton` (fused-threshold sparse GEMV) and `triton_autotune` (per-shape launch configurations).
-- Activation sparsity runs its sparse kernels by default. `teal`, `cats` and `dejavu` default to `backend="auto"`,
-  which runs the Triton kernels with launch parameters timed per map shape on the device (`RowTuner` for the
-  row-masked GEMV of CATS / Deja Vu, `AutotuneTritonBackend` for the column-skipping GEMV) and raises `ConfigError`
-  without CUDA, Triton or 16-bit weights. A map whose tuned multi-row kernel loses to the dense matmul sends calls
-  of more than one row to the dense path (`KernelPlan`). `backend="dense"` is the explicit masked reference and
-  reports SIMULATED in `simulations()` and `backend_support`. On an H100 NVL at one row and 50% sparsity the tuned
-  TEAL GEMV runs the maps of a Llama-3-8B-shaped model at 1.30-1.71x the dense cuBLAS GEMV and the row kernel its up
-  map at 1.72x.
 - 2:4 pruning storage kernels as a registry (`SEMI_STRUCTURED_KERNELS`) with a per-shape `auto` timing policy.
 
 ### Quantization
@@ -197,9 +203,6 @@ the simulated paths remain as explicit references that `economize.backend_suppor
 
 ### Fixes
 
-- The default configs of `teal`, `cats` and `dejavu` no longer save nothing: the former default `backend="dense"`
-  only masked the activations in front of dense maps while the transformers support entry reported REAL. The
-  default is now `"auto"` (see Kernels), and `"dense"` declares itself simulated.
 - `generate` with a draft tree (for example `draft_policy="dynamic_tree"`) no longer fails: the
   selector built from history-free logits processors (temperature, top-k, top-p, min-p, typical, epsilon, eta,
   suppressed tokens) now selects and returns distributions for many rows at once.
@@ -246,10 +249,6 @@ the simulated paths remain as explicit references that `economize.backend_suppor
 - README, ARCHITECTURE and ecosystem.md describe the 0.4 scope; `docs/drafters.md` documents Hydra, ReDrafter,
   Kangaroo, KnapSpec, Lookahead, REST and suffix decoding; `docs/weights.md` documents LittleBit; `docs/training.md`
   lists every registered objective.
-- The combination examples of the README, Getting started and Examples pages use only stacks whose techniques all
-  save for real and pass `economize.compatible` (`tests/docs/test_doc_combinations.py`). The tutorials of `teal`,
-  `cats`, `dejavu` and `quant` and the usage example of `docs/weights.md` no longer stack activation sparsity on
-  quantized weights, and the test checks that every combination of the tutorials and the weights page is compatible.
 
 ### Removed
 

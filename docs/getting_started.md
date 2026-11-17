@@ -10,7 +10,7 @@ pip install economize
 
 Installing the package also registers the vLLM plugin, the compressed-tensors quantization backend and the
 `economize-lm-eval` command. Optional integrations are available as extras, and `pip install "economize[all]"`
-installs all of them except vLLM and SGLang.
+installs all of them except the serving engines (vLLM, SGLang, Arctic Inference) and llama-cpp.
 
 | Extra | Installs | Used for |
 |---|---|---|
@@ -20,6 +20,8 @@ installs all of them except vLLM and SGLang.
 | `train` | accelerate, datasets, trl | drafter training and online RL rollouts |
 | `eval` | lm-eval[hf] | evaluation with the lm-evaluation-harness |
 | `bench` | datasets | the benchmark prompt suites (Spec-Bench, GSM8K, HumanEval) |
+| `gguf`, `onnx`, `mlx` | gguf, onnx and onnxruntime, mlx-lm (macOS) | GGUF, ONNX and MLX exports |
+| `llama-cpp` | llama-cpp-python | loading a GGUF export in llama.cpp |
 | `vllm`, `sglang` | vllm, sglang | serving backends |
 | `docs` | mkdocs-material, mkdocstrings | building this site |
 | `test` | pytest | the test suite |

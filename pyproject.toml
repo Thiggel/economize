@@ -70,7 +70,10 @@ gguf = ["gguf>=0.17", "numpy>=1.26"]
 llama-cpp = ["economize[gguf]", "llama-cpp-python>=0.3"]
 onnx = ["onnx>=1.17", "onnxruntime>=1.20", "onnxscript>=0.2"]
 mlx = ["mlx-lm>=0.22; sys_platform == 'darwin'"]
-all = ["economize[peft,quant,kernels,train,eval,bench]"]
+# Every extra that installs from wheels next to the stock torch build. Left out: the development tools (test, docs,
+# dev), the serving engines, which pin their own torch build and conflict with each other (vllm, sglang, arctic),
+# and llama-cpp, which compiles llama.cpp from source. tests/unit/test_packaging.py keeps this list complete.
+all = ["economize[peft,quant,kernels,train,eval,bench,gguf,onnx,mlx]"]
 
 [project.scripts]
 economize-lm-eval = "economize.integrations.lm_eval:main"
