@@ -70,6 +70,9 @@
 - Fused slot gathers (tree compaction, speculation adoption) launch on the device of their buffers, so two-GPU
   speculative-speculative decoding with CUDA graphs no longer hits an illegal memory access, and the pointer tables
   that captured graphs read stay alive as long as their buffers.
+- Triton's CPU interpreter (`TRITON_INTERPRET=1`) cannot call libdevice, so the attention kernels (decode,
+  MInference, KIVI) use plain arithmetic for their round-to-nearest helpers there. The MInference kernels pass the
+  interpreter test again.
 
 ## 0.4.0 (2026-11-04)
 
