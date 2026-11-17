@@ -7,7 +7,7 @@ import inspect
 import weakref
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, overload, runtime_checkable
 
 import torch
 from torch import nn
@@ -43,6 +43,18 @@ class DraftModules(Protocol):
     def draft_modules(self) -> dict[str, nn.Module]:
         """The drafter's own modules by qualified name (no shared base-model layers)."""
         ...
+
+
+@overload
+def take_rows(tensor: torch.Tensor, rows: torch.Tensor) -> torch.Tensor: ...
+
+
+@overload
+def take_rows(tensor: None, rows: torch.Tensor) -> None: ...
+
+
+@overload
+def take_rows(tensor: torch.Tensor | None, rows: torch.Tensor) -> torch.Tensor | None: ...
 
 
 def take_rows(tensor: torch.Tensor | None, rows: torch.Tensor) -> torch.Tensor | None:
@@ -223,7 +235,7 @@ class ObserveCosts:
         self.add(columns.sum(1), start)
 
     def reorder(self, rows: torch.Tensor) -> None:
-        self._pending = [(take_rows(t, rows), take_rows(s, rows), f) for t, s, f in self._pending]  # type: ignore[misc]
+        self._pending = [(take_rows(t, rows), take_rows(s, rows), f) for t, s, f in self._pending]
 
     def flush(self, costs: Sequence[CostLog]) -> None:
         """Record every pending pass in the cost log of its row and forget it."""

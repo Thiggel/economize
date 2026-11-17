@@ -54,6 +54,8 @@ class SelfDrafter(AdapterHeadSlicing, Drafter):
     head reads (:class:`~economize.techniques._drafting.HeadInput`).
     """
 
+    technique: SelfDraftStep
+
     def __init__(self, technique: SelfDraftStep, runner: LayerRunner) -> None:
         self.technique = technique
         self.runner = runner
@@ -62,11 +64,11 @@ class SelfDrafter(AdapterHeadSlicing, Drafter):
         self._head: Callable[[torch.Tensor], torch.Tensor] | None = None
 
     @property
-    def layer_span(self) -> tuple[int, int]:  # type: ignore[override]
+    def layer_span(self) -> tuple[int, int]:  # type: ignore[override]  # property over a Drafter attribute
         return self.technique.layer_span
 
     @property
-    def footprint(self) -> LayerFootprint | None:  # type: ignore[override]
+    def footprint(self) -> LayerFootprint | None:  # type: ignore[override]  # property over a Drafter attribute
         return self.technique.footprint
 
     def begin(self, runner: LayerRunner, cache: KVCache, batch_size: int) -> None:

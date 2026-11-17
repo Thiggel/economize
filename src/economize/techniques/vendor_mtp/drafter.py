@@ -172,6 +172,6 @@ class VendorMTPDrafter(Drafter):
             self._cache.reorder(rows.to(self.technique.device))
         self._source = take_rows(self._source, rows)
         self._state = take_rows(self._state, rows)
-        self._committed = [take_rows(t, rows) for t in self._committed]  # type: ignore[misc]
-        self._inputs = [take_rows(t, rows) for t in self._inputs]  # type: ignore[misc]
+        self._committed = [take_rows(t, rows) for t in self._committed]
+        self._inputs = [take_rows(t, rows) for t in self._inputs]
         self._observe_costs.reorder(rows)

@@ -10,7 +10,7 @@ autodiscovery.
 * :mod:`.training`: :class:`StepDrafterDefaults`, the common answers of ``economize.train``'s step protocol, and the
   learning rates of draft-path LoRA factors and layer copies (:data:`LORA_LR`, :data:`BLOCK_LR`).
 * :mod:`.head`: draft heads restricted to a draft vocabulary (:class:`HeadSliceable`, :class:`HeadInput`,
-  :class:`LinearSlice`, :class:`SlicedAdapterHead`, :func:`adapter_head_slice`).
+  :class:`AdapterReadout`, :class:`LinearSlice`, :class:`SlicedAdapterHead`, :func:`adapter_head_slice`).
 * :mod:`.greedy_head`: the greedy choice of a draft head without writing its logits (:class:`GreedyHead`,
   :class:`FusedGreedyHead`, the fused Triton LM-head kernel :func:`greedy_select`, :class:`LogitsGreedyHead`,
   :func:`adapter_greedy_head`).
@@ -43,7 +43,15 @@ from .formats import (
     state_shapes,
 )
 from .greedy_head import FusedGreedyHead, GreedyHead, LogitsGreedyHead, adapter_greedy_head, greedy_select
-from .head import AdapterHeadSlicing, HeadInput, HeadSliceable, LinearSlice, SlicedAdapterHead, adapter_head_slice
+from .head import (
+    AdapterHeadSlicing,
+    AdapterReadout,
+    HeadInput,
+    HeadSliceable,
+    LinearSlice,
+    SlicedAdapterHead,
+    adapter_head_slice,
+)
 from .training import BLOCK_LR, LORA_LR, StepDrafterDefaults
 from .tree_step import tree_step_context
 from .wrapping import (
@@ -59,6 +67,7 @@ __all__ = [
     "BLOCK_LR",
     "LORA_LR",
     "AdapterHeadSlicing",
+    "AdapterReadout",
     "BoundedDrafter",
     "ChainGraphs",
     "CommittedColumns",
