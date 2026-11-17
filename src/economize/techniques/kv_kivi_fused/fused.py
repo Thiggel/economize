@@ -35,6 +35,7 @@ class FusedKIVIConfig(KIVIConfig):
     """
 
     technique: ClassVar[str] = "kivi_fused"
+    packable: ClassVar[bool] = False  # keeps the dense buffers next to the codes
 
     def validate(self, adapter: Any) -> None:
         super().validate(adapter)

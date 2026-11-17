@@ -7,7 +7,7 @@ import triton
 import triton.language as tl
 
 from ._decode_kernels import _accumulate, _online_softmax, _scores
-from ._libdevice import libdevice as _ld
+from ._libdevice import ld as _ld
 
 
 @triton.jit
@@ -170,7 +170,7 @@ def _kivi_block(
     block of values read entirely from one source skips the merge of the two. With ``HAS_RING`` the dense entries
     live in a ring of ``ring`` slots: slot ``s`` is read at ``s % ring``."""
     offs = first + tl.arange(0, BLOCK_N)
-    if HAS_RING:  # noqa: SIM108 (a branch on a constexpr, resolved at compile time)
+    if HAS_RING:  # noqa: SIM108  # a constexpr branch, kept as a statement for triton
         dense = offs % ring
     else:
         dense = offs

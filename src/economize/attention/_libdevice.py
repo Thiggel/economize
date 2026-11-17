@@ -1,50 +1,60 @@
-"""The libdevice functions of the attention kernels.
+"""Correctly rounded float arithmetic for the attention kernels.
 
-Compiled kernels round every step on its own through libdevice's ``*_rn`` functions, so that no two steps contract
-into one fused multiply-add. The Triton interpreter (``TRITON_INTERPRET=1``) cannot call extern functions, and it
-computes in numpy, which rounds every operation on its own anyway, so there the same names are plain arithmetic.
+When the kernels compile, :data:`ld` is triton's CUDA libdevice module: ``mul_rn`` and friends round every step to
+nearest and stop the compiler from fusing a multiply and an add into an FMA, so that every kernel rounds a score
+alike. The Triton interpreter (``TRITON_INTERPRET=1``) runs kernels on numpy and implements no extern function, so
+there :data:`ld` holds the same functions as plain operators; numpy rounds every float32 operation on its own and
+never fuses, which gives the same values.
 """
 
 from __future__ import annotations
 
 import os
-from typing import Any
+from types import ModuleType, SimpleNamespace
+
+import triton
+import triton.language as tl  # noqa: F401  # older interpreters patch the triton.language a jit function sees
+
+__all__ = ["interpreting", "ld"]
 
 
-def _interpreting() -> bool:
-    """Whether Triton runs kernels in its interpreter (the same truthy values as ``triton.knobs``)."""
-    return os.environ.get("TRITON_INTERPRET", "0").lower() in ("1", "true", "on", "yes", "y")
+def interpreting() -> bool:
+    """Whether triton runs kernels in its interpreter (``TRITON_INTERPRET=1`` when triton was imported)."""
+    knobs = getattr(triton, "knobs", None)
+    if knobs is not None:
+        return bool(knobs.runtime.interpret)
+    return os.environ.get("TRITON_INTERPRET", "0") == "1"  # pragma: no cover - triton < 3.4
 
 
-class _Interpreted:
-    """The ``*_rn`` functions as plain arithmetic, for the Triton interpreter."""
-
-    @staticmethod
-    def add_rn(a: Any, b: Any) -> Any:
-        return a + b
-
-    @staticmethod
-    def sub_rn(a: Any, b: Any) -> Any:
-        return a - b
-
-    @staticmethod
-    def mul_rn(a: Any, b: Any) -> Any:
-        return a * b
-
-    @staticmethod
-    def div_rn(a: Any, b: Any) -> Any:
-        return a / b
+@triton.jit
+def _add_rn(a, b):
+    return a + b
 
 
-def _compiled() -> Any:
-    """libdevice of the installed triton (its module moved under ``extra.cuda`` in triton 3)."""
+@triton.jit
+def _sub_rn(a, b):
+    return a - b
+
+
+@triton.jit
+def _mul_rn(a, b):
+    return a * b
+
+
+@triton.jit
+def _div_rn(a, b):
+    return a / b
+
+
+def _libdevice() -> ModuleType | SimpleNamespace:
+    if interpreting():
+        return SimpleNamespace(add_rn=_add_rn, sub_rn=_sub_rn, mul_rn=_mul_rn, div_rn=_div_rn)
     try:
-        from triton.language.extra.cuda import libdevice as compiled
+        from triton.language.extra.cuda import libdevice
     except ImportError:  # pragma: no cover - older triton
-        from triton.language.extra import libdevice as compiled
-    return compiled
+        from triton.language.extra import libdevice
+    return libdevice
 
 
-libdevice: Any = _Interpreted() if _interpreting() else _compiled()
-
-__all__ = ["libdevice"]
+#: ``add_rn``, ``sub_rn``, ``mul_rn`` and ``div_rn`` for ``@triton.jit`` code (see the module docstring).
+ld = _libdevice()

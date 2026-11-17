@@ -51,6 +51,16 @@
   into `recent + headroom` entries and a verify pass into `headroom`, or a `ConfigError` names the headroom.
 - StreamingLLM trims the cache to the window at the end of the prompt pass, so draft steps after the prompt see
   only the sinks and the window, as in the reference (outputs at `cycle_length=1` are unchanged).
+- `kivi` stores its covered layers packed by default (`KIVIConfig(storage="packed")`): `bits`-bit codes, fp16
+  scales and zero points (keys per channel, values per token) and a full-precision ring of `residual_length +
+  headroom` recent entries. The inner cache allocates no dense buffer for these layers, so the cache holds about
+  `bits / 16 + 2 / group_size` of the bf16 bytes (`PackedKIVICache.allocated_bytes`), and the decoded tokens equal
+  those of the simulated storage. Attention kernels that read the `"kivi"` packed format get the codes, others a
+  transient dense copy per layer. `backend_support("kivi")` reports the Transformers path as real.
+  `storage="simulated"` keeps the previous in-place reference with dense buffers; the default falls back to it next
+  to another KV technique on the same cache and under `kivi_fused`. Storages are a registry (`KIVI_STORAGES`,
+  entry-point group `economize.kivi_storages`). The packed storage decodes eagerly (no CUDA graphs) and refuses a
+  cycle that writes past its ring (raise `headroom`) and scales beyond the fp16 range.
 - `import economize` no longer imports `transformers.cache_utils` (which loads `hqq`, `torch._dynamo` and Triton when
   `hqq` is installed); the cache probe runs on first use.
 - The `ECONOMIZE_*` environment variables (`ECONOMIZE_FLASH_PREFILL`, `ECONOMIZE_FLASH_DECODE`,
@@ -70,9 +80,9 @@
 - Fused slot gathers (tree compaction, speculation adoption) launch on the device of their buffers, so two-GPU
   speculative-speculative decoding with CUDA graphs no longer hits an illegal memory access, and the pointer tables
   that captured graphs read stay alive as long as their buffers.
-- Triton's CPU interpreter (`TRITON_INTERPRET=1`) cannot call libdevice, so the attention kernels (decode,
-  MInference, KIVI) use plain arithmetic for their round-to-nearest helpers there. The MInference kernels pass the
-  interpreter test again.
+- The attention kernels run in Triton's CPU interpreter (`TRITON_INTERPRET=1`): the interpreter cannot call
+  libdevice, so the round-to-nearest helpers of the decode, MInference and KIVI kernels are plain operators there,
+  and the Quest kernel no longer masks a block with a scalar bool.
 
 ## 0.4.0 (2026-11-04)
 

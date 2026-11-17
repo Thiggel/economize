@@ -71,10 +71,12 @@ def _quest_split_kernel(
             sel = first < sel_len
             page = tl.load(IDX + b * sib + kvh * sih + first // PAGE, mask=sel, other=-1)
             base = tl.where(sel, page * PAGE + first % PAGE, tail + first - sel_len)
-            ok = (first >= sel_len) | (page >= 0)
+            # lanes of an unselected page (index -1): a lane bound instead of ``& ok``, since the Triton interpreter
+            # gives a block combined with a scalar bool an int32 mask that tl.load rejects
+            lanes = tl.where((first >= sel_len) | (page >= 0), BLOCK_N, 0)
             lane = tl.arange(0, BLOCK_N)
             offs = base + lane
-            in_range = (first + lane < length) & (offs < keys) & ok
+            in_range = (first + lane < length) & (offs < keys) & (lane < lanes)
             if HAS_MASK:
                 vis = _visible(Mask, b, h, qi, offs, r_ok, in_range, smb, smh, smq, sms, MASK_PER_HEAD)
             else:

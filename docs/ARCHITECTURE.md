@@ -440,9 +440,19 @@ positions below the next pass's frontier, so rejected draft queries never count.
 `values` and `get_seq_length` to the inner cache, and rows that hold only padding are ignored. `RowStats` counts, per row, the committed bytes held at the last exact pass and the bytes read over all
 exact passes, with and without compression.
 
-- KIVI simulates quantization in place (quantize, then dequantize in the cache dtype), keys per channel in blocks
-  of `residual_length` tokens and values per token once older than `residual_length`. Scales are float32, so fp16
-  caches do not overflow.
+- KIVI quantizes keys per channel in blocks of `residual_length` tokens and values per token once older than
+  `residual_length`. Its storage is a registry (`KIVI_STORAGES`, `techniques/kv_quant/storage.py`); a new one is
+  a registered factory of the generation's cache. `"packed"` (default, `PackedKIVICache`) keeps no dense buffer
+  for a covered layer: packed codes for every slot, fp16 scales and zero points, and a ring of
+  `residual_length + headroom` full-precision entries (slot `s` at `s % ring`, the trash slot after the ring). It
+  quantizes at the same pass boundaries as the simulated storage, packing from the ring, or for a long prompt pass
+  straight from a transient dense copy. Attention implementations that accept `packed_kv={"kivi"}` get stand-ins
+  carrying a `KIVIPacked` with the codes and the rings for passes of at most `headroom` queries; every other read
+  gets a transient dense copy (dequantized prefix, ring above it). Overwriting an unquantized ring entry and an
+  fp16 scale overflow set device flags that the next pass boundary turns into a `ConfigError`. The packed storage
+  is not graph-safe. `"simulated"` (`KIVICache`) quantizes in place (quantize, then dequantize in the cache dtype)
+  with float32 scales, so fp16 caches do not overflow; it is the storage when another KV technique wraps the
+  same cache.
 - `kivi_fused` subclasses KIVI and also stores the packed codes (8/bits per byte) and fp16 scale and zero point of
   every quantized entry. It attaches them (`economize.attention.attach_packed`) to a view of the key buffer it
   returns, and a kernel registered with `packed_kv={"kivi"}` reads the codes for the quantized prefix of each row and
