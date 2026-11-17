@@ -7,10 +7,7 @@ import torch
 import triton
 import triton.language as tl
 
-try:
-    from triton.language.extra.cuda import libdevice as _ld
-except ImportError:  # older triton
-    from triton.language.extra import libdevice as _ld
+from ._libdevice import ld as _ld
 
 #: The ``tl`` dtype the kernels compute ``tl.dot`` in, per query dtype.
 _DOT = {torch.bfloat16: tl.bfloat16, torch.float16: tl.float16, torch.float32: tl.float32}
