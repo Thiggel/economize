@@ -34,10 +34,7 @@ from ...decoding.config import DecodeConfig
 from ...errors import ConfigError
 from ...train.objective import Batch, ObjectiveOutput, TeacherOutputs, register_objective
 from ...validation import check_positive
-from ..jump.config import JumpConfig
-from ..jump.objective import JumpRollout
-from ..jump.predictor import PREDICTORS, Predictor
-from ..jump.technique import JumpTechnique
+from ._cross_layer import PREDICTORS, CrossLayerConfig, CrossLayerRollout, CrossLayerTechnique, Predictor
 from .drafted import drafted_cost_summary
 
 if TYPE_CHECKING:
@@ -65,7 +62,7 @@ class EmbeddingPredictor(Predictor):
 
 
 @dataclass(frozen=True)
-class DmtdConfig(JumpConfig):
+class DmtdConfig(CrossLayerConfig):
     """Hyperparameters of DMTD.
 
     Attributes:
@@ -102,7 +99,7 @@ class DmtdConfig(JumpConfig):
         if self.target_layer is None or self.source_layer is None:
             if (self.target_layer, self.source_layer) != (None, None):
                 raise ConfigError("set both target_layer and source_layer, or neither (DMTD resolves them)")
-            dataclasses.replace(self, target_layer=0, source_layer=0)  # the jump checks of the other fields
+            dataclasses.replace(self, target_layer=0, source_layer=0)  # the base checks of the other fields
             return
         super().__post_init__()
 
@@ -118,11 +115,11 @@ class DmtdConfig(JumpConfig):
         return dataclasses.replace(self, target_layer=m, source_layer=m)
 
     def validate(self, adapter: ArchAdapter) -> None:
-        JumpConfig.validate(self.resolved(adapter.num_layers), adapter)
+        CrossLayerConfig.validate(self.resolved(adapter.num_layers), adapter)
 
 
 @register_technique
-class DmtdTechnique(JumpTechnique):
+class DmtdTechnique(CrossLayerTechnique):
     """DMTD: the late layers decode several tokens per cycle from their embeddings, and the drafts are kept.
 
     The early and middle layers refill their K/V at the start of the next cycle (see the module docstring).
@@ -158,8 +155,8 @@ class DmtdTechnique(JumpTechnique):
 
 @register_objective("dmtd", default_for=(DmtdTechnique.name,))
 @dataclass
-class DmtdRollout(JumpRollout):
-    """:class:`~economize.techniques.jump.JumpRollout` with DMTD's cycle: rollouts of ``horizon = tau - 1`` draft
+class DmtdRollout(CrossLayerRollout):
+    """The base drafter's rollout objective with DMTD's cycle: rollouts of ``horizon = tau - 1`` draft
     steps every ``stride = tau`` tokens (``None``: from the technique's :attr:`DmtdConfig.cycle_length`) and no state
     loss (the embedding predictor has nothing to fit)."""
 
