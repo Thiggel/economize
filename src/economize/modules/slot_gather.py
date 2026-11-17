@@ -30,11 +30,15 @@ __all__ = ["SLOT_GATHER", "gather_slots", "gather_slots_reference"]
 #: it off.
 SLOT_GATHER = os.environ.get("ECONOMIZE_SLOT_GATHER", "1") != "0"
 
+#: A buffer's identity for the pointer tables: its address, shape and dtype.
+_BufferKey = tuple[int, tuple[int, ...], torch.dtype]
+#: A pointer table's key: the device it lives on and the identities of its buffers.
+_TableKey = tuple[torch.device, tuple[_BufferKey, ...]]
 #: Pointer tables kept on the device, keyed by the device and the buffers' addresses and shapes. Static caches keep
 #: their buffers, so a decoder reuses one table for its whole life. A CUDA graph that recorded a gather reads its
 #: table at replay without holding a reference to it, so a table lives exactly as long as its buffers: it is dropped
 #: when the first of them is garbage collected, never earlier (a size cap would free tables that live graphs replay).
-_TABLES: dict[tuple[Any, ...], torch.Tensor] = {}
+_TABLES: dict[_TableKey, torch.Tensor] = {}
 
 
 def gather_slots_reference(buffer: torch.Tensor, rows: torch.Tensor, src: torch.Tensor, dst: torch.Tensor) -> None:
@@ -107,7 +111,7 @@ def _triton_available() -> bool:
 
 def _table(buffers: list[torch.Tensor], device: torch.device) -> torch.Tensor | None:
     """``[N, 4]`` int64 on ``device``: base address, heads, slots and 32-bit words per slot of every buffer."""
-    key = (device, *((b.data_ptr(), tuple(b.shape), b.dtype) for b in buffers))
+    key: _TableKey = (device, tuple((b.data_ptr(), tuple(b.shape), b.dtype) for b in buffers))
     table = _TABLES.get(key)
     if table is not None:
         return table
@@ -121,7 +125,7 @@ def _table(buffers: list[torch.Tensor], device: torch.device) -> torch.Tensor | 
     return table
 
 
-def _evict(key: tuple[Any, ...], table: torch.Tensor) -> None:
+def _evict(key: _TableKey, table: torch.Tensor) -> None:
     """Drop ``key``'s table once one of its buffers dies, unless a newer buffer set at the same addresses rebuilt it."""
     if _TABLES.get(key) is table:
         del _TABLES[key]

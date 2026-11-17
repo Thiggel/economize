@@ -95,7 +95,7 @@ def trainable_copy(layer: nn.Module, dtype: torch.dtype | None = torch.float32,
     Raises:
         ConfigError: A weight is neither a float tensor nor dequantizable.
     """
-    memo: dict[int, Any] = _dense_linears(layer)
+    memo: dict[int, object] = dict(_dense_linears(layer))  # copy.deepcopy's memo: originals by id -> stand-ins
     replaced = {id(p) for module in layer.modules() if id(module) in memo for p in module.parameters()}
     for name, param in layer.named_parameters():
         if id(param) in replaced:

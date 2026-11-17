@@ -20,7 +20,7 @@ metadata helpers. A class whose instances are :class:`~economize.EfficientModel`
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from torch import nn
 
@@ -34,6 +34,9 @@ from ..core.hub import (
     read_meta,
 )
 from ..core.serialization import CONFIG_FILE, teacher_fingerprint
+
+if TYPE_CHECKING:
+    from ..core.model import EfficientModel
 
 __all__ = [
     "CONFIG_FILE",
@@ -54,18 +57,18 @@ __all__ = [
 class HubModel(EconomizeHubMixin):
     """Hub view of an existing :class:`~economize.EfficientModel`: ``HubModel(model).push_to_hub(repo_id)``."""
 
-    def __init__(self, model: Any) -> None:
+    def __init__(self, model: EfficientModel) -> None:
         self.model = model
 
-    def _economize_model(self) -> Any:
+    def _economize_model(self) -> EfficientModel:
         return self.model
 
 
-def _view(model: Any) -> EconomizeHubMixin:
+def _view(model: EfficientModel) -> EconomizeHubMixin:
     return model if isinstance(model, EconomizeHubMixin) else HubModel(model)
 
 
-def save_pretrained(model: Any, save_directory: str | Path, **kwargs: Any) -> str | None:
+def save_pretrained(model: EfficientModel, save_directory: str | Path, **kwargs: Any) -> str | None:
     """Write ``model``'s techniques and a model card to ``save_directory``.
 
     ``kwargs`` are those of ``ModelHubMixin.save_pretrained`` (``push_to_hub``, ``repo_id``, ``model_card_kwargs``,
@@ -74,7 +77,7 @@ def save_pretrained(model: Any, save_directory: str | Path, **kwargs: Any) -> st
     return _view(model).save_pretrained(save_directory, **kwargs)
 
 
-def push_to_hub(model: Any, repo_id: str, **kwargs: Any) -> str:
+def push_to_hub(model: EfficientModel, repo_id: str, **kwargs: Any) -> str:
     """Upload ``model``'s techniques and a model card to the Hub repo ``repo_id`` in one commit.
 
     ``kwargs`` are those of ``ModelHubMixin.push_to_hub`` (``private``, ``token``, ``branch``, ``create_pr``,
@@ -83,7 +86,9 @@ def push_to_hub(model: Any, repo_id: str, **kwargs: Any) -> str:
     return _view(model).push_to_hub(repo_id, **kwargs)
 
 
-def from_pretrained(name_or_path: str | Path, base_model: str | nn.Module | None = None, **kwargs: Any) -> Any:
+def from_pretrained(
+    name_or_path: str | Path, base_model: str | nn.Module | None = None, **kwargs: Any
+) -> EfficientModel:
     """Load an economize checkpoint from a local folder or a Hub repo and attach it to its base model.
 
     Args:

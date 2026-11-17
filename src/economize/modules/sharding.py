@@ -18,12 +18,18 @@ split model and back.
 from __future__ import annotations
 
 import functools
-from typing import Any
+from typing import TYPE_CHECKING, TypeGuard, cast
 
 import torch
 from torch import nn
 
 from ..errors import ConfigError
+
+if TYPE_CHECKING:
+    from torch.distributed import ProcessGroup
+    from torch.distributed.device_mesh import DeviceMesh
+    from torch.distributed.tensor import DTensor, Shard
+    from transformers.distributed.tensor_parallel import TensorParallelLayer
 
 __all__ = [
     "check_adaptable_split",
@@ -48,7 +54,7 @@ def _dtensor_class() -> type | None:
     return DTensor
 
 
-def is_sharded(tensor: object) -> bool:
+def is_sharded(tensor: object) -> TypeGuard[DTensor]:
     """Whether ``tensor`` is a ``DTensor`` (a parameter of a split model)."""
     cls = _dtensor_class()
     return cls is not None and isinstance(tensor, cls)
@@ -56,10 +62,10 @@ def is_sharded(tensor: object) -> bool:
 
 def full_tensor(tensor: torch.Tensor) -> torch.Tensor:
     """The whole tensor of a ``DTensor`` (gathered from all processes, a collective call), else ``tensor``."""
-    return tensor.full_tensor() if is_sharded(tensor) else tensor  # type: ignore[attr-defined]
+    return tensor.full_tensor() if is_sharded(tensor) else tensor
 
 
-def clone_sharded(tensor: torch.Tensor) -> torch.Tensor:
+def clone_sharded(tensor: DTensor) -> DTensor:
     """A copy of the ``DTensor`` ``tensor`` with a clone of its local shard (no communication).
 
     ``copy.deepcopy`` of a loaded ``DTensor`` can fail: transformers cuts the local shard of a process other than
@@ -67,12 +73,11 @@ def clone_sharded(tensor: torch.Tensor) -> torch.Tensor:
     """
     from torch.distributed.tensor import DTensor
 
-    return DTensor.from_local(tensor.to_local().detach().clone(), tensor.device_mesh,  # type: ignore[attr-defined]
-                              tensor.placements, run_check=False, shape=tensor.shape,  # type: ignore[attr-defined]
-                              stride=tensor.stride())
+    return DTensor.from_local(tensor.to_local().detach().clone(), tensor.device_mesh, tensor.placements,
+                              run_check=False, shape=tensor.shape, stride=tensor.stride())
 
 
-def shard_like(value: torch.Tensor, like: torch.Tensor) -> torch.Tensor:
+def shard_like(value: torch.Tensor, like: DTensor) -> DTensor:
     """``value`` (a whole tensor) as a ``DTensor`` with the mesh and placements of the ``DTensor`` ``like``.
 
     Every process cuts its own shard out of its copy of ``value`` (no communication), so ``value`` must be the same
@@ -80,19 +85,22 @@ def shard_like(value: torch.Tensor, like: torch.Tensor) -> torch.Tensor:
     """
     from torch.distributed.tensor import distribute_tensor
 
-    return distribute_tensor(value.to(device=like.device), like.device_mesh, like.placements,  # type: ignore[attr-defined]
-                             src_data_rank=None)
+    return distribute_tensor(value.to(device=like.device), like.device_mesh, like.placements, src_data_rank=None)
 
 
 def shard_state_like(state: dict[str, torch.Tensor], module: nn.Module) -> dict[str, torch.Tensor]:
     """``state`` (whole tensors, e.g. from a checkpoint) with every entry whose parameter or buffer in ``module`` is a
     ``DTensor`` cut into that tensor's local shard (see :func:`shard_like`), ready for ``module.load_state_dict``."""
     own = module.state_dict()
-    return {key: shard_like(value, own[key]) if key in own and is_sharded(own[key]) and not is_sharded(value)
-            else value for key, value in state.items()}
+    return {key: _shard_entry(value, own.get(key)) for key, value in state.items()}
 
 
-def model_tensor_parallel_group(model: nn.Module) -> Any:
+def _shard_entry(value: torch.Tensor, like: torch.Tensor | None) -> torch.Tensor:
+    """``value`` cut like ``like`` when ``like`` is a ``DTensor`` and ``value`` is whole, else ``value``."""
+    return shard_like(value, like) if is_sharded(like) and not is_sharded(value) else value
+
+
+def model_tensor_parallel_group(model: nn.Module) -> ProcessGroup | None:
     """The tensor-parallel process group of a split model (that of its first ``DTensor`` parameter), ``None`` for a
     model without ``DTensor`` parameters."""
     for param in model.parameters():
@@ -101,9 +109,9 @@ def model_tensor_parallel_group(model: nn.Module) -> Any:
     return None
 
 
-def tensor_parallel_group(tensor: torch.Tensor) -> Any:
+def tensor_parallel_group(tensor: DTensor) -> ProcessGroup:
     """The process group a ``DTensor`` is sharded over (the ``"tp"`` dimension of a multi-dimensional mesh)."""
-    mesh = tensor.device_mesh  # type: ignore[attr-defined]
+    mesh = tensor.device_mesh
     return mesh.get_group() if mesh.ndim == 1 else mesh.get_group("tp")
 
 
@@ -112,12 +120,13 @@ def sharded_dim(tensor: torch.Tensor) -> int | None:
     a replicated or plain tensor."""
     if not is_sharded(tensor):
         return None
-    mesh = tensor.device_mesh  # type: ignore[attr-defined]
+    mesh = tensor.device_mesh
     index = 0 if mesh.ndim == 1 else list(mesh.mesh_dim_names or ()).index("tp")
-    placement = tensor.placements[index]  # type: ignore[attr-defined]
+    placement = tensor.placements[index]
     if not placement.is_shard():
         return None
-    return int(placement.dim) % tensor.ndim
+    # is_shard() holds only for Shard and its strided variant, both of which have a ``dim``.
+    return int(cast("Shard", placement).dim) % tensor.ndim
 
 
 def check_adaptable_split(model: nn.Module, tensor_parallel_size: int, adaptation: str) -> None:
@@ -137,7 +146,7 @@ def check_adaptable_split(model: nn.Module, tensor_parallel_size: int, adaptatio
     )
 
 
-def replicate_from_first_rank(module: nn.Module, group: Any) -> None:
+def replicate_from_first_rank(module: nn.Module, group: ProcessGroup) -> None:
     """Overwrite the plain (unsharded) parameters and buffers of ``module`` with those of the first process of
     ``group`` (a collective call). ``DTensor`` parameters are left alone: they are sharded consistently already."""
     first = torch.distributed.get_global_rank(group, 0)
@@ -147,7 +156,7 @@ def replicate_from_first_rank(module: nn.Module, group: Any) -> None:
                 torch.distributed.broadcast(tensor.data, src=first, group=group)
 
 
-def _tensor_parallel_forward(module: nn.Module) -> tuple[Any, Any, dict[str, Any]] | None:
+def _tensor_parallel_forward(module: nn.Module) -> tuple[TensorParallelLayer, DeviceMesh, dict[str, object]] | None:
     """The transformers parallel style, mesh and further arguments of ``module``'s sharded forward, ``None`` if the
     module keeps its class's forward or its forward is bound to the module itself.
 

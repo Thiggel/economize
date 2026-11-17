@@ -54,7 +54,7 @@ class TechniqueConfig:
         return cls(**{k: tuple(v) if isinstance(v, list) else v for k, v in data.items()})
 
 
-def _to_json(value: Any) -> Any:
+def _to_json(value: object) -> object:
     return list(value) if isinstance(value, tuple) else value
 
 
