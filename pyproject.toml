@@ -116,9 +116,9 @@ markers = [
     "gpu: needs a CUDA device (run with -m gpu)",
 ]
 # economize's own deprecation shims (``economize._deprecation.warn_moved``) fail the suite; only the shim tests
-# (tests/unit/test_compat_tskip.py, tests/train/test_technique_objective.py) reach them, under ``pytest.warns``.
+# (the tests of economize.compat and tests/train/test_technique_objective.py) reach them, under ``pytest.warns``.
 filterwarnings = [
-    'error:(economize\..*|CostLog\.to_tskip\(\)) is deprecated:DeprecationWarning',
+    'error:economize\..* is deprecated:DeprecationWarning',
 ]
 
 # Lint gate: `uvx ruff@0.16.10 check src tests` (docs/CONTRIBUTING.md; pinned, as in the `dev` extra). ruff is used as a linter only; the code is not

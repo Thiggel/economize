@@ -28,9 +28,9 @@ from .draft_layer_worker import (
     GraphedEagle3Worker,
 )
 from .drafters import DRAFTER_WORKERS, DrafterWorkers, drafter_workers, speculative_decoder
-from .graphed import GraphedJumpWorker, GraphedLinkedSpeculativeDecoder, GraphedSelfSpeculativeDecoder
+from .graphed import GraphedJumpWorker, GraphedLinkedSpeculativeDecoder, GraphedSelfSpeculativeDecoder  # noqa: F401
 from .linked import CapturingTargetWorker, LinkedDrafter, LinkedSpeculativeDecoder, LinkedWorker
-from .self_drafting import JumpWorker, SelfSpeculativeDecoder
+from .self_drafting import JumpWorker, SelfSpeculativeDecoder  # noqa: F401  (importable, unlisted with their technique)
 from .ssd import AsyncSpeculativeDecoder, SSDConfig, SSDResult
 from .workers import ModelWorker, Speculation, SpeculationWorker, Spine, TargetWorker
 
@@ -48,17 +48,13 @@ __all__ = [
     "GraphedDraftLayerWorker",
     "GraphedEagle3SpeculativeDecoder",
     "GraphedEagle3Worker",
-    "GraphedJumpWorker",
     "GraphedLinkedSpeculativeDecoder",
-    "GraphedSelfSpeculativeDecoder",
-    "JumpWorker",
     "LinkedDrafter",
     "LinkedSpeculativeDecoder",
     "LinkedWorker",
     "ModelWorker",
     "SSDConfig",
     "SSDResult",
-    "SelfSpeculativeDecoder",
     "Speculation",
     "SpeculationWorker",
     "Spine",

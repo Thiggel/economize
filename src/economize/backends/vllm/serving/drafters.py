@@ -90,8 +90,8 @@ def _model_spec(builder: PlanBuilder, method: str, drafter: str | Path | None, *
 
 #: Why the vLLM and SGLang exports refuse a drafter quantized with a kernel backend (``{engine}`` is the engine).
 DRAFT_QUANT_REASON = (
-    "the drafter exports ({engine}'s EAGLE-3, Medusa and DFlash heads, economize's jump plugin) write dense float "
-    "weights, and {engine} has no checkpoint format economize writes for a quantized hidden-state drafter; "
+    "the drafter exports ({engine}'s EAGLE-3, Medusa and DFlash heads, economize's self-drafter plugin) write dense "
+    "float weights, and {engine} has no checkpoint format economize writes for a quantized hidden-state drafter; "
     "backend='fake' serves the rounded drafter dense (simulated), and a separate draft LM is quantized with "
     "quant on the draft model itself"
 )

@@ -6,5 +6,3 @@ Decoding across several devices.
     options:
       filters:
         - "!^_"
-        - "!JumpWorker$"
-        - "!SelfSpeculativeDecoder$"

@@ -253,9 +253,10 @@ the simulated paths remain as explicit references that `economize.backend_suppor
 
 ### Removed
 
-- The research-code names deprecated in 0.3.0 at their old paths: `economize.techniques.early_exit.formats`, the `Tskip*` names of `techniques.medusa.formats` and
-  `techniques._drafting`, and `CostLog.to_tskip()`. They live in `economize.compat.tskip` (`cost_events(log)` replaces
-  `to_tskip`). The EAGLE-3 names in `techniques.eagle3.formats` still warn.
+- The research-code checkpoint readers and cost-log export deprecated in 0.3.0 at their old paths
+  (`economize.techniques.early_exit.formats`, the research-code names of `techniques.medusa.formats` and
+  `techniques._drafting`, and the research-code export of `CostLog`). They live in `economize.compat`
+  (`cost_events(log)` replaces the export). The EAGLE-3 names in `techniques.eagle3.formats` still warn.
 
 ## 0.3.2 (2026-10-11)
 
