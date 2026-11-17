@@ -299,7 +299,7 @@ class HiddenTransferDrafter(Drafter):
 
     def reorder(self, rows: torch.Tensor) -> None:
         if self._states is not None:
-            self._states = {layer: cast(torch.Tensor, take_rows(h, rows)) for layer, h in self._states.items()}
+            self._states = {layer: take_rows(h, rows) for layer, h in self._states.items()}
 
     def draft_capacity(self, cycle_length: int) -> int:
         return max(0, min(cycle_length - 1, self.technique.num_steps))

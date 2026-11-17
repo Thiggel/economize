@@ -52,6 +52,8 @@ class JumpDrafter(AdapterHeadSlicing, BoundedDrafter, ChainGraphs):
     every exact pass as :data:`~economize.decoding.CostKind.DRAFT_OBSERVE` events of the module ``"jump_predictor"``.
     """
 
+    technique: JumpTechnique
+
     def __init__(self, technique: JumpTechnique, runner: LayerRunner) -> None:
         self.technique = technique
         self.runner = runner
@@ -82,7 +84,7 @@ class JumpDrafter(AdapterHeadSlicing, BoundedDrafter, ChainGraphs):
         return tuple(sorted({*self.source_layers, self.technique.target_layer, *memory}))
 
     @property
-    def streams_prompt(self) -> bool:  # type: ignore[override]
+    def streams_prompt(self) -> bool:  # type: ignore[override]  # property over a Drafter attribute
         """Without a :class:`CachedPredictor` the drafter reads the last accepted token's states alone; a cached
         predictor fills its memory from every prompt position."""
         return self._predictor is None
@@ -213,7 +215,7 @@ class JumpDrafter(AdapterHeadSlicing, BoundedDrafter, ChainGraphs):
             return
         target = self._buffers.setdefault(len(rows), {}) if self._step_fn.enabled else {}
         for layer, s in self._states.items():
-            self._put(target, layer, take_rows(s, rows))  # type: ignore[arg-type]
+            self._put(target, layer, take_rows(s, rows))
         self._states = target
 
     def _put(self, states: dict[int, torch.Tensor], layer: int, value: torch.Tensor) -> None:

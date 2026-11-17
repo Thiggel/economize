@@ -13,7 +13,7 @@ vocabulary only (FR-Spec's saving on large vocabularies).
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Protocol, TypeGuard, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, TypeGuard, cast, runtime_checkable
 
 import torch
 import torch.nn.functional as F
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from .drafters import GraphedStep
     from .greedy_head import GreedyHead
 
-__all__ = ["AdapterHeadSlicing", "HeadInput", "HeadSliceable", "LinearSlice", "SlicedAdapterHead",
+__all__ = ["AdapterHeadSlicing", "AdapterReadout", "HeadInput", "HeadSliceable", "LinearSlice", "SlicedAdapterHead",
            "adapter_head_slice"]
 
 #: A head on draft-path states ``[..., d]`` that returns logits ``[..., K]`` over a token subset.
@@ -109,6 +109,18 @@ class SlicedAdapterHead:
         return self.transform(self.rows(self.norm(hidden.to(self.device))))
 
 
+class AdapterReadout(Protocol):
+    """The technique of an :class:`AdapterHeadSlicing` drafter: its logits are the model's final norm and LM head
+    (read through :attr:`adapter`) applied to the draft path's output."""
+
+    @property
+    def adapter(self) -> ArchAdapter: ...
+
+    def logits(self, hidden: torch.Tensor) -> torch.Tensor:
+        """Next-token logits from the draft-path hidden states."""
+        ...
+
+
 class AdapterHeadSlicing:
     """Mixin of a drafter whose ``technique`` reads out through the model's final norm and LM head: it makes the
     drafter :class:`HeadSliceable` when the technique is a :class:`HeadInput`.
@@ -117,7 +129,7 @@ class AdapterHeadSlicing:
     the full head once enabled) and ``_head = None``, and reads its logits with :meth:`_draft_logits`.
     """
 
-    technique: Any
+    technique: AdapterReadout
     _step_fn: GraphedStep
     _head: HeadFn | None
 
@@ -132,15 +144,15 @@ class AdapterHeadSlicing:
 
     def _draft_logits(self, hidden: torch.Tensor) -> torch.Tensor:
         """Float logits ``[B, V]`` (or ``[B, K]`` once sliced) of the draft-path output ``[B, 1, d]``."""
-        if self._head is not None:
-            return self._head(self.technique.head_input(hidden))[:, 0].float()
+        if self._head is not None:  # slice_head sets a head only for a HeadInput technique
+            return self._head(cast(HeadInput, self.technique).head_input(hidden))[:, 0].float()
         return self.technique.logits(hidden)[:, 0].float()
 
     def _tree_logits(self, hidden: torch.Tensor) -> torch.Tensor:
         """Float logits ``[B, W, V]`` (or ``[B, W, K]`` once sliced) of the draft-path outputs ``[B, W, d]`` of a tree
         draft step."""
-        if self._head is not None:
-            return self._head(self.technique.head_input(hidden)).float()
+        if self._head is not None:  # slice_head sets a head only for a HeadInput technique
+            return self._head(cast(HeadInput, self.technique).head_input(hidden)).float()
         return self.technique.logits(hidden).float()
 
     def greedy_head(self, fused: bool = True) -> GreedyHead:
