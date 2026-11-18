@@ -37,6 +37,7 @@ from torch import nn
 
 from ...core.config import TechniqueConfig
 from ...core.technique import Capability, Technique
+from ...errors import ConfigError
 from ...modules.norm import rms_normalize
 from ...runtime import current_phase
 from ...runtime.policy import Decision, LayerAction, LayerPolicy, Route
@@ -128,7 +129,7 @@ class DepthMeter:
             elif isinstance(value, int) and value == 0:
                 continue
             else:
-                raise ValueError("per-row counts need a [B] tensor per column (or 0)")
+                raise ConfigError("per-row counts need a [B] tensor per column (or 0)")
 
     def add(self, name: str, value: torch.Tensor | float, rows: torch.Tensor | None = None) -> None:
         """Add ``value`` to the counter ``name``: a number, or a ``[B]`` tensor of per-row values, kept per row
