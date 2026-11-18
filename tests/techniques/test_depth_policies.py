@@ -16,6 +16,7 @@ import economize
 from economize import DecodeConfig
 from economize.errors import ConfigError
 from economize.runtime import LayerPolicy, phase
+from economize.runtime.phase import current_phase
 from economize.techniques.dynamic_depth import (
     CalmConfig,
     DepthMeter,
@@ -27,6 +28,7 @@ from economize.techniques.dynamic_depth import (
     redundant_layers,
     top_fraction,
 )
+from economize.techniques.dynamic_depth.calm import SoftmaxConfidence
 from helpers import VOCAB, make_tiny_model, perturb, reference_greedy
 
 PREFIX, TOTAL, LAYERS = 12, 40, 6
@@ -212,7 +214,7 @@ def test_mechanism_skips_layers(config: object, needs_noise: bool) -> None:
     if config.technique == "skipdecode":
         assert summary["kv_fill_layer_tokens"] == 0
     elif config.technique in ("gateskip", "mod", "flexidepth", "calm"):
-        assert summary["kv_fill_layer_tokens"] == summary["skipped_layer_tokens"]
+        assert summary["kv_fill_layer_tokens"] >= summary["skipped_layer_tokens"]  # a route fills every token
     if config.technique == "calm":
         assert summary["exits"] > 0
         assert summary.get("confidence_head_tokens", 0) == 0  # the state and classifier measures need no head
@@ -486,3 +488,62 @@ def test_layer_policy_reorder_is_a_no_op_by_default() -> None:
             return None
 
     RunAll().reorder(torch.tensor([0]))
+
+
+def _count_decode_layer_tokens(monkeypatch: pytest.MonkeyPatch, model: economize.EfficientModel) -> list[int]:
+    """Record the tokens every decode-phase layer call computes (one-token steps carry no padding)."""
+    computed: list[int] = []
+    adapter = model.runner.adapter
+    original = adapter.call_layer
+
+    def call_layer(index: int, layer: object, hidden: torch.Tensor, ctx: object) -> torch.Tensor:
+        if current_phase() == "decode":
+            computed.append(hidden.shape[0] * hidden.shape[1])
+        return original(index, layer, hidden, ctx)
+
+    monkeypatch.setattr(adapter, "call_layer", call_layer)
+    return computed
+
+
+def test_batched_exits_count_only_layers_no_row_computes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """In a batched one-token step a layer that any row runs is computed for every row (review B2 #9): the meter
+    counts those tokens as executed, per row and for the batch, and a row's cost summary subtracts its own skips."""
+    model = _model(1)
+    computed = _count_decode_layer_tokens(monkeypatch, model)
+    prompts, lengths = _prompts(), [3, 16, 9]
+    results = model.decode_batch(prompts, lengths)
+    technique = model.techniques["calm"]
+    batch = technique.depth_stats()
+    decode = batch["phases"]["decode"]
+    assert decode["ran"] == sum(computed)
+    assert decode["ran"] < decode["entered"] and batch["padded_layer_tokens"] > 0
+    rows = [technique.depth_stats(b) for b in range(len(prompts))]
+    for key in ("policy_layer_tokens", "executed_layer_tokens", "skipped_layer_tokens", "kv_fill_layer_tokens",
+                "padded_layer_tokens", "exits", "confidence_head_tokens"):
+        assert sum(row.get(key, 0) for row in rows) == batch.get(key, 0), key
+    for b, result in enumerate(results):
+        assert result.row == b
+        summary = technique.cost_summary(result)
+        assert summary["skipped_layer_tokens"] == rows[b]["skipped_layer_tokens"]
+        skipped = rows[b]["skipped_layer_tokens"]
+        assert summary["effective_layer_tokens"] == result.cost_summary()["layer_tokens"] - skipped
+    with pytest.raises(IndexError):
+        technique.depth_stats(len(prompts))
+
+
+def test_calm_softmax_applies_the_head_to_live_tokens_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The confidence head runs on the tokens that have not exited (review B3), so the counted head tokens are the
+    head's real work."""
+    head_tokens: list[int] = []
+    original = SoftmaxConfidence.__call__
+
+    def measure(self: SoftmaxConfidence, index: int, x: torch.Tensor, out: torch.Tensor) -> torch.Tensor:
+        head_tokens.append(out.shape[0] * out.shape[1])
+        return original(self, index, x, out)
+
+    monkeypatch.setattr(SoftmaxConfidence, "__call__", measure)
+    model = economize.apply(make_tiny_model(), CalmConfig(threshold=0.3))
+    model.decode_batch(_prompts(), [6, 10, 8])
+    stats = model.techniques["calm"].depth_stats()
+    assert stats["exits"] > 0
+    assert stats["confidence_head_tokens"] == sum(head_tokens)

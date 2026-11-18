@@ -75,8 +75,13 @@ attached KV techniques in recipe order, so `kivi` composes with `kv_evict` (but 
 
 **Cost accounting.** `DepthTechnique.cost_summary(result)` adds the policy's `DepthMeter` to the result's cost
 summary: `entered`, `ran` and `kv_filled` layer-token counts per phase and layer, `skipped_layer_tokens`,
-`kv_fill_layer_tokens` (layers that only computed K/V), `effective_layer_tokens` and
-`relative_effective_layer_tokens` (relative to plain decoding of the same output). `KVCacheTechnique.cost_summary`
+`kv_fill_layer_tokens` (K/V projections computed outside a full layer call), `effective_layer_tokens` and
+`relative_effective_layer_tokens` (relative to plain decoding of the same output). The counts are what the pass
+computed: in a batch a routed layer computes the same number of columns in every row, so a token that wanted to
+skip while another row of the pass ran the layer counts as executed (and in `padded_layer_tokens`; in a batched
+one-token step a per-token exit therefore saves compute only when every row exits). The meter keeps the counts per
+row of the batch as well: `cost_summary(result)` of a `decode_batch` result subtracts that row's own skips
+(`result.row`), and `depth_stats(row)` returns one row's counts. `KVCacheTechnique.cost_summary`
 and `kv_stats(row)` report, per row, `kv_bytes` (committed entries held at the last exact pass), `kv_bytes_read`
 (summed over exact passes), both again without compression (`*_full`), `kv_passes` and `kv_compression`. KIVI
 counts `bits / 8` bytes per quantized element plus an fp16 scale and zero point per group, fp8 one byte per
