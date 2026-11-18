@@ -23,6 +23,7 @@ another order.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Callable, Sequence
 from typing import Any, cast
 
@@ -55,17 +56,24 @@ def _drafts(model: Any, decoding: Any) -> bool:
     return getattr(model, "drafting_technique", None) is not None and getattr(decoding, "cycle_length", 1) > 1
 
 
-def _check_sampling(model: Any, decoding: Any) -> None:
-    """Sampling with a drafter needs a verifier that accepts stochastic selectors. The decoding loop checks this
-    too; checking here fails before the prompt is streamed and names the sampling verifiers."""
+def _sampling_decoding(model: Any, decoding: Any) -> Any:
+    """The decoding options for ``do_sample=True``.
+
+    ``transformers``' ``pipeline("text-generation")`` and many generation configs sample by default. A drafting
+    model whose verifier was left implicit then verifies with lossless speculative sampling (the ``"rejection"``
+    verifier), which draws tokens from the same distribution as sampling without drafts. A verifier named
+    explicitly is kept, and one that needs a deterministic selector fails here, before the prompt is streamed.
+    """
     if not _drafts(model, decoding):
-        return
-    name = decoding.verifier_name
-    if VERIFIERS.get(name).requires_greedy:
-        raise ConfigError(
-            f"do_sample=True cannot be verified by the {name!r} verifier; use a sampling verifier such as "
-            "DecodeConfig(verifier='rejection') for lossless speculative sampling, or DecodeConfig(lossless=False)"
-        )
+        return decoding
+    if not VERIFIERS.get(decoding.verifier_name).requires_greedy:
+        return decoding
+    if decoding.verifier is None and decoding.lossless is not False:
+        return dataclasses.replace(decoding, verifier="rejection")
+    raise ConfigError(
+        f"do_sample=True cannot be verified by the {decoding.verifier_name!r} verifier; use a sampling verifier "
+        "such as DecodeConfig(verifier='rejection') for lossless speculative sampling, or DecodeConfig(lossless=False)"
+    )
 
 
 class EconomizeGenerate:
@@ -107,7 +115,7 @@ class EconomizeGenerate:
         decoding = decoding or self.decoding or getattr(self.model, "decoding", None)
         do_sample = bool(getattr(config, "do_sample", False))
         if do_sample:
-            _check_sampling(self.model, decoding)
+            decoding = _sampling_decoding(self.model, decoding)
         batch, width = input_ids.shape
         if self.streamer is not None:
             if batch != 1:

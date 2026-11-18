@@ -226,7 +226,18 @@ def test_right_padding_and_streamer_batch_raise(base: torch.nn.Module) -> None:
 
 def test_sampling_with_greedy_verifier_raises(base: torch.nn.Module) -> None:
     with pytest.raises(ConfigError, match="rejection"):
-        generate(FakeEfficientModel(base, drafting=True), _prompt(), max_new_tokens=4, do_sample=True)
+        generate(FakeEfficientModel(base, drafting=True, verifier="greedy"), _prompt(), max_new_tokens=4,
+                 do_sample=True)
+
+
+def test_sampling_with_an_implicit_verifier_uses_rejection_sampling(base: torch.nn.Module) -> None:
+    """``pipeline("text-generation")`` samples by default; a drafter without a named verifier must still run."""
+    model = FakeEfficientModel(base, drafting=True, verifier=None)
+    out = generate(model, _prompt(), max_new_tokens=4, do_sample=True)
+    assert out.shape == (1, PROMPT_LEN + 4)
+    assert [d.verifier_name for d in model.decodings] == ["rejection"]
+    generate(model, _prompt(), max_new_tokens=4, do_sample=False)
+    assert model.decodings[-1].verifier_name == "greedy"
     out = generate(FakeEfficientModel(base, drafting=True, verifier="accept_all"), _prompt(), max_new_tokens=4,
                    do_sample=True)
     assert out.shape == (1, PROMPT_LEN + 4)

@@ -40,6 +40,9 @@
   through `economize.core.serialization.resolve_base_model`, which the Hub and lm-eval loaders share.
   `trust_remote_code=True` is refused with a `ConfigError` when only the checkpoint names the base repository: name
   the base model explicitly to run its code.
+- `generate` with `do_sample=True` (the default of `pipeline("text-generation")`) on a drafting model whose
+  verifier is not named verifies by rejection sampling, which keeps the sampled distribution exact. It used to raise
+  `ConfigError` for the implicit greedy verifier. A verifier named explicitly is kept, and a greedy one still raises.
 
 ## 0.5.0 (2026-11-18)
 
