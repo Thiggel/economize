@@ -99,6 +99,9 @@
 - The attention kernels run in Triton's CPU interpreter (`TRITON_INTERPRET=1`): the interpreter cannot call
   libdevice, so the round-to-nearest helpers of the decode, MInference and KIVI kernels are plain operators there,
   and the Quest kernel no longer masks a block with a scalar bool.
+- The Gemma-4 assistant drafter loads on transformers 5.23, which cannot build an assistant whose layers all reuse
+  cache entries (huggingface/transformers#50316), and Gemma-4 finds its context layers and KV-sharing sources from
+  `is_kv_shared_layer`, since 5.23 sets `store_full_length_kv` only on the last producer of each layer type.
 
 ## 0.4.0 (2026-11-04)
 
