@@ -113,3 +113,21 @@ def test_rejects_models_without_a_jump_drafter(target: nn.Module) -> None:
         JumpWorker(target)
     with pytest.raises(ConfigError, match="JumpWorker"):
         SelfSpeculativeDecoder(target, target)  # type: ignore[arg-type]
+
+
+def test_linking_refuses_a_target_cache_without_the_window(prompt: torch.Tensor) -> None:
+    """A target whose cache lacks a layer of the drafter's window is refused (the drafter would read unwritten K/V)."""
+    shallow = make_tiny_model(seed=0, num_layers=4)
+    with pytest.raises(ConfigError, match="cache indices"):
+        SelfSpeculativeDecoder(shallow, JumpWorker(jump_replica("full")), SSDConfig(draft_length=3)).generate(
+            prompt, NEW)
+
+
+def test_summary_counts_the_self_drafters_layers(target: nn.Module, prompt: torch.Tensor) -> None:
+    """A self-drafter runs layers of the target's architecture: the summary counts them next to the target's."""
+    result = decoder(target, jump_replica("full"), True, draft_length=3).generate(prompt, NEW)
+    summary = result.summary()
+    draft_layers = sum(event.layer_tokens for event in result.draft_cost.events)
+    assert summary["draft_steps"] == result.draft_cost.count("draft") > 0
+    assert summary["draft_layer_tokens"] == draft_layers > 0 and summary["module_layer_tokens"] == {}
+    assert summary["relative_layer_tokens_with_draft"] > summary["relative_layer_tokens"]
