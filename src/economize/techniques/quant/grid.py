@@ -8,7 +8,8 @@ registered factory ``(symmetric: bool) -> QuantGrid``.
 * :class:`IntGrid`: uniform ``b``-bit integers with the min-max range of the GPTQ reference
   (https://github.com/IST-DASLab/gptq, ``quant.py``): the range always contains zero, asymmetric grids use an integer
   zero point ``round(-min / scale)``, symmetric grids put zero at ``(2^b) / 2``. Round to nearest is off by at most
-  ``scale / 2`` for every weight of the fitted block.
+  ``scale / 2`` for every weight of the fitted block. The arithmetic is float32 unless :meth:`QuantGrid.in_dtype`
+  asks for fp16 (AWQ fits fp16 weights in fp16, as the reference does).
 * :class:`Fp8Grid`: OCP float8 e4m3 with one absmax scale ``amax / 448`` per row and group (the weight-only fp8 of
   vLLM and torchao). The relative error of a normal value is at most ``2^-4``.
 * The 4-bit floating-point microscaling formats ``nvfp4`` and ``mxfp4`` (:mod:`.fp4`).
@@ -23,7 +24,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import torch
 from torch import Tensor, nn
@@ -107,6 +108,17 @@ class QuantGrid(ABC):
         """Whether the grid has tensor-level parameters that :meth:`bind` has not fitted yet."""
         return False
 
+    def in_dtype(self, dtype: torch.dtype) -> QuantGrid:
+        """The grid fitting and encoding in ``dtype`` arithmetic, as references that quantize in the weight dtype do.
+
+        The default keeps the grid unchanged (float32). Round to nearest decides near-ties differently in fp16 than in
+        float32, which shifts low-bit results measurably (AWQ INT3 on Llama-2-7B: 6.30 in float32, 6.25 in fp16).
+
+        Args:
+            dtype: The weight dtype.
+        """
+        return self
+
     def bind(self, weights: Sequence[Tensor]) -> QuantGrid:
         """The grid with its tensor-level parameters fitted to ``weights`` (the shards of one fused map share them).
 
@@ -121,10 +133,15 @@ class QuantGrid(ABC):
 
 @dataclass(frozen=True)
 class IntGrid(QuantGrid):
-    """Uniform ``bits``-bit integer grid (codes ``0 .. 2^bits - 1``), min-max fitted as in the GPTQ reference."""
+    """Uniform ``bits``-bit integer grid (codes ``0 .. 2^bits - 1``), min-max fitted as in the GPTQ reference.
+
+    ``arithmetic`` is the dtype of the fit and of the rounding (float32, or fp16 via :meth:`in_dtype`); parameters are
+    returned in float32 either way. bf16 stays in float32, as its 8-bit mantissa would misround codes above 64.
+    """
 
     bits: int
     symmetric: bool = False
+    arithmetic: torch.dtype = torch.float32
 
     def __post_init__(self) -> None:
         if not 2 <= self.bits <= 8:
@@ -142,9 +159,12 @@ class IntGrid(QuantGrid):
     def code_dtype(self) -> torch.dtype:
         return torch.uint8
 
+    def in_dtype(self, dtype: torch.dtype) -> IntGrid:
+        return replace(self, arithmetic=dtype) if dtype == torch.float16 else self
+
     def fit(self, w: Tensor) -> QParams:
-        w = w.float()
-        zero_ = torch.zeros(w.shape[0], device=w.device)
+        w = w.to(self.arithmetic)
+        zero_ = torch.zeros(w.shape[0], device=w.device, dtype=w.dtype)
         xmin = torch.minimum(w.min(1).values, zero_)
         xmax = torch.maximum(w.max(1).values, zero_)
         if self.symmetric:
@@ -157,11 +177,12 @@ class IntGrid(QuantGrid):
         xmax = torch.where(degenerate, torch.ones_like(xmax), xmax)
         scale = (xmax - xmin) / self.maxq
         zero = torch.full_like(scale, (self.maxq + 1) / 2) if self.symmetric else torch.round(-xmin / scale)
-        return QParams(scale.unsqueeze(1), zero.unsqueeze(1))
+        return QParams(scale.float().unsqueeze(1), zero.float().unsqueeze(1))
 
     def encode(self, w: Tensor, params: QParams) -> Tensor:
         assert params.zero is not None
-        q = torch.clamp(torch.round(w.float() / params.scale) + params.zero, 0, self.maxq)
+        dtype = self.arithmetic
+        q = torch.clamp(torch.round(w.to(dtype) / params.scale.to(dtype)) + params.zero.to(dtype), 0, self.maxq)
         return q.to(torch.uint8)
 
     def decode(self, codes: Tensor, params: QParams) -> Tensor:

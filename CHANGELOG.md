@@ -76,6 +76,10 @@
 
 ### Fixed
 
+- AWQ quantizes fp16 weights in fp16 arithmetic, as llm-awq does: the scale search and the clip search score the
+  weights rounded to their dtype, and the integer grid fits and rounds in fp16. AWQ INT3 g128 on Llama-2-7B now
+  reaches WikiText-2 perplexity 6.239 ± 0.011 over three calibration seeds (paper 6.24, before 6.309), INT4 5.606.
+  bf16 and fp32 weights keep float32 arithmetic.
 - The default configs of `teal`, `cats` and `dejavu` saved nothing: the former default `backend="dense"` only masked
   the activations while the transformers support entry reported REAL.
 - KnapSpec no longer hits an illegal memory access after searching more than `max_graphs` skip sets. The first

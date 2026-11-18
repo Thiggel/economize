@@ -1,6 +1,6 @@
 {
  "schema": "economize.reproduction-result/1",
- "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0). The groups hold calibration seed 0; 'calibration_seeds' holds the reruns of the calibrated variants with seeds 1 and 2.",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0). The groups hold calibration seed 0; 'calibration_seeds' holds the reruns of the calibrated variants with seeds 1 and 2. The awq_w4g128 variant was rerun with economize 0.5.0 (unreleased, integrate-0.5 c24930b with fix/awq-int3) on NVIDIA RTX A6000 after the AWQ quantizer moved to fp16 arithmetic (as in llm-awq); its 'rerun' field and the seed entries record those runs.",
  "id": "B1",
  "title": "RTN / GPTQ / GPTQ-R / AWQ INT4 g128 (quant, backend fake), Llama-2-7B, WikiText-2 ppl at 2048",
  "paper": "2306.00978 (AWQ Tab. 4)",
@@ -98,7 +98,13 @@
      "checkpoint": null,
      "decoding": {},
      "metrics": {
-      "wikitext2_test": 5.605452622488544
+      "wikitext2_test": 5.600605898127777
+     },
+     "rerun": {
+      "economize": "0.5.0 (unreleased, integrate-0.5 c24930b with fix/awq-int3)",
+      "gpu": "NVIDIA RTX A6000",
+      "date": "2026-11-18T00:17:35+00:00",
+      "baseline": 5.472080286583786
      }
     }
    }
@@ -155,15 +161,15 @@
    "variant": "awq_w4g128",
    "metric": "wikitext2_test",
    "kind": "ppl",
-   "economize": 5.605452622488544,
+   "economize": 5.600605898127777,
    "paper": 5.6,
    "baseline": 5.472115466922817,
    "paper_baseline": 5.47,
-   "delta": 0.13333715556572656,
+   "delta": 0.12849043120495995,
    "paper_delta": 0.1299999999999999,
    "status": "pass",
    "tolerance": 0.05,
-   "error": 0.0033371555657266683
+   "error": -0.0015095687950399395
   }
  ],
  "calibration_seeds": [
@@ -181,7 +187,10 @@
       "wikitext2_test": 5.619184643608973
      },
      "awq_w4g128": {
-      "wikitext2_test": 5.611863283173821
+      "wikitext2_test": 5.605005041875671,
+      "economize": "0.5.0 (unreleased, integrate-0.5 c24930b with fix/awq-int3)",
+      "gpu": "NVIDIA RTX A6000",
+      "date": "2026-11-18T00:24:04+00:00"
      }
     }
    }
@@ -200,7 +209,10 @@
       "wikitext2_test": 5.624255560005544
      },
      "awq_w4g128": {
-      "wikitext2_test": 5.610911280989428
+      "wikitext2_test": 5.6115269551299045,
+      "economize": "0.5.0 (unreleased, integrate-0.5 c24930b with fix/awq-int3)",
+      "gpu": "NVIDIA RTX A6000",
+      "date": "2026-11-18T00:29:48+00:00"
      }
     }
    }
