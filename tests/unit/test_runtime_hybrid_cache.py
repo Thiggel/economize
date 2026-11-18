@@ -59,3 +59,17 @@ def test_writing_a_known_layer_inside_selecting_updates_the_selected_rows() -> N
     with cache.selecting(torch.tensor([0, 2])):
         cache.update_recurrent_state(torch.ones(2, 2), 0)
     assert cache.recurrent_states[0][:, 0].tolist() == [1.0, 0.0, 1.0]
+
+
+def test_state_getters_follow_the_transformers_cache_api() -> None:
+    """``transformers`` >= 5.23 reads the states with ``get_conv_state`` / ``get_recurrent_state`` and asks
+    ``is_recording_past`` before the fused single-token conv kernel."""
+    cache = _cache()
+    assert cache.get_conv_state(0) is None and cache.get_recurrent_state(0, state_idx=0) is None
+    cache.update_conv_state(torch.ones(3, 4, 5), 0, conv_kernel_size=4)
+    cache.update_recurrent_state(torch.full((3, 2), 2.0), 0)
+    assert cache.get_conv_state(0).shape == (3, 4, 4)
+    assert torch.equal(cache.get_recurrent_state(0), torch.full((3, 2), 2.0))
+    assert cache.is_recording_past(0)
+    with cache.selecting(torch.tensor([1])):
+        assert cache.get_recurrent_state(0).shape == (1, 2)

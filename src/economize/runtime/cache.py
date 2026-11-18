@@ -517,7 +517,8 @@ class HybridCache(PositionalKVCache):
     """K/V buffers for attention layers plus the states of recurrent layers (gated delta nets, Mamba-2).
 
     It implements the part of the ``transformers`` cache API that these layers call (``has_previous_state``,
-    ``layers[idx]``, ``update_conv_state``, ``update_recurrent_state``) for Qwen3.5, Qwen3-Next and Nemotron-H, on
+    ``layers[idx]``, ``get_conv_state``, ``get_recurrent_state``, ``is_recording_past``, ``update_conv_state``,
+    ``update_recurrent_state``) for Qwen3.5, Qwen3-Next and Nemotron-H, on
     ``transformers`` 5.13 and later. Each recurrent layer keeps a conv window ``[B, channels, kernel]`` and a
     recurrent state. States advance with every token they see, so a decoder that processes speculative tokens takes
     a :meth:`snapshot` before and restores it afterwards, then replays the accepted tokens.
@@ -585,6 +586,21 @@ class HybridCache(PositionalKVCache):
         if layer_idx is None:
             return bool(self.recurrent_states)
         return layer_idx in self.recurrent_states
+
+    def get_conv_state(self, layer_idx: int, state_idx: int = 0) -> torch.Tensor | None:
+        """Conv window of layer ``layer_idx``, or ``None`` before the layer has seen tokens (``transformers`` >= 5.23
+        reads the states through these getters instead of ``layers[idx]``)."""
+        return self.recurrent_state(layer_idx)[_CONV] if self.has_previous_state(layer_idx) else None
+
+    def get_recurrent_state(self, layer_idx: int, state_idx: int = 0) -> torch.Tensor | None:
+        """Recurrent state of layer ``layer_idx``, or ``None`` before the layer has seen tokens."""
+        return self.recurrent_state(layer_idx)[_RECURRENT] if self.has_previous_state(layer_idx) else None
+
+    def is_recording_past(self, layer_idx: int) -> bool:
+        """Always ``True``: keeps single-token steps on the path that calls :meth:`update_conv_state`, so the stored
+        window is replaced, never updated in place by the fused kernel (the same as ``record_past`` of
+        ``layers[idx]``)."""
+        return True
 
     def update_conv_state(
         self, conv_states: torch.Tensor, layer_idx: int, state_idx: int = 0, conv_kernel_size: int | None = None,

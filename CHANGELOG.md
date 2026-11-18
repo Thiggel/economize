@@ -116,6 +116,9 @@
   kernel is slower than dense, and the weights docs now say so.
 - The TEAL CUDA-graph test compares replay and eager outputs within bf16 rounding: the split-K GEMV adds its
   float32 partial sums atomically in a run-dependent order, so bit equality failed intermittently.
+- The hybrid cache of the decoders and the training rollout implements `get_conv_state`, `get_recurrent_state` and
+  `is_recording_past`, which the linear-attention and Mamba layers of transformers 5.23 read (Qwen3.5, Qwen3-Next,
+  Nemotron-H).
 
 ## 0.4.0 (2026-11-04)
 
