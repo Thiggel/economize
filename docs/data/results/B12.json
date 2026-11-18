@@ -1,0 +1,355 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0). The groups hold calibration seed 0; 'calibration_seeds' holds the reruns of the calibrated variants with seeds 1 and 2.",
+ "id": "B12",
+ "title": "Magnitude / SparseGPT / Wanda at 50 %, 4:8 and 2:4, Llama-2-7B, WikiText-2 ppl at 4096",
+ "paper": "2306.11695 (Wanda Tab. 3)",
+ "date": "2026-10-09T16:01:19+00:00",
+ "gpu": "NVIDIA A100-SXM4-80GB",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "Llama-2-7b-hf",
+   "model": "meta-llama/Llama-2-7b-hf",
+   "dtype": "float16",
+   "baseline": "dense",
+   "variants": {
+    "dense": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 5.116358529690888
+     }
+    },
+    "magnitude_50": {
+     "techniques": [
+      {
+       "technique": "prune",
+       "method": "magnitude",
+       "sparsity": 0.5
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 14.795653022013184
+     }
+    },
+    "sparsegpt_50": {
+     "techniques": [
+      {
+       "technique": "prune",
+       "method": "sparsegpt",
+       "sparsity": 0.5
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 6.504312172441232
+     }
+    },
+    "wanda_50": {
+     "techniques": [
+      {
+       "technique": "prune",
+       "method": "wanda",
+       "sparsity": 0.5
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 6.462477245569833
+     }
+    },
+    "magnitude_4of8": {
+     "techniques": [
+      {
+       "technique": "prune",
+       "method": "magnitude",
+       "sparsity": "4:8"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 16.52903887567772
+     }
+    },
+    "sparsegpt_4of8": {
+     "techniques": [
+      {
+       "technique": "prune",
+       "method": "sparsegpt",
+       "sparsity": "4:8"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 7.893631300476931
+     }
+    },
+    "wanda_4of8": {
+     "techniques": [
+      {
+       "technique": "prune",
+       "method": "wanda",
+       "sparsity": "4:8"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 8.073617643317649
+     }
+    },
+    "magnitude_2of4": {
+     "techniques": [
+      {
+       "technique": "prune",
+       "method": "magnitude",
+       "sparsity": "2:4"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 54.382173419688904
+     }
+    },
+    "sparsegpt_2of4": {
+     "techniques": [
+      {
+       "technique": "prune",
+       "method": "sparsegpt",
+       "sparsity": "2:4"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 10.152655253813819
+     }
+    },
+    "wanda_2of4": {
+     "techniques": [
+      {
+       "technique": "prune",
+       "method": "wanda",
+       "sparsity": "2:4"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 11.338189051507271
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "magnitude_50",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 14.795653022013184,
+   "paper": 14.89,
+   "baseline": 5.116358529690888,
+   "paper_baseline": 5.12,
+   "delta": 9.679294492322295,
+   "paper_delta": 9.77,
+   "status": "pass",
+   "tolerance": 0.4885,
+   "error": -0.09070550767770413
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "sparsegpt_50",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 6.504312172441232,
+   "paper": 6.51,
+   "baseline": 5.116358529690888,
+   "paper_baseline": 5.12,
+   "delta": 1.387953642750344,
+   "paper_delta": 1.3899999999999997,
+   "status": "pass",
+   "tolerance": 0.06949999999999999,
+   "error": -0.002046357249655628
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "wanda_50",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 6.462477245569833,
+   "paper": 6.42,
+   "baseline": 5.116358529690888,
+   "paper_baseline": 5.12,
+   "delta": 1.3461187158789452,
+   "paper_delta": 1.2999999999999998,
+   "status": "pass",
+   "tolerance": 0.06499999999999999,
+   "error": 0.04611871587894534
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "magnitude_4of8",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 16.52903887567772,
+   "paper": 16.48,
+   "baseline": 5.116358529690888,
+   "paper_baseline": 5.12,
+   "delta": 11.412680345986832,
+   "paper_delta": 11.36,
+   "status": "pass",
+   "tolerance": 0.568,
+   "error": 0.05268034598683258
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "sparsegpt_4of8",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 7.893631300476931,
+   "paper": 8.12,
+   "baseline": 5.116358529690888,
+   "paper_baseline": 5.12,
+   "delta": 2.777272770786044,
+   "paper_delta": 2.999999999999999,
+   "status": "fail",
+   "tolerance": 0.14999999999999997,
+   "error": -0.22272722921395527
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "wanda_4of8",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 8.073617643317649,
+   "paper": 7.97,
+   "baseline": 5.116358529690888,
+   "paper_baseline": 5.12,
+   "delta": 2.957259113626761,
+   "paper_delta": 2.8499999999999996,
+   "status": "pass",
+   "tolerance": 0.1425,
+   "error": 0.10725911362676133
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "magnitude_2of4",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 54.382173419688904,
+   "paper": 54.59,
+   "baseline": 5.116358529690888,
+   "paper_baseline": 5.12,
+   "delta": 49.26581488999802,
+   "paper_delta": 49.470000000000006,
+   "status": "pass",
+   "tolerance": 2.4735000000000005,
+   "error": -0.2041851100019869
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "sparsegpt_2of4",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 10.152655253813819,
+   "paper": 10.17,
+   "baseline": 5.116358529690888,
+   "paper_baseline": 5.12,
+   "delta": 5.0362967241229315,
+   "paper_delta": 5.05,
+   "status": "pass",
+   "tolerance": 0.2525,
+   "error": -0.013703275877068322
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "wanda_2of4",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 11.338189051507271,
+   "paper": 11.02,
+   "baseline": 5.116358529690888,
+   "paper_baseline": 5.12,
+   "delta": 6.221830521816384,
+   "paper_delta": 5.8999999999999995,
+   "status": "fail",
+   "tolerance": 0.295,
+   "error": 0.32183052181638416
+  }
+ ],
+ "calibration_seeds": [
+  {
+   "calibration_seed": 1,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-80GB",
+   "date": "2026-10-12T04:47:17+00:00",
+   "groups": {
+    "Llama-2-7b-hf": {
+     "sparsegpt_50": {
+      "wikitext2_test": 6.543861691699099
+     },
+     "wanda_50": {
+      "wikitext2_test": 6.449422195476665
+     },
+     "sparsegpt_4of8": {
+      "wikitext2_test": 8.01032613073145
+     },
+     "wanda_4of8": {
+      "wikitext2_test": 8.057708404941506
+     },
+     "sparsegpt_2of4": {
+      "wikitext2_test": 10.164897866228399
+     },
+     "wanda_2of4": {
+      "wikitext2_test": 11.361887085392931
+     }
+    }
+   }
+  },
+  {
+   "calibration_seed": 2,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-80GB",
+   "date": "2026-10-12T10:13:03+00:00",
+   "groups": {
+    "Llama-2-7b-hf": {
+     "sparsegpt_50": {
+      "wikitext2_test": 6.510438352442606
+     },
+     "wanda_50": {
+      "wikitext2_test": 6.455605397605538
+     },
+     "sparsegpt_4of8": {
+      "wikitext2_test": 7.924310783344246
+     },
+     "wanda_4of8": {
+      "wikitext2_test": 8.04657356339792
+     },
+     "sparsegpt_2of4": {
+      "wikitext2_test": 10.439812863220927
+     },
+     "wanda_2of4": {
+      "wikitext2_test": 11.175001849807574
+     }
+    }
+   }
+  }
+ ]
+}

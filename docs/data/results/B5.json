@@ -1,0 +1,238 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0). The groups hold calibration seed 0; 'calibration_seeds' holds the reruns of the calibrated variants with seeds 1 and 2.",
+ "id": "B5",
+ "title": "GPTQ-R / AWQ INT4 g128, Llama-3-8B and Mistral-7B, WikiText-2 ppl at 2048",
+ "paper": "2405.04532 (QServe Tab. 2)",
+ "date": "2026-10-09T16:08:48+00:00",
+ "gpu": "NVIDIA A100-SXM4-40GB",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "Meta-Llama-3-8B",
+   "model": "meta-llama/Meta-Llama-3-8B",
+   "dtype": "float16",
+   "baseline": "fp16",
+   "variants": {
+    "fp16": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 6.1358360042261015
+     }
+    },
+    "gptq_r_w4g128": {
+     "techniques": [
+      {
+       "technique": "quant",
+       "format": "int4",
+       "method": "gptq",
+       "group_size": 128,
+       "symmetric": false,
+       "act_order": true,
+       "static_groups": true,
+       "true_sequential": true,
+       "percdamp": 0.01
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 6.565637508713537
+     }
+    },
+    "awq_w4g128": {
+     "techniques": [
+      {
+       "technique": "quant",
+       "format": "int4",
+       "method": "awq",
+       "group_size": 128,
+       "symmetric": false,
+       "awq_grid": 20,
+       "awq_clip": true
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 6.541463156318309
+     }
+    }
+   }
+  },
+  {
+   "name": "Mistral-7B-v0.1",
+   "model": "mistralai/Mistral-7B-v0.1",
+   "dtype": "float16",
+   "baseline": "fp16",
+   "variants": {
+    "fp16": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 5.251897066976881
+     }
+    },
+    "gptq_r_w4g128": {
+     "techniques": [
+      {
+       "technique": "quant",
+       "format": "int4",
+       "method": "gptq",
+       "group_size": 128,
+       "symmetric": false,
+       "act_order": true,
+       "static_groups": true,
+       "true_sequential": true,
+       "percdamp": 0.01
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 5.372133196718918
+     }
+    },
+    "awq_w4g128": {
+     "techniques": [
+      {
+       "technique": "quant",
+       "format": "int4",
+       "method": "awq",
+       "group_size": 128,
+       "symmetric": false,
+       "awq_grid": 20,
+       "awq_clip": true
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 5.362816304011183
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "Meta-Llama-3-8B",
+   "variant": "gptq_r_w4g128",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 6.565637508713537,
+   "paper": 6.56,
+   "baseline": 6.1358360042261015,
+   "paper_baseline": 6.14,
+   "delta": 0.42980150448743526,
+   "paper_delta": 0.41999999999999993,
+   "status": "pass",
+   "tolerance": 0.05,
+   "error": 0.00980150448743533
+  },
+  {
+   "group": "Meta-Llama-3-8B",
+   "variant": "awq_w4g128",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 6.541463156318309,
+   "paper": 6.54,
+   "baseline": 6.1358360042261015,
+   "paper_baseline": 6.14,
+   "delta": 0.40562715209220723,
+   "paper_delta": 0.40000000000000036,
+   "status": "pass",
+   "tolerance": 0.05,
+   "error": 0.005627152092206877
+  },
+  {
+   "group": "Mistral-7B-v0.1",
+   "variant": "gptq_r_w4g128",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 5.372133196718918,
+   "paper": 5.39,
+   "baseline": 5.251897066976881,
+   "paper_baseline": 5.25,
+   "delta": 0.1202361297420369,
+   "paper_delta": 0.13999999999999968,
+   "status": "pass",
+   "tolerance": 0.05,
+   "error": -0.01976387025796278
+  },
+  {
+   "group": "Mistral-7B-v0.1",
+   "variant": "awq_w4g128",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 5.362816304011183,
+   "paper": 5.37,
+   "baseline": 5.251897066976881,
+   "paper_baseline": 5.25,
+   "delta": 0.11091923703430151,
+   "paper_delta": 0.1200000000000001,
+   "status": "pass",
+   "tolerance": 0.05,
+   "error": -0.009080762965698597
+  }
+ ],
+ "calibration_seeds": [
+  {
+   "calibration_seed": 1,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-40GB",
+   "date": "2026-10-12T04:06:43+00:00",
+   "groups": {
+    "Meta-Llama-3-8B": {
+     "gptq_r_w4g128": {
+      "wikitext2_test": 6.555365052177588
+     },
+     "awq_w4g128": {
+      "wikitext2_test": 6.550829183799924
+     }
+    },
+    "Mistral-7B-v0.1": {
+     "gptq_r_w4g128": {
+      "wikitext2_test": 5.368194104535705
+     },
+     "awq_w4g128": {
+      "wikitext2_test": 5.370064748086904
+     }
+    }
+   }
+  },
+  {
+   "calibration_seed": 2,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-40GB",
+   "date": "2026-10-12T12:13:21+00:00",
+   "groups": {
+    "Meta-Llama-3-8B": {
+     "gptq_r_w4g128": {
+      "wikitext2_test": 6.559534946824979
+     },
+     "awq_w4g128": {
+      "wikitext2_test": 6.5607391340156616
+     }
+    },
+    "Mistral-7B-v0.1": {
+     "gptq_r_w4g128": {
+      "wikitext2_test": 5.3802801527680355
+     },
+     "awq_w4g128": {
+      "wikitext2_test": 5.367509029358188
+     }
+    }
+   }
+  }
+ ]
+}

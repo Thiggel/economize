@@ -1,0 +1,114 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0).",
+ "id": "B8",
+ "title": "torchao int4wo-64, int8wo, float8wo, float8dq (quant, backend torchao), Llama-3.1-8B, HellaSwag, WikiText, tok/s",
+ "paper": "2507.16099 (torchao Tab. 4)",
+ "date": "2026-10-09T17:04:07+00:00",
+ "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "Llama-3.1-8B",
+   "model": "meta-llama/Llama-3.1-8B",
+   "dtype": "bfloat16",
+   "baseline": "bf16",
+   "variants": {
+    "bf16": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "hellaswag": 60.73491336387173,
+      "wikitext": 7.546334957004163,
+      "tau/prompts": null,
+      "rate/prompts": null,
+      "mat/prompts": 1.0,
+      "tok_s/prompts": 74.74599157632946
+     }
+    },
+    "float8dq_row": {
+     "techniques": [
+      {
+       "technique": "quant",
+       "format": "fp8",
+       "method": "rtn",
+       "group_size": null,
+       "backend": "torchao",
+       "fp8_activations": true
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "hellaswag": 60.495917147978496,
+      "wikitext": 7.61458959573563,
+      "tau/prompts": null,
+      "rate/prompts": null,
+      "mat/prompts": 1.0,
+      "tok_s/prompts": 73.04208168705324,
+      "speedup/prompts": 0.9772039964506162
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "Llama-3.1-8B",
+   "variant": "float8dq_row",
+   "metric": "hellaswag",
+   "kind": "acc",
+   "economize": 60.495917147978496,
+   "paper": 59.86,
+   "baseline": 60.73491336387173,
+   "paper_baseline": 60.01,
+   "delta": -0.23899621589323772,
+   "paper_delta": -0.14999999999999858,
+   "status": "pass",
+   "tolerance": 0.5,
+   "error": -0.08899621589323914
+  },
+  {
+   "group": "Llama-3.1-8B",
+   "variant": "float8dq_row",
+   "metric": "wikitext",
+   "kind": "ppl",
+   "economize": 7.61458959573563,
+   "paper": 7.41,
+   "baseline": 7.546334957004163,
+   "paper_baseline": 7.33,
+   "delta": 0.06825463873146731,
+   "paper_delta": 0.08000000000000007,
+   "status": "pass",
+   "tolerance": 0.05,
+   "error": -0.011745361268532761
+  },
+  {
+   "group": "Llama-3.1-8B",
+   "variant": "float8dq_row",
+   "metric": "tok_s/prompts",
+   "kind": "info",
+   "economize": 73.04208168705324,
+   "paper": 167.13,
+   "status": "info",
+   "tolerance": null
+  },
+  {
+   "group": "Llama-3.1-8B",
+   "variant": "float8dq_row",
+   "metric": "speedup/prompts",
+   "kind": "info",
+   "economize": 0.9772039964506162,
+   "paper": 1.26,
+   "status": "info",
+   "tolerance": null
+  }
+ ]
+}

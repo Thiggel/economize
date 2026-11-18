@@ -1,0 +1,409 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0). The groups hold calibration seed 0; 'calibration_seeds' holds the reruns of the calibrated variants with seeds 1 and 2.",
+ "id": "B17",
+ "title": "SLEB block removal at 10 % and 20 %, Llama-2-7B, WikiText-2 and C4 ppl at 2048, prompt latency",
+ "paper": "2402.09025 (SLEB Tab. 1, Tab. 7)",
+ "date": "2026-10-10T01:44:51+00:00",
+ "gpu": "NVIDIA A100-SXM4-40GB",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "Llama-2-7b-hf",
+   "model": "meta-llama/Llama-2-7b-hf",
+   "dtype": "float16",
+   "baseline": "dense",
+   "variants": {
+    "dense": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2": 5.472115466922817,
+      "c4": 7.263559679527936,
+      "latency_ms/prefill": 167.3051854595542,
+      "layers": [],
+      "layers0": []
+     }
+    },
+    "sleb_10": {
+     "techniques": [
+      {
+       "technique": "depth_prune",
+       "method": "sleb",
+       "num_blocks": 4
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2": 6.953430254143512,
+      "c4": 9.335962286117777,
+      "latency_ms/prefill": 147.14700262993574,
+      "layers": [
+       12,
+       15,
+       24,
+       25
+      ],
+      "layers0": [
+       11,
+       14,
+       23,
+       24
+      ],
+      "speedup/prefill": 1.13699349948918
+     }
+    },
+    "sleb_20": {
+     "techniques": [
+      {
+       "technique": "depth_prune",
+       "method": "sleb",
+       "num_blocks": 7
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2": 9.14158355555045,
+      "c4": 12.3234406706453,
+      "latency_ms/prefill": 131.3572209328413,
+      "layers": [
+       11,
+       12,
+       15,
+       16,
+       24,
+       25,
+       28
+      ],
+      "layers0": [
+       10,
+       11,
+       14,
+       15,
+       23,
+       24,
+       27
+      ],
+      "speedup/prefill": 1.273665690180001
+     }
+    },
+    "sleb_10_floor": {
+     "techniques": [
+      {
+       "technique": "depth_prune",
+       "method": "sleb",
+       "num_blocks": 3
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2": 6.468122734007643,
+      "c4": 8.710716090304718,
+      "latency_ms/prefill": 152.39696786738932,
+      "layers": [
+       12,
+       15,
+       24
+      ],
+      "layers0": [
+       11,
+       14,
+       23
+      ],
+      "speedup/prefill": 1.0978248963925417
+     }
+    },
+    "sleb_20_floor": {
+     "techniques": [
+      {
+       "technique": "depth_prune",
+       "method": "sleb",
+       "num_blocks": 6
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2": 8.11049893804528,
+      "c4": 10.896082310211302,
+      "latency_ms/prefill": 136.9743759278208,
+      "layers": [
+       11,
+       12,
+       15,
+       24,
+       25,
+       28
+      ],
+      "layers0": [
+       10,
+       11,
+       14,
+       23,
+       24,
+       27
+      ],
+      "speedup/prefill": 1.2214341866957388
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "sleb_10",
+   "metric": "wikitext2",
+   "kind": "ppl",
+   "economize": 6.953430254143512,
+   "paper": 6.95,
+   "baseline": 5.472115466922817,
+   "paper_baseline": 5.47,
+   "delta": 1.4813147872206942,
+   "paper_delta": 1.4800000000000004,
+   "status": "pass",
+   "tolerance": 0.07400000000000002,
+   "error": 0.0013147872206937805
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "sleb_10",
+   "metric": "c4",
+   "kind": "ppl",
+   "economize": 9.335962286117777,
+   "paper": 9.34,
+   "baseline": 7.263559679527936,
+   "paper_baseline": 7.26,
+   "delta": 2.072402606589841,
+   "paper_delta": 2.08,
+   "status": "pass",
+   "tolerance": 0.10400000000000001,
+   "error": -0.007597393410159192
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "sleb_20",
+   "metric": "wikitext2",
+   "kind": "ppl",
+   "economize": 9.14158355555045,
+   "paper": 9.14,
+   "baseline": 5.472115466922817,
+   "paper_baseline": 5.47,
+   "delta": 3.6694680886276334,
+   "paper_delta": 3.670000000000001,
+   "status": "pass",
+   "tolerance": 0.18350000000000005,
+   "error": -0.0005319113723674107
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "sleb_20",
+   "metric": "c4",
+   "kind": "ppl",
+   "economize": 12.3234406706453,
+   "paper": 12.32,
+   "baseline": 7.263559679527936,
+   "paper_baseline": 7.26,
+   "delta": 5.059880991117365,
+   "paper_delta": 5.0600000000000005,
+   "status": "pass",
+   "tolerance": 0.25300000000000006,
+   "error": -0.0001190088826357183
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "sleb_20",
+   "metric": "speedup/prefill",
+   "kind": "speedup",
+   "economize": 1.273665690180001,
+   "paper": 1.28,
+   "status": "pass",
+   "tolerance": 0.128,
+   "error": -0.006334309819999051
+  }
+ ],
+ "calibration_seeds": [
+  {
+   "calibration_seed": 1,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-40GB",
+   "date": "2026-10-12T05:43:22+00:00",
+   "groups": {
+    "Llama-2-7b-hf": {
+     "sleb_10": {
+      "wikitext2": 6.7949776922991,
+      "c4": 9.132194701195399,
+      "latency_ms/prefill": 145.74369764886796,
+      "layers": [
+       11,
+       12,
+       13,
+       25
+      ],
+      "layers0": [
+       10,
+       11,
+       12,
+       24
+      ]
+     },
+     "sleb_20": {
+      "wikitext2": 8.91345610249576,
+      "c4": 11.759214880888889,
+      "latency_ms/prefill": 130.72139001451433,
+      "layers": [
+       11,
+       12,
+       13,
+       22,
+       24,
+       25,
+       28
+      ],
+      "layers0": [
+       10,
+       11,
+       12,
+       21,
+       23,
+       24,
+       27
+      ]
+     },
+     "sleb_10_floor": {
+      "wikitext2": 6.3466048712885765,
+      "c4": 8.515723254282545,
+      "latency_ms/prefill": 150.924680987373,
+      "layers": [
+       12,
+       13,
+       25
+      ],
+      "layers0": [
+       11,
+       12,
+       24
+      ]
+     },
+     "sleb_20_floor": {
+      "wikitext2": 7.9986542596200145,
+      "c4": 10.63722492884356,
+      "latency_ms/prefill": 135.83426689729095,
+      "layers": [
+       11,
+       12,
+       13,
+       24,
+       25,
+       28
+      ],
+      "layers0": [
+       10,
+       11,
+       12,
+       23,
+       24,
+       27
+      ]
+     }
+    }
+   }
+  },
+  {
+   "calibration_seed": 2,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-40GB",
+   "date": "2026-10-12T12:12:12+00:00",
+   "groups": {
+    "Llama-2-7b-hf": {
+     "sleb_10": {
+      "wikitext2": 6.7949776922991,
+      "c4": 9.132194701195399,
+      "latency_ms/prefill": 145.92052646912634,
+      "layers": [
+       11,
+       12,
+       13,
+       25
+      ],
+      "layers0": [
+       10,
+       11,
+       12,
+       24
+      ]
+     },
+     "sleb_20": {
+      "wikitext2": 8.723259210498355,
+      "c4": 11.374950846499672,
+      "latency_ms/prefill": 130.82702760584652,
+      "layers": [
+       10,
+       11,
+       12,
+       13,
+       24,
+       25,
+       28
+      ],
+      "layers0": [
+       9,
+       10,
+       11,
+       12,
+       23,
+       24,
+       27
+      ]
+     },
+     "sleb_10_floor": {
+      "wikitext2": 6.3466048712885765,
+      "c4": 8.515723254282545,
+      "latency_ms/prefill": 151.7285886220634,
+      "layers": [
+       12,
+       13,
+       25
+      ],
+      "layers0": [
+       11,
+       12,
+       24
+      ]
+     },
+     "sleb_20_floor": {
+      "wikitext2": 7.9986542596200145,
+      "c4": 10.63722492884356,
+      "latency_ms/prefill": 136.39592728577554,
+      "layers": [
+       11,
+       12,
+       13,
+       24,
+       25,
+       28
+      ],
+      "layers0": [
+       10,
+       11,
+       12,
+       23,
+       24,
+       27
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

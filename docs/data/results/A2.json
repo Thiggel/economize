@@ -1,0 +1,117 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0).",
+ "id": "A2",
+ "title": "EAGLE-3 chain k=3 with the RedHatAI speculators head, Llama-3.1-8B-Instruct, code / math / summarization tau",
+ "paper": "RedHatAI/Llama-3.1-8B-Instruct-speculator.eagle3 model card (vLLM speculators, chain k=3)",
+ "date": "2026-10-09T13:49:55+00:00",
+ "gpu": "NVIDIA A100-SXM4-40GB",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "Llama-3.1-8B-Instruct",
+   "model": "meta-llama/Llama-3.1-8B-Instruct",
+   "dtype": "bfloat16",
+   "baseline": "plain",
+   "variants": {
+    "plain": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "tau/humaneval": null,
+      "rate/humaneval": null,
+      "mat/humaneval": 1.0,
+      "tok_s/humaneval": 49.716933086326684,
+      "tau/specbench_math_reasoning": null,
+      "rate/specbench_math_reasoning": null,
+      "mat/specbench_math_reasoning": 1.0,
+      "tok_s/specbench_math_reasoning": 48.06638883915408,
+      "tau/specbench_summarization": null,
+      "rate/specbench_summarization": null,
+      "mat/specbench_summarization": 1.0,
+      "tok_s/specbench_summarization": 43.448321270172656,
+      "mat/mean": 1.0,
+      "tok_s/mean": 47.07721439855114
+     }
+    },
+    "speculators_k3": {
+     "techniques": [],
+     "checkpoint": {
+      "repo": "RedHatAI/Llama-3.1-8B-Instruct-speculator.eagle3",
+      "revision": null,
+      "format": "eagle3",
+      "overrides": {},
+      "allow_patterns": null
+     },
+     "decoding": {
+      "cycle_length": 4
+     },
+     "metrics": {
+      "tau/humaneval": 3.050801192943436,
+      "rate/humaneval": 0.6836003976478121,
+      "mat/humaneval": 3.0347773340747106,
+      "tok_s/humaneval": 97.37993941023299,
+      "tau/specbench_math_reasoning": 2.913961038961039,
+      "rate/specbench_math_reasoning": 0.637987012987013,
+      "mat/specbench_math_reasoning": 2.885957792207792,
+      "tok_s/specbench_math_reasoning": 90.99755597321705,
+      "tau/specbench_summarization": 2.615949885555957,
+      "rate/specbench_summarization": 0.5386499618519857,
+      "mat/specbench_summarization": 2.600770991446814,
+      "tok_s/specbench_summarization": 76.11510492410427,
+      "tau/mean": 2.860237372486811,
+      "rate/mean": 0.6200791241622703,
+      "mat/mean": 2.8405020392431055,
+      "tok_s/mean": 88.16420010251811,
+      "speedup/humaneval": 1.9586875811737219,
+      "speedup/specbench_math_reasoning": 1.8931639794644184,
+      "speedup/specbench_summarization": 1.7518537586481486,
+      "speedup/mean": 1.8727573674204365
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "Llama-3.1-8B-Instruct",
+   "variant": "speculators_k3",
+   "metric": "tau/humaneval",
+   "kind": "tau",
+   "economize": 3.050801192943436,
+   "paper": 3.02,
+   "status": "pass",
+   "tolerance": 0.0906,
+   "error": 0.030801192943436195
+  },
+  {
+   "group": "Llama-3.1-8B-Instruct",
+   "variant": "speculators_k3",
+   "metric": "tau/specbench_math_reasoning",
+   "kind": "tau",
+   "economize": 2.913961038961039,
+   "paper": 2.83,
+   "status": "pass",
+   "tolerance": 0.0849,
+   "error": 0.08396103896103879
+  },
+  {
+   "group": "Llama-3.1-8B-Instruct",
+   "variant": "speculators_k3",
+   "metric": "tau/specbench_summarization",
+   "kind": "tau",
+   "economize": 2.615949885555957,
+   "paper": 2.5,
+   "status": "fail",
+   "tolerance": 0.075,
+   "error": 0.11594988555595709
+  }
+ ]
+}

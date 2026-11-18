@@ -1,0 +1,70 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0).",
+ "id": "A8",
+ "title": "Prompt lookup decoding (lookup, n-gram 3, 10 tokens), Vicuna-7B-v1.3, Spec-Bench MAT and speedup",
+ "paper": "Saxena 2023 (prompt-lookup-decoding); Spec-Bench leaderboard (2401.07851)",
+ "date": "2026-10-09T13:55:57+00:00",
+ "gpu": "NVIDIA A100-SXM4-40GB",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "vicuna-7b-v1.3",
+   "model": "lmsys/vicuna-7b-v1.3",
+   "dtype": "float16",
+   "baseline": "plain",
+   "variants": {
+    "plain": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "tau/specbench": null,
+      "rate/specbench": null,
+      "mat/specbench": 1.0,
+      "tok_s/specbench": 53.087633969818704
+     }
+    },
+    "pld_ngram3_k10": {
+     "techniques": [
+      {
+       "technique": "lookup",
+       "max_ngram": 3,
+       "max_proposal": 10
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {
+      "cycle_length": 11
+     },
+     "metrics": {
+      "tau/specbench": 2.1515907673112915,
+      "rate/specbench": 0.1164812249668729,
+      "mat/specbench": 1.742842888940057,
+      "tok_s/specbench": 79.5464535259608,
+      "speedup/specbench": 1.4983989222647296
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "vicuna-7b-v1.3",
+   "variant": "pld_ngram3_k10",
+   "metric": "mat/specbench",
+   "kind": "tau",
+   "economize": 1.742842888940057,
+   "paper": 1.73,
+   "status": "pass",
+   "tolerance": 0.051899999999999995,
+   "error": 0.012842888940056918
+  }
+ ]
+}

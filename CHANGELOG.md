@@ -24,6 +24,9 @@
   reproductions page whose tables are generated from the validated data file `docs/data/reproductions.yaml`.
 - Reproductions: KV-cache eviction (SnapKV, H2O, StreamingLLM at budgets 128 and 2048) on Llama-3-8B-Instruct
   against PyramidKV's LongBench table. H2O at budget 128 matches the paper (35.37) with `method="h2o_prefill"`.
+- Reproductions: 21 further studies from measured runs, covering AWQ, GPTQ and QServe-style weight quantization,
+  torchao FP8, magnitude, SparseGPT and Wanda pruning, SLEB block removal, SVD-LLM, KIVI, FP8 KV caches, prompt
+  lookup decoding and an EAGLE-3 speculator in the speculators format.
 - Quantization backend `triton`: a weight-only int8 / fp8 GEMM in Triton that decodes the 8-bit codes in registers
   (sm80+, bf16 or fp16, no vLLM needed). `auto` picks it before `torchao`, whose weight-only int8 and weight-only fp8
   dequantize the whole weight on every eager call.

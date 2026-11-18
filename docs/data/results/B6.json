@@ -1,0 +1,132 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0). The groups hold calibration seed 0; 'calibration_seeds' holds the reruns of the calibrated variants with seeds 1 and 2.",
+ "id": "B6",
+ "title": "AWQ INT4 / INT3 g128 on an instruct model, Mistral-7B-Instruct-v0.2, WikiText-2 ppl at 2048",
+ "paper": "2306.00978 (AWQ Tab. 5)",
+ "date": "2026-10-10T21:39:52+00:00",
+ "gpu": "NVIDIA A100-SXM4-40GB",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "Mistral-7B-Instruct-v0.2",
+   "model": "mistralai/Mistral-7B-Instruct-v0.2",
+   "dtype": "float16",
+   "baseline": "fp16",
+   "variants": {
+    "fp16": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 5.93813502430241
+     }
+    },
+    "awq_w4g128": {
+     "techniques": [
+      {
+       "technique": "quant",
+       "format": "int4",
+       "method": "awq",
+       "group_size": 128,
+       "symmetric": false
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 6.047968689542969
+     }
+    },
+    "awq_w3g128": {
+     "techniques": [
+      {
+       "technique": "quant",
+       "format": "int3",
+       "method": "awq",
+       "group_size": 128,
+       "symmetric": false
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 6.537542978754755
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "Mistral-7B-Instruct-v0.2",
+   "variant": "awq_w4g128",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 6.047968689542969,
+   "paper": 4.3,
+   "baseline": 5.93813502430241,
+   "paper_baseline": 4.14,
+   "delta": 0.1098336652405596,
+   "paper_delta": 0.16000000000000014,
+   "status": "above",
+   "tolerance": 0.05,
+   "error": -0.050166334759440545
+  },
+  {
+   "group": "Mistral-7B-Instruct-v0.2",
+   "variant": "awq_w3g128",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 6.537542978754755,
+   "paper": 4.83,
+   "baseline": 5.93813502430241,
+   "paper_baseline": 4.14,
+   "delta": 0.599407954452345,
+   "paper_delta": 0.6900000000000004,
+   "status": "above",
+   "tolerance": 0.05,
+   "error": -0.09059204554765543
+  }
+ ],
+ "calibration_seeds": [
+  {
+   "calibration_seed": 1,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-40GB",
+   "date": "2026-10-12T04:34:16+00:00",
+   "groups": {
+    "Mistral-7B-Instruct-v0.2": {
+     "awq_w4g128": {
+      "wikitext2_test": 6.058710573329194
+     },
+     "awq_w3g128": {
+      "wikitext2_test": 6.5690717482012015
+     }
+    }
+   }
+  },
+  {
+   "calibration_seed": 2,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-40GB",
+   "date": "2026-10-12T09:50:58+00:00",
+   "groups": {
+    "Mistral-7B-Instruct-v0.2": {
+     "awq_w4g128": {
+      "wikitext2_test": 6.065112910019426
+     },
+     "awq_w3g128": {
+      "wikitext2_test": 6.580121817431618
+     }
+    }
+   }
+  }
+ ]
+}

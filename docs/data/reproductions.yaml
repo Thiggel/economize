@@ -83,6 +83,268 @@ studies:
         paper: 6.24
         economize: {mean: 6.239, std: 0.011, seeds: 3}
 
+  - id: awq-int4-llama-7b
+    title: 4-bit weight quantization of LLaMA-7B
+    technique: quant
+    model: huggyllama/llama-7b (fp16)
+    hardware: NVIDIA A100-SXM4-40GB
+    metric: WikiText-2 test perplexity, 2048-token windows
+    better: lower
+    paper:
+      source: AWQ, Table 4
+      arxiv: "2306.00978"
+      baseline: 5.68
+    economize:
+      version: 0.2.0 (calibration seed 0), 0.3.1 (calibration seeds 1 and 2)
+      date: 2026-10-09 (seed 0), 2026-10-12 (seeds 1 and 2)
+      baseline: 5.677
+    command: effeval repro run B3
+    result: data/results/B3.json
+    note: >-
+      Same setup as the Llama-2-7B studies. GPTQ-R is GPTQ with act-order reordering and static groups. GPTQ without
+      reordering varies strongly with the calibration draw on this model: calibration seeds 0 to 4 give 6.24 to 6.89,
+      and the paper's 6.22 lies just below that range. The AWQ row was measured before economize 0.5.0, when AWQ
+      rounded in float32; it now rounds in fp16 as llm-awq does, which lowered AWQ INT3 on Llama-2-7B from 6.31 to
+      6.24.
+    rows:
+      - setting: RTN, INT4, group size 128
+        config: QuantConfig(format="int4", method="rtn", group_size=128, symmetric=False, backend="fake")
+        paper: 5.96
+        economize: 5.964
+      - setting: GPTQ, INT4, group size 128
+        config: >-
+          QuantConfig(format="int4", method="gptq", group_size=128, symmetric=False, act_order=False,
+          true_sequential=True, percdamp=0.01, backend="fake")
+        paper: 6.22
+        economize: {mean: 6.506, std: 0.343, seeds: 3}
+      - setting: GPTQ-R, INT4, group size 128
+        config: >-
+          QuantConfig(format="int4", method="gptq", group_size=128, symmetric=False, act_order=True,
+          static_groups=True, true_sequential=True, percdamp=0.01, backend="fake")
+        paper: 5.83
+        economize: {mean: 5.836, std: 0.019, seeds: 3}
+      - setting: AWQ, INT4, group size 128
+        config: >-
+          QuantConfig(format="int4", method="awq", group_size=128, symmetric=False, awq_grid=20, awq_clip=True,
+          backend="fake")
+        paper: 5.78
+        economize: {mean: 5.809, std: 0.014, seeds: 3}
+
+  - id: gptq-per-channel-llama-7b
+    title: Per-channel GPTQ quantization of LLaMA-7B
+    technique: quant
+    model: huggyllama/llama-7b (fp16)
+    hardware: NVIDIA A100-SXM4-40GB
+    metric: WikiText-2 test perplexity, 2048-token windows
+    better: lower
+    paper:
+      source: GPTQ repository README, LLaMA table
+      arxiv: "2210.17323"
+      baseline: 5.68
+    economize:
+      version: 0.2.0 (calibration seed 0), 0.3.1 (calibration seeds 1 and 2)
+      date: 2026-10-09 (seed 0), 2026-10-12 (seeds 1 and 2)
+      baseline: 5.677
+    command: effeval repro run B4
+    result: data/results/B4.json
+    note: >-
+      Weights are quantized per output channel unless a group size is given, and GPTQ uses act-order and
+      true-sequential quantization as in the README. GPTQ calibrates on 128 random C4 sequences of 2048 tokens. INT4
+      GPTQ at calibration seeds 0 to 4 gives 6.22, 6.07, 6.13, 6.15 and 6.05.
+    rows:
+      - setting: RTN, INT4, per channel
+        config: QuantConfig(format="int4", method="rtn", group_size=None, symmetric=False, backend="fake")
+        paper: 6.29
+        economize: 6.290
+      - setting: GPTQ, INT4, per channel
+        config: >-
+          QuantConfig(format="int4", method="gptq", group_size=None, symmetric=False, act_order=True,
+          true_sequential=True, percdamp=0.01, backend="fake")
+        paper: 6.09
+        economize: {mean: 6.137, std: 0.075, seeds: 3}
+      - setting: RTN, INT3, per channel
+        config: QuantConfig(format="int3", method="rtn", group_size=None, symmetric=False, backend="fake")
+        paper: 25.54
+        economize: 25.581
+      - setting: GPTQ, INT3, per channel
+        config: >-
+          QuantConfig(format="int3", method="gptq", group_size=None, symmetric=False, act_order=True,
+          true_sequential=True, percdamp=0.01, backend="fake")
+        paper: 8.07
+        economize: {mean: 8.111, std: 0.067, seeds: 3}
+      - setting: GPTQ, INT3, group size 128
+        config: >-
+          QuantConfig(format="int3", method="gptq", group_size=128, symmetric=False, act_order=True,
+          static_groups=False, true_sequential=True, percdamp=0.01, backend="fake")
+        paper: 6.61
+        economize: {mean: 6.508, std: 0.050, seeds: 3}
+
+  - id: qserve-int4-llama-3-8b
+    title: 4-bit weight quantization of Llama-3-8B
+    technique: quant
+    model: meta-llama/Meta-Llama-3-8B (fp16)
+    hardware: NVIDIA A100-SXM4-40GB
+    metric: WikiText-2 test perplexity, 2048-token windows
+    better: lower
+    paper:
+      source: QServe, Table 2
+      arxiv: "2405.04532"
+      baseline: 6.14
+    economize:
+      version: 0.2.0 (calibration seed 0), 0.3.1 (calibration seeds 1 and 2)
+      date: 2026-10-09 (seed 0), 2026-10-12 (seeds 1 and 2)
+      baseline: 6.136
+    command: effeval repro run B5
+    result: data/results/B5.json
+    note: >-
+      GPTQ-R is GPTQ with act-order reordering and static groups. GPTQ calibrates on 128 random C4 sequences of 2048
+      tokens and AWQ on 128 blocks of 512 tokens from the Pile validation set; the three seeds draw different samples.
+      The AWQ row was measured before economize 0.5.0, when AWQ rounded in float32 instead of in the weights'
+      precision.
+    rows:
+      - setting: GPTQ-R, INT4, group size 128
+        config: >-
+          QuantConfig(format="int4", method="gptq", group_size=128, symmetric=False, act_order=True,
+          static_groups=True, true_sequential=True, percdamp=0.01, backend="fake")
+        paper: 6.56
+        economize: {mean: 6.560, std: 0.005, seeds: 3}
+      - setting: AWQ, INT4, group size 128
+        config: >-
+          QuantConfig(format="int4", method="awq", group_size=128, symmetric=False, awq_grid=20, awq_clip=True,
+          backend="fake")
+        paper: 6.54
+        economize: {mean: 6.551, std: 0.010, seeds: 3}
+
+  - id: qserve-int4-mistral-7b
+    title: 4-bit weight quantization of Mistral-7B
+    technique: quant
+    model: mistralai/Mistral-7B-v0.1 (fp16)
+    hardware: NVIDIA A100-SXM4-40GB
+    metric: WikiText-2 test perplexity, 2048-token windows
+    better: lower
+    paper:
+      source: QServe, Table 2
+      arxiv: "2405.04532"
+      baseline: 5.25
+    economize:
+      version: 0.2.0 (calibration seed 0), 0.3.1 (calibration seeds 1 and 2)
+      date: 2026-10-09 (seed 0), 2026-10-12 (seeds 1 and 2)
+      baseline: 5.252
+    command: effeval repro run B5
+    result: data/results/B5.json
+    note: Same setup as the Llama-3-8B study.
+    rows:
+      - setting: GPTQ-R, INT4, group size 128
+        config: >-
+          QuantConfig(format="int4", method="gptq", group_size=128, symmetric=False, act_order=True,
+          static_groups=True, true_sequential=True, percdamp=0.01, backend="fake")
+        paper: 5.39
+        economize: {mean: 5.374, std: 0.006, seeds: 3}
+      - setting: AWQ, INT4, group size 128
+        config: >-
+          QuantConfig(format="int4", method="awq", group_size=128, symmetric=False, awq_grid=20, awq_clip=True,
+          backend="fake")
+        paper: 5.37
+        economize: {mean: 5.367, std: 0.004, seeds: 3}
+
+  - id: awq-mistral-7b-instruct
+    title: AWQ on Mistral-7B-Instruct
+    technique: quant
+    model: mistralai/Mistral-7B-Instruct-v0.2 (fp16)
+    hardware: NVIDIA A100-SXM4-40GB
+    metric: WikiText-2 test perplexity, 2048-token windows
+    better: lower
+    paper:
+      source: AWQ, Table 5
+      arxiv: "2306.00978"
+      baseline: 4.14
+    economize:
+      version: 0.2.0 (calibration seed 0), 0.3.1 (calibration seeds 1 and 2)
+      date: 2026-10-10 (seed 0), 2026-10-12 (seeds 1 and 2)
+      baseline: 5.938
+    command: effeval repro run B6
+    result: data/results/B6.json
+    note: >-
+      The paper scores this model under a protocol that economize does not match (dense 4.14 against 5.94), so the
+      changes from dense are the quantities to compare: +0.12 and +0.62 here against +0.16 and +0.69 in the paper.
+      AWQ calibrates on 128 blocks of 512 tokens from the Pile validation set and rounded in float32 at the time of
+      these runs (before economize 0.5.0).
+    rows:
+      - setting: AWQ, INT4, group size 128
+        config: QuantConfig(format="int4", method="awq", group_size=128, symmetric=False, backend="fake")
+        paper: 4.30
+        economize: {mean: 6.057, std: 0.009, seeds: 3}
+      - setting: AWQ, INT3, group size 128
+        config: QuantConfig(format="int3", method="awq", group_size=128, symmetric=False, backend="fake")
+        paper: 4.83
+        economize: {mean: 6.562, std: 0.022, seeds: 3}
+
+  - id: awq-gsm8k-llama-2-7b
+    title: 4-bit weight quantization of Llama-2-7B on GSM8K
+    technique: quant
+    model: meta-llama/Llama-2-7b-hf (fp16)
+    hardware: NVIDIA A100-SXM4-40GB
+    metric: GSM8K accuracy (%), lm-eval gsm8k, 5 shots, strict match
+    better: higher
+    paper:
+      source: AWQ, Table 8
+      arxiv: "2306.00978"
+      baseline: 13.87
+    economize:
+      version: 0.2.0 (calibration seed 0), 0.3.1 (calibration seeds 1 and 2)
+      date: 2026-10-10 (seed 0), 2026-10-12 (seeds 1 and 2)
+      baseline: 13.268
+    command: effeval repro run B7
+    result: data/results/B7.json
+    note: >-
+      The paper does not state the number of shots or the prompt. With 1319 problems one score has a standard error
+      of about 0.9 points. Calibration as in the WikiText-2 studies; AWQ rounded in float32 at the time of these runs
+      (before economize 0.5.0).
+    rows:
+      - setting: RTN, INT4, group size 128
+        config: QuantConfig(format="int4", method="rtn", group_size=128, symmetric=False, backend="fake")
+        paper: 11.07
+        economize: 11.903
+      - setting: GPTQ, INT4, group size 128
+        config: >-
+          QuantConfig(format="int4", method="gptq", group_size=128, symmetric=False, act_order=False,
+          true_sequential=True, percdamp=0.01, backend="fake")
+        paper: 12.13
+        economize: {mean: 12.004, std: 0.244, seeds: 3}
+      - setting: AWQ, INT4, group size 128
+        config: >-
+          QuantConfig(format="int4", method="awq", group_size=128, symmetric=False, awq_grid=20, awq_clip=True,
+          backend="fake")
+        paper: 13.57
+        economize: {mean: 12.585, std: 0.422, seeds: 3}
+
+  - id: torchao-fp8-llama-3-1-8b
+    title: FP8 weights and activations in Llama-3.1-8B
+    technique: quant
+    model: meta-llama/Llama-3.1-8B (bf16)
+    hardware: NVIDIA RTX PRO 6000 Blackwell Server Edition
+    metric: HellaSwag zero-shot accuracy (%), lm-eval
+    better: higher
+    paper:
+      source: torchao, Table 4
+      arxiv: "2507.16099"
+      baseline: 60.01
+    economize:
+      version: 0.2.0
+      date: 2026-10-09
+      baseline: 60.735
+    command: effeval repro run B8
+    result: data/results/B8.json
+    note: >-
+      Weights and activations are cast to fp8 with per-row scales through torchao. WikiText word perplexity rises
+      from 7.546 to 7.615 (paper 7.33 to 7.41). The paper measures a 1.26x decoding speedup on an H100 with
+      torch.compile; economize runs the same configuration under CUDA graphs without compilation and measures 0.98x.
+    rows:
+      - setting: FP8 weights and dynamic FP8 activations, per-row scales
+        config: QuantConfig(format="fp8", method="rtn", group_size=None, backend="torchao", fp8_activations=True)
+        paper: 59.86
+        economize: 60.496
+
   - id: wanda-llama-7b
     title: Unstructured and 2:4 pruning of LLaMA-7B
     technique: prune
@@ -129,6 +391,118 @@ studies:
         paper: 11.53
         economize: {mean: 11.598, std: 0.079, seeds: 3}
 
+  - id: wanda-llama-2-7b
+    title: Unstructured and N:M pruning of Llama-2-7B
+    technique: prune
+    model: meta-llama/Llama-2-7b-hf (fp16)
+    hardware: NVIDIA A100-SXM4-80GB
+    metric: WikiText-2 test perplexity, 4096-token windows
+    better: lower
+    paper:
+      source: Wanda, Table 3
+      arxiv: "2306.11695"
+      baseline: 5.12
+    economize:
+      version: 0.2.0 (calibration seed 0), 0.3.1 (calibration seeds 1 and 2)
+      date: 2026-10-09 (seed 0), 2026-10-12 (seeds 1 and 2)
+      baseline: 5.116
+    command: effeval repro run B12
+    result: data/results/B12.json
+    note: >-
+      SparseGPT and Wanda calibrate on 128 random C4 sequences of 4096 tokens, the model's context, as in Wanda's
+      code; magnitude pruning needs no calibration data and is run once. The authors' code (locuslab/wanda) on the
+      same GPU and weights gives 11.36, 11.35 and 11.23 for Wanda 2:4 at calibration seeds 0 to 2, 6.46 for Wanda
+      50% and 10.23 for SparseGPT 2:4, so the gap of Wanda 2:4 to the paper comes from the hardware and software
+      stack.
+    rows:
+      - setting: Magnitude, 50% unstructured
+        config: PruneConfig(method="magnitude", sparsity=0.5)
+        paper: 14.89
+        economize: 14.796
+      - setting: SparseGPT, 50% unstructured
+        config: PruneConfig(method="sparsegpt", sparsity=0.5)
+        paper: 6.51
+        economize: {mean: 6.520, std: 0.021, seeds: 3}
+      - setting: Wanda, 50% unstructured
+        config: PruneConfig(method="wanda", sparsity=0.5)
+        paper: 6.42
+        economize: {mean: 6.456, std: 0.007, seeds: 3}
+      - setting: Magnitude, 4:8
+        config: PruneConfig(method="magnitude", sparsity="4:8")
+        paper: 16.48
+        economize: 16.529
+      - setting: SparseGPT, 4:8
+        config: PruneConfig(method="sparsegpt", sparsity="4:8")
+        paper: 8.12
+        economize: {mean: 7.943, std: 0.060, seeds: 3}
+      - setting: Wanda, 4:8
+        config: PruneConfig(method="wanda", sparsity="4:8")
+        paper: 7.97
+        economize: {mean: 8.059, std: 0.014, seeds: 3}
+      - setting: Magnitude, 2:4
+        config: PruneConfig(method="magnitude", sparsity="2:4")
+        paper: 54.59
+        economize: 54.382
+      - setting: SparseGPT, 2:4
+        config: PruneConfig(method="sparsegpt", sparsity="2:4")
+        paper: 10.17
+        economize: {mean: 10.252, std: 0.162, seeds: 3}
+      - setting: Wanda, 2:4
+        config: PruneConfig(method="wanda", sparsity="2:4")
+        paper: 11.02
+        economize: {mean: 11.292, std: 0.102, seeds: 3}
+
+  - id: wanda-zero-shot-llama-2-7b
+    title: Zero-shot accuracy of pruned Llama-2-7B
+    technique: prune
+    model: meta-llama/Llama-2-7b-hf (fp16)
+    hardware: NVIDIA A100-SXM4-80GB
+    metric: >-
+      Mean zero-shot accuracy (%) over BoolQ, RTE, HellaSwag, WinoGrande, ARC-easy, ARC-challenge and OpenBookQA
+      (lm-eval, plain accuracy)
+    better: higher
+    paper:
+      source: Wanda, Table 2
+      arxiv: "2306.11695"
+      baseline: 59.71
+    economize:
+      version: 0.2.0 (calibration seed 0), 0.3.1 (calibration seeds 1 and 2)
+      date: 2026-10-09 (seed 0), 2026-10-12 (seeds 1 and 2)
+      baseline: 60.270
+    command: effeval repro run B14
+    result: data/results/B14.json
+    note: >-
+      Calibration as in the WikiText-2 study of this model. The paper used lm-eval commit df3da98c, and the current
+      lm-eval scores the dense model 0.56 points higher (BoolQ, RTE and OpenBookQA rise). The authors' code with
+      that lm-eval commit on the same weights gives 59.72 for the dense model and 47.47 for magnitude 2:4, so the
+      gap of magnitude 2:4 to the paper also appears with the authors' code. RTE has 277 examples and moves the mean
+      by up to 1.4 points between settings.
+    rows:
+      - setting: Magnitude, 50% unstructured
+        config: PruneConfig(method="magnitude", sparsity=0.5)
+        paper: 51.14
+        economize: 51.569
+      - setting: SparseGPT, 50% unstructured
+        config: PruneConfig(method="sparsegpt", sparsity=0.5)
+        paper: 56.24
+        economize: {mean: 56.040, std: 0.223, seeds: 3}
+      - setting: Wanda, 50% unstructured
+        config: PruneConfig(method="wanda", sparsity=0.5)
+        paper: 56.24
+        economize: {mean: 56.167, std: 0.131, seeds: 3}
+      - setting: Magnitude, 2:4
+        config: PruneConfig(method="magnitude", sparsity="2:4")
+        paper: 45.58
+        economize: 47.455
+      - setting: SparseGPT, 2:4
+        config: PruneConfig(method="sparsegpt", sparsity="2:4")
+        paper: 50.94
+        economize: {mean: 50.636, std: 0.777, seeds: 3}
+      - setting: Wanda, 2:4
+        config: PruneConfig(method="wanda", sparsity="2:4")
+        paper: 48.75
+        economize: {mean: 48.777, std: 0.036, seeds: 3}
+
   - id: svd-llm-llama-7b
     title: Low-rank compression of LLaMA-7B
     technique: lowrank
@@ -155,6 +529,127 @@ studies:
         config: LowRankConfig(method="svd_llm", compression=0.2, sequential=False, offload=True)
         paper: 7.94
         economize: {mean: 7.660, std: 0.035, seeds: 3}
+
+  - id: svd-llm-llama-7b-c4
+    title: Low-rank compression of LLaMA-7B on C4
+    technique: lowrank
+    model: huggyllama/llama-7b (fp16)
+    hardware: NVIDIA A100-SXM4-80GB
+    metric: C4 validation perplexity, 2048-token windows
+    better: lower
+    paper:
+      source: SVD-LLM, Table 1
+      arxiv: "2403.07378"
+      baseline: 7.34
+    economize:
+      version: 0.2.0 (calibration seed 0), 0.3.1 (calibration seeds 1 and 2)
+      date: 2026-10-09 (seed 0), 2026-10-12 (seeds 1 and 2)
+      baseline: 7.339
+    command: effeval repro run B19
+    result: data/results/B19.json
+    note: >-
+      Calibration on 256 windows of the WikiText-2 training split, as in the other SVD-LLM studies.
+    rows:
+      - setting: SVD-LLM, 20% parameter compression
+        config: LowRankConfig(method="svd_llm", compression=0.2, sequential=False, offload=True)
+        paper: 15.84
+        economize: {mean: 16.079, std: 0.102, seeds: 3}
+
+  - id: svd-llm-other-7b-models
+    title: Low-rank compression of other 7B models
+    technique: lowrank
+    model: meta-llama/Llama-2-7b-hf, mistralai/Mistral-7B-v0.1, lmsys/vicuna-7b-v1.3 (fp16)
+    hardware: NVIDIA A100-SXM4-80GB
+    metric: WikiText-2 test perplexity, 2048-token windows
+    better: lower
+    paper:
+      source: SVD-LLM, results on other models, (W) rows
+      arxiv: "2403.07378"
+    economize:
+      version: 0.2.0 (calibration seed 0), 0.3.1 (calibration seeds 1 and 2)
+      date: 2026-10-09 (seed 0), 2026-10-12 (seeds 1 and 2)
+    command: effeval repro run B19
+    result: data/results/B19.json
+    note: >-
+      Calibration on 256 windows of the WikiText-2 training split, which favours the WikiText-2 test perplexity. The paper lists only the compressed models; the
+      dense models score 5.393 (Llama-2-7B), 5.149 (Mistral-7B) and 6.773 (Vicuna-7B) under economize, against
+      5.47 and 5.25 in the paper for the first two. The paper does not state its Vicuna version.
+    rows:
+      - setting: Llama-2-7B, 20% parameter compression
+        config: LowRankConfig(method="svd_llm", compression=0.2, sequential=False, offload=True)
+        paper: 8.50
+        economize: {mean: 8.111, std: 0.051, seeds: 3}
+      - setting: Mistral-7B, 20% parameter compression
+        config: LowRankConfig(method="svd_llm", compression=0.2, sequential=False, offload=True)
+        paper: 10.21
+        economize: {mean: 7.300, std: 0.039, seeds: 3}
+      - setting: Vicuna-7B v1.3, 20% parameter compression
+        config: LowRankConfig(method="svd_llm", compression=0.2, sequential=False, offload=True)
+        paper: 8.41
+        economize: {mean: 9.486, std: 0.033, seeds: 3}
+
+  - id: sleb-llama-2-7b-wikitext2
+    title: Block removal in Llama-2-7B on WikiText-2
+    technique: depth_prune
+    model: meta-llama/Llama-2-7b-hf (fp16)
+    hardware: NVIDIA A100-SXM4-40GB
+    metric: WikiText-2 test perplexity, 2048-token windows
+    better: lower
+    paper:
+      source: SLEB, Table 7
+      arxiv: "2402.09025"
+      baseline: 5.47
+    economize:
+      version: 0.2.0 (calibration seed 0), 0.3.1 (calibration seeds 1 and 2)
+      date: 2026-10-10 (seed 0), 2026-10-12 (seeds 1 and 2)
+      baseline: 5.472
+    command: effeval repro run B17
+    result: data/results/B17.json
+    note: >-
+      SLEB keeps the first and the last block and searches the others on 128 rows of the WikiText-2 training split.
+      Seed 0 takes the rows that SLEB's code takes and matches the paper (6.953 at 10%, 9.142 at 20%), removing
+      blocks 11, 14, 23 and 24 at 10% and blocks 10, 11, 14, 15, 23, 24 and 27 at 20% (0-indexed). Seeds 1 and 2
+      draw other rows and find blocks whose removal costs less. Prefill at 20% runs 1.274 times as fast as the dense
+      model (paper 1.28).
+    rows:
+      - setting: SLEB, 10% of blocks (4 of 32)
+        config: DepthPruneConfig(method="sleb", num_blocks=4)
+        paper: 6.95
+        economize: {mean: 6.848, std: 0.091, seeds: 3}
+      - setting: SLEB, 20% of blocks (7 of 32)
+        config: DepthPruneConfig(method="sleb", num_blocks=7)
+        paper: 9.14
+        economize: {mean: 8.926, std: 0.209, seeds: 3}
+
+  - id: sleb-llama-2-7b-c4
+    title: Block removal in Llama-2-7B on C4
+    technique: depth_prune
+    model: meta-llama/Llama-2-7b-hf (fp16)
+    hardware: NVIDIA A100-SXM4-40GB
+    metric: C4 validation perplexity, 2048-token windows
+    better: lower
+    paper:
+      source: SLEB, Table 1
+      arxiv: "2402.09025"
+      baseline: 7.26
+    economize:
+      version: 0.2.0 (calibration seed 0), 0.3.1 (calibration seeds 1 and 2)
+      date: 2026-10-10 (seed 0), 2026-10-12 (seeds 1 and 2)
+      baseline: 7.264
+    command: effeval repro run B17
+    result: data/results/B17.json
+    note: >-
+      Same block search as the WikiText-2 study; C4 follows SLEB's c4-new protocol. Seed 0 gives 9.336 at 10% and
+      12.323 at 20%.
+    rows:
+      - setting: SLEB, 10% of blocks (4 of 32)
+        config: DepthPruneConfig(method="sleb", num_blocks=4)
+        paper: 9.34
+        economize: {mean: 9.200, std: 0.118, seeds: 3}
+      - setting: SLEB, 20% of blocks (7 of 32)
+        config: DepthPruneConfig(method="sleb", num_blocks=7)
+        paper: 12.32
+        economize: {mean: 11.819, std: 0.477, seeds: 3}
 
   - id: teal-llama-3-8b
     title: Activation sparsity in Llama-3-8B
@@ -300,6 +795,69 @@ studies:
         paper: 4.44
         economize: 2.822
 
+  - id: lookup-vicuna-7b
+    title: Prompt lookup decoding of Vicuna-7B
+    technique: lookup
+    model: lmsys/vicuna-7b-v1.3 (fp16)
+    hardware: NVIDIA A100-SXM4-40GB
+    metric: Mean accepted tokens (MAT, as Spec-Bench defines it) on Spec-Bench (480 prompts)
+    better: higher
+    paper:
+      source: Spec-Bench leaderboard
+      arxiv: "2401.07851"
+    economize:
+      version: 0.2.0
+      date: 2026-10-09
+    command: effeval repro run A8
+    result: data/results/A8.json
+    note: >-
+      Greedy decoding. Each verification cycle accepts 2.15 tokens on average, and economize runs 1.50 times as
+      fast as plain greedy decoding on the same prompts.
+    rows:
+      - setting: n-gram up to 3, up to 10 proposed tokens
+        config: LookupConfig(max_ngram=3, max_proposal=10), DecodeConfig(cycle_length=11)
+        paper: 1.73
+        economize: 1.743
+
+  - id: eagle3-speculators-llama-3-1-8b
+    title: EAGLE-3 speculator from the speculators format on Llama-3.1-8B-Instruct
+    technique: eagle3
+    model: meta-llama/Llama-3.1-8B-Instruct (bf16)
+    hardware: NVIDIA A100-SXM4-40GB
+    metric: Mean acceptance length per verification cycle, chain of 3 draft tokens
+    better: higher
+    paper:
+      source: RedHatAI/Llama-3.1-8B-Instruct-speculator.eagle3 model card
+      url: https://huggingface.co/RedHatAI/Llama-3.1-8B-Instruct-speculator.eagle3
+    economize:
+      version: 0.2.0
+      date: 2026-10-09
+    command: effeval repro run A2
+    result: data/results/A2.json
+    note: >-
+      Loads the released drafter, which reads the target's layers 2, 16 and 29. The model card does not publish its
+      prompts, so the sets here are HumanEval and the Spec-Bench categories of the same names. economize runs 1.96,
+      1.89 and 1.75 times as fast as plain greedy decoding on the three sets.
+    rows:
+      - setting: HumanEval
+        config: >-
+          economize.load(base, "RedHatAI/Llama-3.1-8B-Instruct-speculator.eagle3",
+          decoding=DecodeConfig(cycle_length=4))
+        paper: 3.02
+        economize: 3.051
+      - setting: Spec-Bench math reasoning
+        config: >-
+          economize.load(base, "RedHatAI/Llama-3.1-8B-Instruct-speculator.eagle3",
+          decoding=DecodeConfig(cycle_length=4))
+        paper: 2.83
+        economize: 2.914
+      - setting: Spec-Bench summarization
+        config: >-
+          economize.load(base, "RedHatAI/Llama-3.1-8B-Instruct-speculator.eagle3",
+          decoding=DecodeConfig(cycle_length=4))
+        paper: 2.50
+        economize: 2.616
+
   - id: kv-eviction-llama-3-8b-instruct
     title: KV-cache eviction in Llama-3-8B-Instruct
     technique: kv_evict
@@ -352,3 +910,179 @@ studies:
         config: KVEvictConfig(method="streaming", sinks=4, recent=2044)
         paper: 37.82
         economize: 40.65
+
+  - id: kivi-llama-2-7b-coqa
+    title: 2-bit and 4-bit KV cache in Llama-2-7B on CoQA
+    technique: kivi
+    model: meta-llama/Llama-2-7b-hf (fp16)
+    hardware: NVIDIA A100-SXM4-80GB
+    metric: CoQA exact match (%)
+    better: higher
+    paper:
+      source: KIVI, Table 3
+      arxiv: "2402.02750"
+      baseline: 63.88
+    economize:
+      version: 0.2.0
+      date: 2026-10-11
+      baseline: 64.500
+    command: effeval repro run B24
+    result: data/results/B24.json
+    note: >-
+      The cache is quantized inside economize's decode loop, with group size 32 and the most recent 128 tokens
+      kept in full precision. The paper does not state the number of CoQA shots, so lm-eval's defaults are used.
+      TruthfulQA is left out because the paper does not state its metric.
+    rows:
+      - setting: KIVI-4
+        config: KIVIConfig(bits=4, group_size=32, residual_length=128)
+        paper: 63.78
+        economize: 64.300
+      - setting: KIVI-2
+        config: KIVIConfig(bits=2, group_size=32, residual_length=128)
+        paper: 63.05
+        economize: 63.917
+
+  - id: kivi-llama-2-7b-gsm8k
+    title: 2-bit and 4-bit KV cache in Llama-2-7B on GSM8K
+    technique: kivi
+    model: meta-llama/Llama-2-7b-hf (fp16)
+    hardware: NVIDIA A100-SXM4-80GB
+    metric: GSM8K accuracy (%), 5 shots, strict match
+    better: higher
+    paper:
+      source: KIVI, Table 3
+      arxiv: "2402.02750"
+      baseline: 13.50
+    economize:
+      version: 0.2.0
+      date: 2026-10-11
+      baseline: 13.268
+    command: effeval repro run B24
+    result: data/results/B24.json
+    note: >-
+      The cache is quantized inside economize's decode loop, with group size 32 and the most recent 128 tokens
+      kept in full precision. One binomial standard error is about 1 point at 1319 problems.
+    rows:
+      - setting: KIVI-4
+        config: KIVIConfig(bits=4, group_size=32, residual_length=128)
+        paper: 13.80
+        economize: 13.192
+      - setting: KIVI-2
+        config: KIVIConfig(bits=2, group_size=32, residual_length=128)
+        paper: 12.74
+        economize: 12.509
+
+  - id: kivi-mistral-7b-coqa
+    title: 2-bit and 4-bit KV cache in Mistral-7B on CoQA
+    technique: kivi
+    model: mistralai/Mistral-7B-v0.1 (fp16)
+    hardware: NVIDIA A100-SXM4-80GB
+    metric: CoQA exact match (%)
+    better: higher
+    paper:
+      source: KIVI, Table 3
+      arxiv: "2402.02750"
+      baseline: 67.40
+    economize:
+      version: 0.2.0
+      date: 2026-10-11
+      baseline: 68.617
+    command: effeval repro run B24
+    result: data/results/B24.json
+    note: >-
+      The cache is quantized inside economize's decode loop, with group size 32 and the most recent 128 tokens
+      kept in full precision. The paper does not state the number of CoQA shots, so lm-eval's defaults are used.
+      TruthfulQA is left out because the paper does not state its metric.
+    rows:
+      - setting: KIVI-4
+        config: KIVIConfig(bits=4, group_size=32, residual_length=128)
+        paper: 66.95
+        economize: 68.233
+      - setting: KIVI-2
+        config: KIVIConfig(bits=2, group_size=32, residual_length=128)
+        paper: 66.35
+        economize: 67.283
+
+  - id: kivi-mistral-7b-gsm8k
+    title: 2-bit and 4-bit KV cache in Mistral-7B on GSM8K
+    technique: kivi
+    model: mistralai/Mistral-7B-v0.1 (fp16)
+    hardware: NVIDIA A100-SXM4-80GB
+    metric: GSM8K accuracy (%), 5 shots, strict match
+    better: higher
+    paper:
+      source: KIVI, Table 3
+      arxiv: "2402.02750"
+      baseline: 38.36
+    economize:
+      version: 0.2.0
+      date: 2026-10-11
+      baseline: 37.832
+    command: effeval repro run B24
+    result: data/results/B24.json
+    note: >-
+      The cache is quantized inside economize's decode loop, with group size 32 and the most recent 128 tokens
+      kept in full precision. One binomial standard error is about 1 point at 1319 problems.
+    rows:
+      - setting: KIVI-4
+        config: KIVIConfig(bits=4, group_size=32, residual_length=128)
+        paper: 37.30
+        economize: 39.045
+      - setting: KIVI-2
+        config: KIVIConfig(bits=2, group_size=32, residual_length=128)
+        paper: 36.01
+        economize: 36.315
+
+  - id: kv-fp8-llama-3-8b-instruct
+    title: FP8 KV cache in Llama-3-8B-Instruct on GSM8K
+    technique: kv_fp8
+    model: meta-llama/Meta-Llama-3-8B-Instruct (bf16)
+    hardware: NVIDIA A100-SXM4-40GB
+    metric: GSM8K accuracy (%), 5 shots, strict match
+    better: higher
+    paper:
+      source: RedHatAI/Meta-Llama-3-8B-Instruct-FP8-KV model card
+      url: https://huggingface.co/RedHatAI/Meta-Llama-3-8B-Instruct-FP8-KV
+      baseline: 75.44
+    economize:
+      version: 0.2.0
+      date: 2026-10-11
+      baseline: 76.952
+    command: effeval repro run B26
+    result: data/results/B26.json
+    note: >-
+      The model card stores keys and values in e4m3 with calibrated per-tensor scales; the row below casts without
+      scales, and the per-tensor setting (scale="tensor") has not been rerun. Per-token scales give 76.194. One
+      binomial standard error is about 1 point at 1319 problems.
+    rows:
+      - setting: e4m3, no scales
+        config: FP8KVConfig(format="e4m3", scale="none")
+        paper: 74.98
+        economize: 75.436
+
+  - id: kv-fp8-mistral-7b
+    title: FP8 KV cache in Mistral-7B on WikiText-2
+    technique: kv_fp8
+    model: mistralai/Mistral-7B-v0.3 (bf16)
+    hardware: NVIDIA A100-SXM4-40GB
+    metric: WikiText-2 test perplexity, first 40 windows of 2048 tokens, decoded through the cache
+    better: lower
+    digits: 3
+    paper:
+      source: JoLT, Table 2
+      arxiv: "2607.12550"
+      baseline: 6.76
+    economize:
+      version: 0.2.0
+      date: 2026-10-11
+      baseline: 5.576
+    command: effeval repro run B26
+    result: data/results/B26.json
+    note: >-
+      The evaluation windows differ from the paper's, so the absolute values differ. The FP8 cache raises the
+      perplexity by 0.13% here against 0.01% in the paper. Per-token scales give 5.580.
+    rows:
+      - setting: e4m3, no scales
+        config: FP8KVConfig(format="e4m3", scale="none")
+        paper: 6.76
+        economize: 5.583

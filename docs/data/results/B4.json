@@ -1,0 +1,241 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0). The groups hold calibration seed 0; 'calibration_seeds' holds the reruns of the calibrated variants with seeds 1 and 2.",
+ "id": "B4",
+ "title": "GPTQ per-channel INT4 / INT3 and INT3 g128 vs RTN, LLaMA-7B, WikiText-2 ppl at 2048",
+ "paper": "2210.17323 (GPTQ README, LLaMA table, --act-order --true-sequential)",
+ "date": "2026-10-09T16:06:51+00:00",
+ "gpu": "NVIDIA A100-SXM4-40GB",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "llama-7b",
+   "model": "huggyllama/llama-7b",
+   "dtype": "float16",
+   "baseline": "fp16",
+   "variants": {
+    "fp16": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 5.677084738293199
+     }
+    },
+    "rtn_w4": {
+     "techniques": [
+      {
+       "technique": "quant",
+       "format": "int4",
+       "method": "rtn",
+       "group_size": null,
+       "symmetric": false
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 6.289883544945647
+     }
+    },
+    "gptq_w4": {
+     "techniques": [
+      {
+       "technique": "quant",
+       "format": "int4",
+       "method": "gptq",
+       "group_size": null,
+       "symmetric": false,
+       "act_order": true,
+       "true_sequential": true,
+       "percdamp": 0.01
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 6.215286708069369
+     }
+    },
+    "rtn_w3": {
+     "techniques": [
+      {
+       "technique": "quant",
+       "format": "int3",
+       "method": "rtn",
+       "group_size": null,
+       "symmetric": false
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 25.581450503119648
+     }
+    },
+    "gptq_w3": {
+     "techniques": [
+      {
+       "technique": "quant",
+       "format": "int3",
+       "method": "gptq",
+       "group_size": null,
+       "symmetric": false,
+       "act_order": true,
+       "true_sequential": true,
+       "percdamp": 0.01
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 8.050735036033325
+     }
+    },
+    "gptq_w3g128": {
+     "techniques": [
+      {
+       "technique": "quant",
+       "format": "int3",
+       "method": "gptq",
+       "group_size": 128,
+       "symmetric": false,
+       "act_order": true,
+       "static_groups": false,
+       "true_sequential": true,
+       "percdamp": 0.01
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 6.527847245309652
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "llama-7b",
+   "variant": "rtn_w4",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 6.289883544945647,
+   "paper": 6.29,
+   "baseline": 5.677084738293199,
+   "paper_baseline": 5.68,
+   "delta": 0.6127988066524486,
+   "paper_delta": 0.6100000000000003,
+   "status": "pass",
+   "tolerance": 0.05,
+   "error": 0.002798806652448249
+  },
+  {
+   "group": "llama-7b",
+   "variant": "gptq_w4",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 6.215286708069369,
+   "paper": 6.09,
+   "baseline": 5.677084738293199,
+   "paper_baseline": 5.68,
+   "delta": 0.5382019697761704,
+   "paper_delta": 0.41000000000000014,
+   "status": "fail",
+   "tolerance": 0.05,
+   "error": 0.12820196977617027
+  },
+  {
+   "group": "llama-7b",
+   "variant": "rtn_w3",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 25.581450503119648,
+   "paper": 25.54,
+   "baseline": 5.677084738293199,
+   "paper_baseline": 5.68,
+   "delta": 19.904365764826448,
+   "paper_delta": 19.86,
+   "status": "pass",
+   "tolerance": 0.993,
+   "error": 0.044365764826448384
+  },
+  {
+   "group": "llama-7b",
+   "variant": "gptq_w3",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 8.050735036033325,
+   "paper": 8.07,
+   "baseline": 5.677084738293199,
+   "paper_baseline": 5.68,
+   "delta": 2.3736502977401264,
+   "paper_delta": 2.3900000000000006,
+   "status": "pass",
+   "tolerance": 0.11950000000000004,
+   "error": -0.0163497022598742
+  },
+  {
+   "group": "llama-7b",
+   "variant": "gptq_w3g128",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 6.527847245309652,
+   "paper": 6.61,
+   "baseline": 5.677084738293199,
+   "paper_baseline": 5.68,
+   "delta": 0.8507625070164533,
+   "paper_delta": 0.9300000000000006,
+   "status": "fail",
+   "tolerance": 0.05,
+   "error": -0.07923749298354732
+  }
+ ],
+ "calibration_seeds": [
+  {
+   "calibration_seed": 1,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-40GB",
+   "date": "2026-10-12T03:51:04+00:00",
+   "groups": {
+    "llama-7b": {
+     "gptq_w4": {
+      "wikitext2_test": 6.066286594334374
+     },
+     "gptq_w3": {
+      "wikitext2_test": 8.100067435148027
+     },
+     "gptq_w3g128": {
+      "wikitext2_test": 6.451345749121127
+     }
+    }
+   }
+  },
+  {
+   "calibration_seed": 2,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-40GB",
+   "date": "2026-10-12T09:20:32+00:00",
+   "groups": {
+    "llama-7b": {
+     "gptq_w4": {
+      "wikitext2_test": 6.129795309449926
+     },
+     "gptq_w3": {
+      "wikitext2_test": 8.182394351942717
+     },
+     "gptq_w3g128": {
+      "wikitext2_test": 6.544148256772037
+     }
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,284 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0).",
+ "id": "B24",
+ "title": "KIVI-4 / KIVI-2 KV-cache quantization (kivi, G=32, R=128), Llama-2-7B and Mistral-7B, CoQA, TruthfulQA, GSM8K",
+ "paper": "2402.02750 (KIVI Tab. 3)",
+ "date": "2026-10-11T02:23:10+00:00",
+ "gpu": "NVIDIA A100-SXM4-80GB",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "Llama-2-7b-hf",
+   "model": "meta-llama/Llama-2-7b-hf",
+   "dtype": "float16",
+   "baseline": "fp16",
+   "variants": {
+    "fp16": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "coqa": 64.5,
+      "truthfulqa": 32.92533659730722,
+      "gsm8k": 13.267626990144048
+     }
+    },
+    "kivi4": {
+     "techniques": [
+      {
+       "technique": "kivi",
+       "bits": 4,
+       "group_size": 32,
+       "residual_length": 128
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "coqa": 64.3,
+      "truthfulqa": 32.680538555691555,
+      "gsm8k": 13.191811978771797
+     }
+    },
+    "kivi2": {
+     "techniques": [
+      {
+       "technique": "kivi",
+       "bits": 2,
+       "group_size": 32,
+       "residual_length": 128
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "coqa": 63.916666666666664,
+      "truthfulqa": 34.27172582619339,
+      "gsm8k": 12.509476876421532
+     }
+    }
+   }
+  },
+  {
+   "name": "Mistral-7B-v0.1",
+   "model": "mistralai/Mistral-7B-v0.1",
+   "dtype": "float16",
+   "baseline": "fp16",
+   "variants": {
+    "fp16": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "coqa": 68.61666666666666,
+      "truthfulqa": 40.63647490820074,
+      "gsm8k": 37.831690674753595
+     }
+    },
+    "kivi4": {
+     "techniques": [
+      {
+       "technique": "kivi",
+       "bits": 4,
+       "group_size": 32,
+       "residual_length": 128
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "coqa": 68.23333333333333,
+      "truthfulqa": 40.63647490820074,
+      "gsm8k": 39.044730856709634
+     }
+    },
+    "kivi2": {
+     "techniques": [
+      {
+       "technique": "kivi",
+       "bits": 2,
+       "group_size": 32,
+       "residual_length": 128
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "coqa": 67.28333333333335,
+      "truthfulqa": 40.26927784577723,
+      "gsm8k": 36.315390447308566
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "kivi4",
+   "metric": "coqa",
+   "kind": "acc",
+   "economize": 64.3,
+   "paper": 63.78,
+   "baseline": 64.5,
+   "paper_baseline": 63.88,
+   "delta": -0.20000000000000284,
+   "paper_delta": -0.10000000000000142,
+   "status": "pass",
+   "tolerance": 0.5,
+   "error": -0.10000000000000142
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "kivi4",
+   "metric": "truthfulqa",
+   "kind": "info",
+   "economize": 32.680538555691555,
+   "paper": 30.8,
+   "status": "info",
+   "tolerance": null
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "kivi4",
+   "metric": "gsm8k",
+   "kind": "acc",
+   "economize": 13.191811978771797,
+   "paper": 13.8,
+   "baseline": 13.267626990144048,
+   "paper_baseline": 13.5,
+   "delta": -0.0758150113722511,
+   "paper_delta": 0.3000000000000007,
+   "status": "pass",
+   "tolerance": 0.5,
+   "error": -0.3758150113722518
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "kivi2",
+   "metric": "coqa",
+   "kind": "acc",
+   "economize": 63.916666666666664,
+   "paper": 63.05,
+   "baseline": 64.5,
+   "paper_baseline": 63.88,
+   "delta": -0.5833333333333357,
+   "paper_delta": -0.8300000000000054,
+   "status": "pass",
+   "tolerance": 0.5,
+   "error": 0.2466666666666697
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "kivi2",
+   "metric": "truthfulqa",
+   "kind": "info",
+   "economize": 34.27172582619339,
+   "paper": 33.95,
+   "status": "info",
+   "tolerance": null
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "kivi2",
+   "metric": "gsm8k",
+   "kind": "acc",
+   "economize": 12.509476876421532,
+   "paper": 12.74,
+   "baseline": 13.267626990144048,
+   "paper_baseline": 13.5,
+   "delta": -0.7581501137225164,
+   "paper_delta": -0.7599999999999998,
+   "status": "pass",
+   "tolerance": 0.5,
+   "error": 0.0018498862774833924
+  },
+  {
+   "group": "Mistral-7B-v0.1",
+   "variant": "kivi4",
+   "metric": "coqa",
+   "kind": "acc",
+   "economize": 68.23333333333333,
+   "paper": 66.95,
+   "baseline": 68.61666666666666,
+   "paper_baseline": 67.4,
+   "delta": -0.38333333333332575,
+   "paper_delta": -0.45000000000000284,
+   "status": "pass",
+   "tolerance": 0.5,
+   "error": 0.06666666666667709
+  },
+  {
+   "group": "Mistral-7B-v0.1",
+   "variant": "kivi4",
+   "metric": "truthfulqa",
+   "kind": "info",
+   "economize": 40.63647490820074,
+   "paper": 30.49,
+   "status": "info",
+   "tolerance": null
+  },
+  {
+   "group": "Mistral-7B-v0.1",
+   "variant": "kivi4",
+   "metric": "gsm8k",
+   "kind": "acc",
+   "economize": 39.044730856709634,
+   "paper": 37.3,
+   "baseline": 37.831690674753595,
+   "paper_baseline": 38.36,
+   "delta": 1.213040181956039,
+   "paper_delta": -1.0600000000000023,
+   "status": "above",
+   "tolerance": 0.5,
+   "error": 2.2730401819560413
+  },
+  {
+   "group": "Mistral-7B-v0.1",
+   "variant": "kivi2",
+   "metric": "coqa",
+   "kind": "acc",
+   "economize": 67.28333333333335,
+   "paper": 66.35,
+   "baseline": 68.61666666666666,
+   "paper_baseline": 67.4,
+   "delta": -1.3333333333333144,
+   "paper_delta": -1.0500000000000114,
+   "status": "pass",
+   "tolerance": 0.5,
+   "error": -0.283333333333303
+  },
+  {
+   "group": "Mistral-7B-v0.1",
+   "variant": "kivi2",
+   "metric": "truthfulqa",
+   "kind": "info",
+   "economize": 40.26927784577723,
+   "paper": 32.17,
+   "status": "info",
+   "tolerance": null
+  },
+  {
+   "group": "Mistral-7B-v0.1",
+   "variant": "kivi2",
+   "metric": "gsm8k",
+   "kind": "acc",
+   "economize": 36.315390447308566,
+   "paper": 36.01,
+   "baseline": 37.831690674753595,
+   "paper_baseline": 38.36,
+   "delta": -1.5163002274450292,
+   "paper_delta": -2.3500000000000014,
+   "status": "above",
+   "tolerance": 0.5,
+   "error": 0.8336997725549722
+  }
+ ]
+}

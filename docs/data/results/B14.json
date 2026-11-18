@@ -1,0 +1,361 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0). The groups hold calibration seed 0; 'calibration_seeds' holds the reruns of the calibrated variants with seeds 1 and 2.",
+ "id": "B14",
+ "title": "Magnitude / SparseGPT / Wanda at 50 % and 2:4, Llama-2-7B, 7-task zero-shot mean accuracy",
+ "paper": "2306.11695 (Wanda Tab. 2)",
+ "date": "2026-10-09T16:10:52+00:00",
+ "gpu": "NVIDIA A100-SXM4-80GB",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "Llama-2-7b-hf",
+   "model": "meta-llama/Llama-2-7b-hf",
+   "dtype": "float16",
+   "baseline": "dense",
+   "variants": {
+    "dense": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "boolq": 79.38837920489297,
+      "rte": 63.898916967509024,
+      "hellaswag": 57.11013742282414,
+      "winogrande": 69.45540647198106,
+      "arc_easy": 75.46296296296296,
+      "arc_challenge": 43.1740614334471,
+      "openbookqa": 33.4,
+      "mean": 60.26998063765961
+     }
+    },
+    "magnitude_50": {
+     "techniques": [
+      {
+       "technique": "prune",
+       "method": "magnitude",
+       "sparsity": 0.5
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "boolq": 61.65137614678899,
+      "rte": 58.12274368231047,
+      "hellaswag": 49.43238398725354,
+      "winogrande": 63.22020520915549,
+      "arc_easy": 64.18350168350169,
+      "arc_challenge": 36.774744027303754,
+      "openbookqa": 27.6,
+      "mean": 51.56927924804484
+     }
+    },
+    "sparsegpt_50": {
+     "techniques": [
+      {
+       "technique": "prune",
+       "method": "sparsegpt",
+       "sparsity": 0.5
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "boolq": 75.47400611620795,
+      "rte": 54.51263537906137,
+      "hellaswag": 52.58912567217686,
+      "winogrande": 68.74506708760852,
+      "arc_easy": 72.18013468013467,
+      "arc_challenge": 38.737201365187715,
+      "openbookqa": 29.799999999999997,
+      "mean": 56.00545290005387
+     }
+    },
+    "wanda_50": {
+     "techniques": [
+      {
+       "technique": "prune",
+       "method": "wanda",
+       "sparsity": 0.5
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "boolq": 77.21712538226299,
+      "rte": 53.42960288808665,
+      "hellaswag": 52.32025492929695,
+      "winogrande": 67.5611681136543,
+      "arc_easy": 72.85353535353535,
+      "arc_challenge": 39.334470989761094,
+      "openbookqa": 31.2,
+      "mean": 56.27373680808534
+     }
+    },
+    "magnitude_2of4": {
+     "techniques": [
+      {
+       "technique": "prune",
+       "method": "magnitude",
+       "sparsity": "2:4"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "boolq": 58.13455657492354,
+      "rte": 53.068592057761734,
+      "hellaswag": 44.6126269667397,
+      "winogrande": 61.089187056037886,
+      "arc_easy": 60.31144781144781,
+      "arc_challenge": 31.569965870307165,
+      "openbookqa": 23.400000000000002,
+      "mean": 47.455196619602546
+     }
+    },
+    "sparsegpt_2of4": {
+     "techniques": [
+      {
+       "technique": "prune",
+       "method": "sparsegpt",
+       "sparsity": "2:4"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "boolq": 71.49847094801223,
+      "rte": 60.64981949458483,
+      "hellaswag": 43.17864967138021,
+      "winogrande": 66.06156274664562,
+      "arc_easy": 63.678451178451176,
+      "arc_challenge": 31.399317406143346,
+      "openbookqa": 24.2,
+      "mean": 51.52375306360249
+     }
+    },
+    "wanda_2of4": {
+     "techniques": [
+      {
+       "technique": "prune",
+       "method": "wanda",
+       "sparsity": "2:4"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "boolq": 68.2262996941896,
+      "rte": 53.068592057761734,
+      "hellaswag": 41.27663811989643,
+      "winogrande": 62.58879242304657,
+      "arc_easy": 62.62626262626263,
+      "arc_challenge": 29.60750853242321,
+      "openbookqa": 24.0,
+      "mean": 48.77058477908288
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "magnitude_50",
+   "metric": "mean",
+   "kind": "acc",
+   "economize": 51.56927924804484,
+   "paper": 51.14,
+   "baseline": 60.26998063765961,
+   "paper_baseline": 59.71,
+   "delta": -8.700701389614764,
+   "paper_delta": -8.57,
+   "status": "pass",
+   "tolerance": 0.5,
+   "error": -0.13070138961476374
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "sparsegpt_50",
+   "metric": "mean",
+   "kind": "acc",
+   "economize": 56.00545290005387,
+   "paper": 56.24,
+   "baseline": 60.26998063765961,
+   "paper_baseline": 59.71,
+   "delta": -4.264527737605739,
+   "paper_delta": -3.469999999999999,
+   "status": "fail",
+   "tolerance": 0.5,
+   "error": -0.7945277376057405
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "wanda_50",
+   "metric": "mean",
+   "kind": "acc",
+   "economize": 56.27373680808534,
+   "paper": 56.24,
+   "baseline": 60.26998063765961,
+   "paper_baseline": 59.71,
+   "delta": -3.9962438295742686,
+   "paper_delta": -3.469999999999999,
+   "status": "fail",
+   "tolerance": 0.5,
+   "error": -0.5262438295742697
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "magnitude_2of4",
+   "metric": "mean",
+   "kind": "acc",
+   "economize": 47.455196619602546,
+   "paper": 45.58,
+   "baseline": 60.26998063765961,
+   "paper_baseline": 59.71,
+   "delta": -12.814784018057061,
+   "paper_delta": -14.130000000000003,
+   "status": "fail",
+   "tolerance": 0.5,
+   "error": 1.3152159819429414
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "sparsegpt_2of4",
+   "metric": "mean",
+   "kind": "acc",
+   "economize": 51.52375306360249,
+   "paper": 50.94,
+   "baseline": 60.26998063765961,
+   "paper_baseline": 59.71,
+   "delta": -8.746227574057116,
+   "paper_delta": -8.770000000000003,
+   "status": "pass",
+   "tolerance": 0.5,
+   "error": 0.02377242594288731
+  },
+  {
+   "group": "Llama-2-7b-hf",
+   "variant": "wanda_2of4",
+   "metric": "mean",
+   "kind": "acc",
+   "economize": 48.77058477908288,
+   "paper": 48.75,
+   "baseline": 60.26998063765961,
+   "paper_baseline": 59.71,
+   "delta": -11.499395858576726,
+   "paper_delta": -10.96,
+   "status": "fail",
+   "tolerance": 0.5,
+   "error": -0.5393958585767251
+  }
+ ],
+ "calibration_seeds": [
+  {
+   "calibration_seed": 1,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-80GB",
+   "date": "2026-10-12T05:30:17+00:00",
+   "groups": {
+    "Llama-2-7b-hf": {
+     "sparsegpt_50": {
+      "boolq": 76.91131498470948,
+      "rte": 53.42960288808665,
+      "hellaswag": 52.5592511451902,
+      "winogrande": 68.90292028413575,
+      "arc_easy": 73.27441077441077,
+      "arc_challenge": 39.67576791808874,
+      "openbookqa": 29.2,
+      "mean": 56.27903828494594
+     },
+     "wanda_50": {
+      "boolq": 75.93272171253822,
+      "rte": 53.79061371841155,
+      "hellaswag": 52.409878510256924,
+      "winogrande": 67.08760852407262,
+      "arc_easy": 72.64309764309765,
+      "arc_challenge": 39.07849829351536,
+      "openbookqa": 31.2,
+      "mean": 56.02034548598461
+     },
+     "sparsegpt_2of4": {
+      "boolq": 68.96024464831805,
+      "rte": 54.87364620938629,
+      "hellaswag": 43.47739494124676,
+      "winogrande": 65.90370955011839,
+      "arc_easy": 64.52020202020202,
+      "arc_challenge": 31.99658703071672,
+      "openbookqa": 22.400000000000002,
+      "mean": 50.30454062856975
+     },
+     "wanda_2of4": {
+      "boolq": 68.74617737003058,
+      "rte": 52.707581227436826,
+      "hellaswag": 41.27663811989643,
+      "winogrande": 62.74664561957379,
+      "arc_easy": 62.20538720538721,
+      "arc_challenge": 28.924914675767916,
+      "openbookqa": 24.6,
+      "mean": 48.743906316870394
+     }
+    }
+   }
+  },
+  {
+   "calibration_seed": 2,
+   "economize": "0.3.1",
+   "gpu": "NVIDIA A100-SXM4-80GB",
+   "date": "2026-10-12T11:06:04+00:00",
+   "groups": {
+    "Llama-2-7b-hf": {
+     "sparsegpt_50": {
+      "boolq": 76.45259938837921,
+      "rte": 53.068592057761734,
+      "hellaswag": 52.25054769966142,
+      "winogrande": 68.98184688239937,
+      "arc_easy": 72.39057239057239,
+      "arc_challenge": 37.71331058020478,
+      "openbookqa": 30.0,
+      "mean": 55.836781285568414
+     },
+     "wanda_50": {
+      "boolq": 76.3302752293578,
+      "rte": 53.79061371841155,
+      "hellaswag": 52.49950209121689,
+      "winogrande": 67.5611681136543,
+      "arc_easy": 72.89562289562289,
+      "arc_challenge": 39.76109215017065,
+      "openbookqa": 30.599999999999998,
+      "mean": 56.205467742633445
+     },
+     "sparsegpt_2of4": {
+      "boolq": 67.52293577981652,
+      "rte": 54.51263537906137,
+      "hellaswag": 43.20852419836686,
+      "winogrande": 64.24625098658248,
+      "arc_easy": 64.64646464646465,
+      "arc_challenge": 31.825938566552903,
+      "openbookqa": 24.6,
+      "mean": 50.08039279383497
+     },
+     "wanda_2of4": {
+      "boolq": 67.49235474006116,
+      "rte": 53.79061371841155,
+      "hellaswag": 41.107349133638714,
+      "winogrande": 63.77269139700079,
+      "arc_easy": 61.910774410774415,
+      "arc_challenge": 30.034129692832767,
+      "openbookqa": 23.599999999999998,
+      "mean": 48.81541615610278
+     }
+    }
+   }
+  }
+ ]
+}

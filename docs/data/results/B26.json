@@ -1,0 +1,138 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0).",
+ "id": "B26",
+ "title": "FP8 (e4m3) KV cache (kv_fp8, scale none / token), Llama-3-8B-Instruct GSM8K and Mistral-7B-v0.3 WikiText-2",
+ "paper": "RedHatAI/Meta-Llama-3-8B-Instruct-FP8-KV model card; 2607.12550 (JoLT Tab. 2)",
+ "date": "2026-10-11T05:46:59+00:00",
+ "gpu": "NVIDIA A100-SXM4-40GB",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "Meta-Llama-3-8B-Instruct",
+   "model": "meta-llama/Meta-Llama-3-8B-Instruct",
+   "dtype": "bfloat16",
+   "baseline": "bf16",
+   "variants": {
+    "bf16": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "gsm8k": 76.95223654283548
+     }
+    },
+    "kv_fp8_e4m3": {
+     "techniques": [
+      {
+       "technique": "kv_fp8",
+       "format": "e4m3",
+       "scale": "none"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "gsm8k": 75.43593631539045
+     }
+    },
+    "kv_fp8_e4m3_token": {
+     "techniques": [
+      {
+       "technique": "kv_fp8",
+       "format": "e4m3",
+       "scale": "token"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "gsm8k": 76.19408642911296
+     }
+    }
+   }
+  },
+  {
+   "name": "Mistral-7B-v0.3",
+   "model": "mistralai/Mistral-7B-v0.3",
+   "dtype": "bfloat16",
+   "baseline": "bf16",
+   "variants": {
+    "bf16": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 5.576006411352852
+     }
+    },
+    "kv_fp8_e4m3": {
+     "techniques": [
+      {
+       "technique": "kv_fp8",
+       "format": "e4m3",
+       "scale": "none"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 5.583236977605821
+     }
+    },
+    "kv_fp8_e4m3_token": {
+     "techniques": [
+      {
+       "technique": "kv_fp8",
+       "format": "e4m3",
+       "scale": "token"
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "wikitext2_test": 5.580266563054388
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "Meta-Llama-3-8B-Instruct",
+   "variant": "kv_fp8_e4m3",
+   "metric": "gsm8k",
+   "kind": "acc",
+   "economize": 75.43593631539045,
+   "paper": 74.98,
+   "baseline": 76.95223654283548,
+   "paper_baseline": 75.44,
+   "delta": -1.5163002274450292,
+   "paper_delta": -0.45999999999999375,
+   "status": "fail",
+   "tolerance": 0.5,
+   "error": -1.0563002274450355
+  },
+  {
+   "group": "Mistral-7B-v0.3",
+   "variant": "kv_fp8_e4m3",
+   "metric": "wikitext2_test",
+   "kind": "ppl",
+   "economize": 5.583236977605821,
+   "paper": 6.76,
+   "baseline": 5.576006411352852,
+   "paper_baseline": 6.76,
+   "delta": 0.007230566252968806,
+   "paper_delta": 0.0,
+   "status": "pass",
+   "tolerance": 0.05,
+   "error": 0.007230566252968806
+  }
+ ]
+}
