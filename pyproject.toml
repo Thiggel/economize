@@ -50,7 +50,8 @@ docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.6,<10", "mkdocstrings[python]>=1.0
 # The pinned lint and type gate (docs/CONTRIBUTING.md runs the same versions through uvx).
 dev = ["economize[test]", "ruff==0.16.10", "mypy==2.4.0"]
 peft = ["peft>=0.21"]
-quant = ["torchao>=0.18", "compressed-tensors>=0.19"]
+# compressed-tensors 0.17 is the version vLLM 0.30 pins, so the quant and vllm extras install together.
+quant = ["torchao>=0.18", "compressed-tensors>=0.17"]
 kernels = ["kernels>=0.17"]
 train = ["accelerate>=1.14", "datasets>=5.0", "trl>=1.14"]
 eval = ["lm-eval[hf]>=0.4.13"]

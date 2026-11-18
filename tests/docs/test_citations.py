@@ -243,7 +243,7 @@ def test_unknown_key_raises(bib: dict) -> None:
 
 
 def test_plugin_error_from_the_mkdocs_event() -> None:
-    from mkdocs.exceptions import PluginError
+    PluginError = pytest.importorskip("mkdocs.exceptions", reason="needs the docs extra").PluginError
 
     page = types.SimpleNamespace(file=types.SimpleNamespace(src_uri="tutorials/x.md"))
     with pytest.raises(PluginError, match=r"tutorials/x\.md: unknown citation key\(s\) @nobody2020x"):

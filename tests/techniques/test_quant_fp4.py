@@ -89,7 +89,13 @@ def test_fp4_matches_compressed_tensors(fmt: str, seed: int) -> None:
 def test_e2m1_rounding_and_packing_follow_compressed_tensors() -> None:
     """Every midpoint (and its neighbours) rounds as ``cast_to_fp4``, and the codes pack as ``pack_fp4_to_uint8``."""
     from compressed_tensors.compressors.nvfp4.helpers import pack_fp4_to_uint8
-    from compressed_tensors.quantization.utils.fp4_utils import cast_to_fp4
+
+    try:
+        from compressed_tensors.quantization.utils.fp4_utils import cast_to_fp4
+    except ImportError:  # compressed-tensors < 0.19 (the version vLLM 0.30 pins) keeps it on the E2M1 dtype class
+        from compressed_tensors.quantization.quant_args import FP4_E2M1_DATA
+
+        cast_to_fp4 = FP4_E2M1_DATA.cast_to_fp4
 
     points = torch.tensor([0.0, 0.25, 0.75, 1.25, 1.75, 2.5, 3.5, 5.0, 6.0, 7.0, 0.2499, 0.2501, 3.4999, 3.5001])
     x = torch.cat([points, -points])
