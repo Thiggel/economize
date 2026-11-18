@@ -4,7 +4,8 @@ Two more draft policies build the tree of a cycle beyond the EAGLE-2 growth of
 [`dynamic_tree`](dynamic_tree.md). `draft_policy="sequoia"` drafts one fixed tree whose shape a dynamic program picks
 from measured acceptance rates and, optionally, the hardware's latencies [@chen2024sequoia].
 `draft_policy="specexec"` grows the tree by best-first search over the drafter's continuations [@svirschevski2024specexec]. Both are policies and work with every drafter that implements tree steps: EAGLE-3, the early exit /
-LayerSkip drafter and FR-Spec around either of them. Both are lossless under the `greedy` and `typical` verifiers, since the exact pass verifies their trees as it
+LayerSkip drafter, a separate draft LM (`draft_model`, the setting of both papers) and FR-Spec around either of the
+self-drafters. Both are lossless under the `greedy` and `typical` verifiers, since the exact pass verifies their trees as it
 verifies any draft tree.
 
 Sequoia and SpecExec change how a drafter's proposals are arranged and leave the drafter itself alone, so they are
@@ -93,11 +94,19 @@ selection would discard. economize runs all `depth - 1` steps, so every cycle ha
 graphs. The official `min_log_prob` cut is left out for the same reason. SpecExec's offloading setting (a 70B base
 model streamed from host memory) is a deployment choice outside the policy; the policy reproduces its tree search.
 
+## Faithfulness
+
+Both policies reproduce the papers' tree construction: Sequoia's dynamic program (exact, checked against the official
+code) and its hardware-aware choice, and SpecExec's best-first search with the differences listed above. Verification
+is the part they leave out. The trees are verified by the `greedy` and `typical` verifiers, so both policies are
+lossless for greedy decoding only. Sequoia's sampling-without-replacement verification and SpecExec's verification at a
+temperature above 0 are not implemented, and a tree policy with the `rejection` verifier raises `ConfigError`.
+
 ## Requirements and cost accounting
 
 The requirements are those of [`dynamic_tree`](dynamic_tree.md#requirements-and-limits): a drafter that implements
 `TreeStepDrafter`, a tree verifier (`greedy` or `typical`), no recurrent layers, and `total_tokens <= 63` for the
-economize attention kernel's boolean tree masks. Two-model drafting,
+economize attention kernel's boolean tree masks. PARD, a draft LM on a second device,
 vendor MTP heads and drafters with their own static trees are rejected with `ConfigError` when the decoder is built.
 Draft policies belong to economize's own decoder. A vLLM or SGLang export serves the drafting technique with the
 engine's speculative decoding and its own proposal shapes, so neither policy carries over to a served model.

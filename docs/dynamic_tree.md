@@ -2,7 +2,8 @@
 
 `draft_policy="dynamic_tree"` grows an EAGLE-2 style draft tree [@li2024eagle2] in every cycle
 and verifies it in one pass of the model. It is a draft policy, so it works with every drafter that can run one draft
-step over a set of tree nodes: EAGLE-3, the early exit / LayerSkip drafter and FR-Spec around either of them.
+step over a set of tree nodes: EAGLE-3, the early exit / LayerSkip drafter, a separate draft LM (`draft_model`) and
+FR-Spec around either of the self-drafters.
 
 ```python
 import economize
@@ -59,13 +60,17 @@ The economize attention kernel (`attn_implementation="economize"`) takes boolean
   commits drafts without checking them.
 - The drafter implements `economize.decoding.TreeStepDrafter` (`supports_tree_steps`, `tree_begin`, `tree_state`,
   `tree_step`). Drafters that do not are rejected with `ConfigError` when the decoder is built: vendor MTP heads,
-  two-model drafting and PARD, DFlash block drafting, prompt lookup, KnapSpec, and drafters that already draft static trees (Medusa, Hydra, ReDrafter). Models
+  PARD and a draft LM on a second device (`placed_draft_model`), DFlash block drafting, prompt lookup, KnapSpec, and drafters that already draft static trees (Medusa, Hydra, ReDrafter). Models
   with recurrent layers are rejected too: their recurrent layers run a tree only as whole root-to-node paths
   (static trees are verified that way), while a dynamic tree's draft steps cover one level at a time.
 - Batches: every row grows its own tree of the same shape, and rows of different lengths are supported.
 - CUDA graphs (`cuda_graphs=True`): each draft depth is captured as its own graph, since the number of ancestors
   differs per depth. The shapes are fixed per (`depth`, `topk`, `total_tokens`) and batch size. Root step and verify
   pass use the graphs they use for chains.
+
+A separate draft LM (`draft_model`) steps over the tree in its own KV cache. Its catch-up before the root step
+processes the committed tokens it has not read yet, and since a tree leaves that cache valid only up to the root,
+the accepted tokens of a cycle are read again by the next catch-up (logged as `draft_catchup`).
 
 ## Overhead
 
