@@ -99,6 +99,9 @@
 - The attention kernels run in Triton's CPU interpreter (`TRITON_INTERPRET=1`): the interpreter cannot call
   libdevice, so the round-to-nearest helpers of the decode, MInference and KIVI kernels are plain operators there,
   and the Quest kernel no longer masks a block with a scalar bool.
+- The hybrid cache of the decoders and the training rollout implements `get_conv_state`, `get_recurrent_state` and
+  `is_recording_past`, which the linear-attention and Mamba layers of transformers 5.23 read (Qwen3.5, Qwen3-Next,
+  Nemotron-H).
 
 ## 0.4.0 (2026-11-04)
 
