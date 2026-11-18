@@ -35,5 +35,8 @@ class LowRankTechnique(CalibratedWeightTransform):
     methods: ClassVar[Registry[Any]] = FACTORIZERS
     config: LowRankConfig
 
+    def plain_save_issue(self) -> str:
+        return "factorized maps are module pairs whose weights the model's architecture has no keys for"
+
     def transform(self, adapter: Any, batches: Sequence[Tensor] | None) -> dict[str, Any]:
         return lowrank_model(adapter, self.config, batches)

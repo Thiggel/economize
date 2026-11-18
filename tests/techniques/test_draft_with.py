@@ -227,7 +227,7 @@ def test_refuses_a_technique_on_both_paths(calib: torch.Tensor) -> None:
 
 def test_refuses_a_held_transform_that_precedes_an_outer_one(calib: torch.Tensor) -> None:
     with pytest.raises(EconomizeError):
-        _apply(make_tiny_model(), QuantConfig(backend="fake"),
+        _apply(make_tiny_model(), QuantConfig(group_size=32, backend="fake"),
                DraftWith(PruneConfig(sparsity=0.5, semi_structured=False)), calib=calib)
 
 

@@ -84,7 +84,10 @@ respect to the processed target. Differences from stock `generate`:
 
 - Batches are decoded row by row. Left padding is stripped per row and finished rows are padded with
   `pad_token_id`, so the output has the same shape and the same tokens as a batched call with a lossless verifier.
-- `output_scores` and `output_logits` cost one extra forward pass over the finished sequences.
+- `output_scores` and `output_logits` cost one extra forward pass of the base model over the finished sequences.
+  They raise `ConfigError` when that pass would not give the logits the tokens were chosen from: with a lossy
+  verifier (`accept_all`, `typical`) or a lossy technique that acts while decoding (KV cache compression,
+  activation sparsity, layer skipping). Quantized, pruned or otherwise rewritten weights are part of the pass.
 - Options that select another algorithm raise `ConfigError` and are never ignored: beam search, assisted
   generation (`assistant_model`), classifier-free guidance, prefilled `past_key_values`, `output_attentions` /
   `output_hidden_states`, `synced_gpus=True`, and `do_sample=True` with a greedy-only verifier.

@@ -76,7 +76,7 @@ class CycleDecoder:
             :meth:`decode_batch` calls, so reuse one decoder for repeated generations.
 
     Raises:
-        ConfigError: ``cycle_length > 1`` without a drafter, ``lossless=True`` with a verifier that commits drafts,
+        ConfigError: ``cycle_length > 1`` without a drafter, ``lossless=True`` with a lossy verifier,
             a verifier that both commits drafts and claims to verify trees, or a drafter that drafts trees
             (:meth:`~economize.decoding.Drafter.drafts_trees`) with a verifier that cannot verify them. Unknown verifier
             options raise from the verifier.
@@ -207,13 +207,17 @@ def _check_combination(config: DecodeConfig, verifier: Verifier, drafter: Drafte
     if config.lossless is True and verifier.commits_drafts:
         raise ConfigError(f"lossless=True contradicts verifier {name!r}, which keeps drafts without verifying them; "
                           "drop one of the two options")
+    if config.lossless is True and not verifier.lossless:
+        raise ConfigError(f"lossless=True contradicts verifier {name!r}, which may accept tokens the model would not "
+                          "have produced; use the 'greedy' or 'rejection' verifier, or drop lossless=True")
     if verifier.commits_drafts and verifier.supports_trees:
         raise ConfigError(f"verifier {name!r} commits drafts as they are proposed, so no exact pass verifies a draft "
                           "tree; a verifier sets at most one of commits_drafts and supports_trees")
     if config.cycle_length > 1 and drafter is not None and drafter.drafts_trees(verifier) \
             and not verifier.supports_trees:
         raise ConfigError(f"{type(drafter).__name__} drafts trees, which verifier {name!r} cannot verify; use a "
-                          "verifier that verifies trees (lossless greedy, rejection, typical) or a chain drafter")
+                          "verifier that verifies trees (the lossless greedy and rejection, or the lossy typical) or a "
+                          "chain drafter")
 
 
 def _per_row(values: Sequence[Any] | None, count: int, name: str) -> list[Any] | None:

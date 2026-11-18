@@ -11,6 +11,7 @@ from economize.arch import adapter_for
 from economize.core.calibration import (
     AbsMeanObserver,
     FeatureMeanObserver,
+    MagnitudeSampleObserver,
     SquaredNormObserver,
     calibration_source,
     layer_device,
@@ -73,6 +74,23 @@ def test_feature_mean_observers_differ_only_in_their_reduction() -> None:
     torch.testing.assert_close(custom.mean, flat.clamp(min=0).mean(0))
     with pytest.raises(TypeError):
         FeatureMeanObserver(module)  # type: ignore[abstract]
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_magnitude_sample_is_uniform_over_calls(seed: int) -> None:
+    """Every observed value survives with the same probability, so each quarter of 128 equal calls holds about a
+    quarter of the sample (the earlier sampler kept 74.7% from the last quarter), and a small set is kept whole."""
+    observer = MagnitudeSampleObserver(max_samples=1 << 14, seed=seed)
+    for call in range(128):
+        observer.update(torch.full((4, 1024), float(call)) * (-1) ** call)
+    calls = observer.values()
+    share = torch.bincount(calls.long() // 32, minlength=4).float() / calls.numel()
+    torch.testing.assert_close(share, torch.full((4,), 0.25), atol=0.02, rtol=0)
+    assert calls.numel() == 1 << 14 and bool((calls >= 0).all())
+    small = MagnitudeSampleObserver(max_samples=100, seed=seed)
+    small.update(torch.arange(30.0))
+    small.update(-torch.arange(30.0, 60.0))
+    assert sorted(small.values().tolist()) == list(range(60))
 
 
 def test_calibration_helpers_ask_the_adapter(tiny_model) -> None:

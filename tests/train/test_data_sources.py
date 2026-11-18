@@ -236,6 +236,25 @@ def test_generate_self_distillation(tokenizer: Any, chat: bool) -> None:
         assert int(example.input_ids.max()) < VOCAB
 
 
+def test_self_distillation_stops_at_every_generation_config_eos(tokenizer: Any) -> None:
+    """A model that stops on an id besides the tokenizer's EOS (the generation config lists several) ends its row
+    early, and ``generate`` fills the rest with pad; neither the filler nor anything after the stop is a target."""
+    model = make_tiny_model()
+    prompts = ["w1 w2 w3 w4 w5", "w6 w7"]
+    greedy = [reference_greedy(model, torch.tensor(tokenizer(p)["input_ids"]), 8).tolist() for p in prompts]
+    stop = greedy[0][1]  # the first prompt stops after two tokens
+    eos, pad = tokenizer.eos_token_id, tokenizer.pad_token_id
+    assume = stop not in (eos, pad) and stop not in greedy[1] and eos not in greedy[0][:2]
+    if not assume:
+        pytest.skip("the tiny model's greedy continuation does not fit the scenario")
+    model.generation_config.eos_token_id = [eos, stop]
+    examples = generate_self_distillation(model, tokenizer, prompts, max_new_tokens=8, batch_size=2)
+    first = len(tokenizer(prompts[0])["input_ids"])
+    assert examples[0].input_ids[first:].tolist() == greedy[0][:2]
+    assert pad not in examples[0].input_ids[first:].tolist()
+    assert examples[0].loss_mask is not None and int(examples[0].loss_mask.sum()) == 2
+
+
 # ---- sharding over processes ----
 @pytest.fixture
 def rows() -> torch.Tensor:

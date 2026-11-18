@@ -29,6 +29,7 @@ from economize.techniques.quant import (
     quantize_rtn,
     quantized_copy,
     restore_draft,
+    split_draft_modules,
 )
 from economize.techniques.quant.awq import ScaleGroup, apply_clip, derive_scale_groups
 from economize.techniques.quant.methods import awq_scale_groups
@@ -248,7 +249,7 @@ def test_rtn_model_writes_round_to_nearest_weights(tiny2, adapter_of) -> None:
     assert torch.equal(tiny2.lm_head.weight, original.lm_head.weight)  # the LM head stays in full precision
 
 
-def test_selection_and_indivisible_maps(tiny2, adapter_of, caplog) -> None:
+def test_selection_of_maps(tiny2, adapter_of) -> None:
     before = _weights(tiny2)
     adapter = adapter_of(tiny2)
     summary = quantize_model(adapter, QuantConfig(group_size=32, layers=(2,), targets=("mlp.*",), exclude=("*down*",),
@@ -256,9 +257,31 @@ def test_selection_and_indivisible_maps(tiny2, adapter_of, caplog) -> None:
     assert summary["modules"] == 2
     changed = {name for name, p in tiny2.named_parameters() if not torch.equal(p, before[name])}
     assert changed == {"model.layers.1.mlp.gate_proj.weight", "model.layers.1.mlp.up_proj.weight"}
-    # group size 128 divides only down_proj's 128 inputs; the 64-input maps are skipped with a warning
-    summary = quantize_model(adapter, QuantConfig(group_size=128, backend="fake"))
-    assert summary["modules"] == 2 and "skipping" in caplog.text
+    assert summary["skipped"] == [] and summary["coverage"] == 1.0
+
+
+def test_indivisible_maps_are_refused_before_any_weight_changes(tiny2, adapter_of) -> None:
+    """Group size 128 divides only down_proj's 128 inputs. Skipping the 64-input maps would leave most of the model
+    in full precision while the summary reported int4, so the call refuses and names a group size that works."""
+    before = _weights(tiny2)
+    with pytest.raises(ConfigError, match=r"group_size=128 does not divide.*q_proj \(64 inputs\).*group_size=64"):
+        quantize_model(adapter_of(tiny2), QuantConfig(group_size=128, backend="fake"))
+    assert all(torch.equal(p, before[name]) for name, p in tiny2.named_parameters())
+    summary = quantize_model(adapter_of(tiny2), QuantConfig(group_size=None, backend="fake"))  # per channel
+    assert summary["modules"] == 14 and summary["coverage"] == 1.0
+
+
+def test_draft_quant_reports_the_maps_it_leaves_out(drafter, tiny2) -> None:
+    """Drafter-only quantization may skip maps (it stays lossless), and its summary counts them."""
+    config = DraftQuantConfig(group_size=128, backend="fake")  # divides predictor.2's 128 inputs, not predictor.0's 64
+    modules, skipped = split_draft_modules(drafter, config, tiny2.parameters())
+    assert set(modules) == {"predictor.2"} and set(skipped) == {"predictor.0"}
+    summary = quantize_draft(modules, config, skipped).summary
+    assert summary["skipped"] == ["predictor.0"] and summary["coverage"] == pytest.approx(0.5)
+    layer = tiny2.model.layers[1]
+    _clone, summary = quantized_copy(layer, config)
+    total = sum(m.weight.numel() for m in layer.modules() if isinstance(m, nn.Linear))
+    assert summary["modules"] == 1 and summary["coverage"] == pytest.approx(layer.mlp.down_proj.weight.numel() / total)
 
 
 @pytest.mark.parametrize("format", ["int4", "int3"])
@@ -281,15 +304,23 @@ def test_calibrated_methods_reduce_error_on_calibration_data(tiny_factory, adapt
         assert errors["awq"][level] < errors["rtn"][level]
 
 
-@pytest.mark.parametrize("method", ["rtn", "gptq", "awq"])
-def test_quantization_keeps_the_pruning_mask(tiny2, adapter_of, calib, method: str) -> None:
+@pytest.mark.parametrize(
+    "config",
+    [
+        *(QuantConfig(format="int4", method=m, group_size=32, backend="fake") for m in ("rtn", "gptq", "awq", "hqq")),
+        QuantConfig(format="int8", method="smoothquant", group_size=None, symmetric=True, activations="int8",
+                    backend="fake"),
+    ],
+    ids=lambda config: config.method,
+)
+def test_quantization_keeps_the_pruning_mask(tiny2, adapter_of, calib, config: QuantConfig) -> None:
+    """Every method keeps pruned weights at exactly zero (HQQ's float zero points needed ``keep_zeros``)."""
     from economize.techniques.prune import PruneConfig, prune_model
 
     adapter = adapter_of(tiny2)
     prune_model(adapter, PruneConfig(method="wanda", sparsity=0.5, semi_structured=False), token_batches(calib))
     zeros = {name: p == 0 for name, p in tiny2.named_parameters() if p.dim() == 2 and "layers" in name}
-    quantize_model(adapter, QuantConfig(format="int4", method=method, group_size=32, backend="fake"),
-                   token_batches(calib))
+    quantize_model(adapter, config, token_batches(calib))
     for name, p in tiny2.named_parameters():
         if name in zeros:
             assert (p[zeros[name]] == 0).all(), name

@@ -332,6 +332,7 @@ def _recipes() -> dict[str, Callable[[Any, Any, argparse.Namespace], Any]]:
 
 def _hf_greedy(model: Any, tokenizer: Any, max_tokens: int) -> tuple[list[list[int]], list[float]]:
     from economize.core.technique import Capability
+    from economize.runtime.phase import phase as scope
     from economize.unwrap import base_model_of
 
     base = base_model_of(model)
@@ -344,10 +345,14 @@ def _hf_greedy(model: Any, tokenizer: Any, max_tokens: int) -> tuple[list[list[i
     for prompt in PROMPTS:
         tokens = tokenizer(prompt, return_tensors="pt").input_ids.to(base.device)
         with torch.no_grad():
-            out = generator.generate(tokens, max_new_tokens=max_tokens, min_new_tokens=max_tokens, do_sample=False,
-                                output_scores=True, return_dict_in_generate=True, pad_token_id=0)
-        ids.append(out.sequences[0, tokens.shape[1] :].tolist())
-        first.append(float(torch.log_softmax(out.scores[0][0].float(), -1).max()))
+            # economize generate refuses output_scores where a plain forward misses the technique, so the first
+            # step's logits come from the prompt's prefill pass
+            sequences = generator.generate(tokens, max_new_tokens=max_tokens, min_new_tokens=max_tokens,
+                                           do_sample=False, pad_token_id=0)
+            with scope("prefill"):
+                logits = base(tokens).logits[0, -1]
+        ids.append(sequences[0, tokens.shape[1] :].tolist())
+        first.append(float(torch.log_softmax(logits.float(), -1).max()))
     return ids, first
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 __all__ = [
+    "CalibrationMismatchWarning",
     "CheckpointFormatError",
     "ConfigError",
     "DuplicateNameError",
@@ -56,6 +57,14 @@ class SimulatedPathWarning(UserWarning):
     """A technique attached on a path that reproduces its outputs without realizing its saving (fake quantization,
     masked eviction; see :class:`~economize.Simulation`). Quality numbers are valid; memory and speed numbers of the
     path are not those of the technique."""
+
+
+class CalibrationMismatchWarning(UserWarning):
+    """A checkpoint's weight techniques, replayed on load, produced weights other than those it was saved with.
+
+    The base model matches the checkpoint's, so the calibration differed: other calibration data, or a device or
+    library version that rounds differently. Pass the calibration data the checkpoint was made with.
+    """
 
 
 class TeacherMismatchWarning(UserWarning):

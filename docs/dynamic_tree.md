@@ -42,7 +42,9 @@ chain drafter does (`tests/unit/test_dynamic_tree.py::test_a_tree_of_width_one_d
 | `topk` | 8 | Width of every draft step, and children per expanded node. |
 | `total_tokens` | 60 | Nodes of the verified tree. At most `k + (D-1) k^2`. |
 
-Unknown options, non-positive values and a `total_tokens` above the number of candidates raise `ConfigError`. The
+Unknown options, non-positive values and a `total_tokens` above the number of candidates raise `ConfigError` as soon as
+the options reach the model (`economize.apply(..., decoding=...)` or `model.decoding = ...`), before any decoding. The
+default `total_tokens=60` therefore needs `cycle_length >= 3` (depth 2, 72 candidates) or a smaller budget. The
 options enter the hash of `DecodeConfig`, so two trees of different shape never share a decoder or its CUDA graphs.
 
 The economize attention kernel (`attn_implementation="economize"`) takes boolean masks of up to 64 queries, so keep
@@ -50,11 +52,12 @@ The economize attention kernel (`attn_implementation="economize"`) takes boolean
 
 ## Requirements and limits
 
-- Lossless verifiers that accept trees only: `greedy` (the default) and `typical`. The `rejection` verifier needs
+- Verifiers that accept trees only: the lossless `greedy` (the default) and the lossy `typical`, which reduces to
+  `greedy` for greedy decoding and is refused under `lossless=True`. The `rejection` verifier needs
   the drafter's probabilities along a chain and is rejected, as is lossy decoding (`lossless=False`), whose verifier
   commits drafts without checking them.
 - The drafter implements `economize.decoding.TreeStepDrafter` (`supports_tree_steps`, `tree_begin`, `tree_state`,
-  `tree_step`). Drafters that do not are rejected with `ConfigError` when the decoder is built: vendor MTP heads,
+  `tree_step`). Drafters that do not are rejected with `ConfigError` when the decoding options reach the model: vendor MTP heads,
   two-model drafting and PARD, DFlash block drafting, prompt lookup, KnapSpec, and drafters that already draft static trees (Medusa, Hydra, ReDrafter). Models
   with recurrent layers are rejected too: their recurrent layers run a tree only as whole root-to-node paths
   (static trees are verified that way), while a dynamic tree's draft steps cover one level at a time.

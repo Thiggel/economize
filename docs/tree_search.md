@@ -4,8 +4,8 @@ Two more draft policies build the tree of a cycle beyond the EAGLE-2 growth of
 [`dynamic_tree`](dynamic_tree.md). `draft_policy="sequoia"` drafts one fixed tree whose shape a dynamic program picks
 from measured acceptance rates and, optionally, the hardware's latencies [@chen2024sequoia].
 `draft_policy="specexec"` grows the tree by best-first search over the drafter's continuations [@svirschevski2024specexec]. Both are policies and work with every drafter that implements tree steps: EAGLE-3, the early exit /
-LayerSkip drafter and FR-Spec around either of them. Both are lossless under the `greedy` and `typical` verifiers, since the exact pass verifies their trees as it
-verifies any draft tree.
+LayerSkip drafter and FR-Spec around either of them. Both are lossless under the `greedy` verifier, since the exact pass verifies their trees as it verifies any
+draft tree. The lossy `typical` verifier also accepts their trees.
 
 Sequoia and SpecExec change how a drafter's proposals are arranged and leave the drafter itself alone, so they are
 draft policies and not techniques. A technique would have to be the model's single drafting technique, which would
@@ -98,7 +98,7 @@ model streamed from host memory) is a deployment choice outside the policy; the 
 The requirements are those of [`dynamic_tree`](dynamic_tree.md#requirements-and-limits): a drafter that implements
 `TreeStepDrafter`, a tree verifier (`greedy` or `typical`), no recurrent layers, and `total_tokens <= 63` for the
 economize attention kernel's boolean tree masks. Two-model drafting,
-vendor MTP heads and drafters with their own static trees are rejected with `ConfigError` when the decoder is built.
+vendor MTP heads and drafters with their own static trees are rejected with `ConfigError` when the decoding options reach the model.
 Draft policies belong to economize's own decoder. A vLLM or SGLang export serves the drafting technique with the
 engine's speculative decoding and its own proposal shapes, so neither policy carries over to a served model.
 

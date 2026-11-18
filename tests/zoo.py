@@ -154,7 +154,7 @@ _SPECIMENS: dict[str, Callable[[Path], TechniqueConfig]] = {
     "pard": lambda a: PardConfig(model=_draft_lm(a), mask_token_id=VOCAB - 1),
     "placed_draft_model": lambda a: PlacedDraftModelConfig(model=_draft_lm(a), device="cpu"),
     "prune": lambda _: PruneConfig(sparsity=0.5, semi_structured=False),  # the masked reference: no CPU sparse kernel
-    "quant": lambda _: QuantConfig(backend="fake"),  # the CPU reference: no int4 kernel here
+    "quant": lambda _: QuantConfig(group_size=None, backend="fake"),  # CPU reference; per-channel fits any width
     "quest": lambda _: QuestConfig(page_size=16, token_budget=32, dense_layers=0),
     "redrafter": lambda _: RedrafterConfig(),
     "rest": lambda a: RestConfig(datastore=_datastore(a), max_span=4),

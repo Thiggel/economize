@@ -10,6 +10,12 @@ Loading compares the fingerprint with that of the base model the techniques are 
 (:class:`~economize.TeacherMismatchWarning`) when they differ, e.g. when a drafter trained on one checkpoint of a model
 is attached to another.
 
+Weight techniques (quantization, pruning, rotation, low rank, ...) store their configuration and are replayed on load,
+so a calibrated one must see the same calibration data again. Their checkpoints record two more fingerprints: the
+base weights before any weight technique (``source_fingerprint``) and all weights and persistent buffers after them
+(``calibrated_fingerprint``). When the base matches and the replayed weights do not, loading warns with
+:class:`~economize.CalibrationMismatchWarning`.
+
 Other checkpoint layouts (e.g. ``jump.pt`` files or official draft heads) are read by registering a
 :class:`CheckpointFormat` in :data:`FORMATS`. :func:`read_checkpoint` asks every registered format whether it
 recognizes a path and refuses to guess when more than one does, so a new format's :meth:`~CheckpointFormat.detect`
@@ -25,14 +31,14 @@ from abc import ABC, abstractmethod
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 import torch
 from torch import nn
 
 from .._version import __version__
 from ..decoding import DecodeConfig
-from ..errors import CheckpointFormatError, TeacherMismatchWarning
+from ..errors import CalibrationMismatchWarning, CheckpointFormatError, TeacherMismatchWarning
 from ..modules.sharding import full_tensor
 from ..registry import Registry
 from ..unwrap import base_model_of, peft_base
@@ -59,6 +65,7 @@ __all__ = [
     "load",
     "read_checkpoint",
     "save",
+    "source_digests",
     "teacher_fingerprint",
     "trained_parameter_names",
 ]
@@ -148,7 +155,9 @@ def trained_parameter_names(model: nn.Module, params: Iterable[nn.Parameter]) ->
     return sorted(name for name, p in _fingerprinted(model).named_parameters() if id(p) in trained)
 
 
-def teacher_fingerprint(model: nn.Module, samples: int = 64, *, exclude: Collection[str] = ()) -> str:
+def teacher_fingerprint(
+    model: nn.Module, samples: int = 64, *, exclude: Collection[str] = (), buffers: bool = False
+) -> str:
     """A hash of the base model's weights: names, shapes and ``samples`` evenly spaced values of every parameter.
 
     It identifies the exact weights a technique was trained or calibrated against. Casting to a wider dtype keeps
@@ -163,21 +172,67 @@ def teacher_fingerprint(model: nn.Module, samples: int = 64, *, exclude: Collect
         exclude: Names (see :func:`trained_parameter_names`) of parameters left out entirely, e.g. LoRA adapters or
             a fine-tuned backbone trained with the techniques: the fingerprint then covers the frozen teacher
             alone and stays the same before and after the trained values are restored.
+        buffers: Hash the persistent buffers as well (packed weights of some quantization kernels are buffers).
     """
     excluded = set(exclude)
     digest = hashlib.sha256()
-    for name, parameter in sorted(_fingerprinted(model).named_parameters(), key=lambda item: item[0]):
-        if name in excluded:
-            continue
-        digest.update(f"{name}|{tuple(parameter.shape)}\n".encode())
-        if parameter.device.type == "meta" or parameter.numel() == 0:
-            continue
-        try:
-            flat = parameter.detach().reshape(-1)
-            values = flat[:: max(1, flat.numel() // samples)][:samples]
-            digest.update(values.to("cpu", torch.float64).numpy().tobytes())
-        except (RuntimeError, TypeError, NotImplementedError):  # packed tensor subclasses without views
-            digest.update(type(parameter).__name__.encode())
+    for name, tensor in _hashed_tensors(model, buffers):
+        if name not in excluded:
+            _hash_tensor(digest, name, tensor, samples)
+    return "sha256:" + digest.hexdigest()
+
+
+def _hashed_tensors(model: nn.Module, buffers: bool) -> list[tuple[str, torch.Tensor]]:
+    """The parameters (and, with ``buffers``, the persistent buffers) of the fingerprinted model, sorted by name."""
+    module = _fingerprinted(model)
+    tensors: dict[str, torch.Tensor] = dict(module.named_parameters())
+    if buffers:
+        persistent = set(module.state_dict(keep_vars=True))
+        tensors.update((name, b) for name, b in module.named_buffers() if name in persistent)
+    return sorted(tensors.items(), key=lambda item: item[0])
+
+
+class _Digest(Protocol):
+    def update(self, data: bytes, /) -> None: ...
+
+
+def _hash_tensor(digest: _Digest, name: str, tensor: torch.Tensor, samples: int) -> None:
+    """Feed ``tensor``'s name, shape and ``samples`` evenly spaced values into ``digest``."""
+    digest.update(f"{name}|{tuple(tensor.shape)}\n".encode())
+    if tensor.device.type == "meta" or tensor.numel() == 0:
+        return
+    try:
+        flat = tensor.detach().reshape(-1)
+        values = flat[:: max(1, flat.numel() // samples)][:samples]
+        digest.update(values.to("cpu", torch.float64).numpy().tobytes())
+    except (RuntimeError, TypeError, NotImplementedError):  # packed tensor subclasses without views
+        digest.update(type(tensor).__name__.encode())
+
+
+def source_digests(model: nn.Module, samples: int = 64) -> dict[str, str] | None:
+    """Per-parameter hashes of ``model``'s base weights, taken before weight techniques rewrite them.
+
+    :func:`~economize.apply` keeps them on the :class:`~economize.EfficientModel` (``None`` on a tensor-parallel
+    shard), and :func:`save` combines them into the ``source_fingerprint`` of a checkpoint with weight techniques,
+    leaving out the parameters trained with the techniques.
+    """
+    if _is_split(model):
+        return None
+    result: dict[str, str] = {}
+    for name, tensor in _hashed_tensors(model, buffers=False):
+        digest = hashlib.sha256()
+        _hash_tensor(digest, name, tensor, samples)
+        result[name] = digest.hexdigest()
+    return result
+
+
+def _combined(digests: Mapping[str, str], exclude: Collection[str] = ()) -> str:
+    """One fingerprint of the per-parameter :func:`source_digests`, without those named in ``exclude``."""
+    excluded = set(exclude)
+    digest = hashlib.sha256()
+    for name in sorted(digests):
+        if name not in excluded:
+            digest.update(f"{name}={digests[name]}\n".encode())
     return "sha256:" + digest.hexdigest()
 
 
@@ -189,6 +244,18 @@ def _is_split(model: nn.Module) -> bool:
 def _recorded_fingerprint(model: nn.Module, exclude: Collection[str] = ()) -> str | None:
     """The fingerprint a checkpoint of ``model`` records (none from a tensor-parallel shard)."""
     return None if _is_split(model) else teacher_fingerprint(model, exclude=exclude)
+
+
+def _calibration_fingerprints(model: EfficientModel, exclude: Collection[str]) -> dict[str, str]:
+    """The ``source_fingerprint`` and ``calibrated_fingerprint`` entries of a checkpoint (none without weight
+    techniques or from a tensor-parallel shard)."""
+    digests = model.source_digests
+    if digests is None or _is_split(model):
+        return {}
+    return {
+        "source_fingerprint": _combined(digests, exclude),
+        "calibrated_fingerprint": teacher_fingerprint(model, exclude=exclude, buffers=True),
+    }
 
 
 def check_teacher_fingerprint(
@@ -215,7 +282,22 @@ def check_teacher_fingerprint(
     recorded = meta.get("teacher_fingerprint")
     if recorded is None or _is_split(model):
         return True
-    if teacher_fingerprint(model, exclude=meta.get(TRAINED_ENTRY, ())) == recorded:
+    trained = meta.get(TRAINED_ENTRY, ())
+    digests: dict[str, str] | None = getattr(model, "source_digests", None)
+    if "source_fingerprint" in meta and digests is not None:  # the checkpoint holds weight techniques
+        if _combined(digests, trained) == meta["source_fingerprint"]:
+            if teacher_fingerprint(model, exclude=trained, buffers=True) == meta["calibrated_fingerprint"]:
+                return True
+            warnings.warn(
+                "the weight techniques of the checkpoint, replayed on the same base model, produced other weights "
+                "than those it was saved with: pass the calibration data the checkpoint was made with (a device or "
+                "library version that rounds differently has the same effect). Pass check_teacher=False to skip "
+                "this check.",
+                CalibrationMismatchWarning,
+                stacklevel=stacklevel + 1,
+            )
+            return False
+    elif teacher_fingerprint(model, exclude=trained) == recorded:
         return True
     warnings.warn(
         f"the base model's weights differ from those the checkpoint was saved with (base "
@@ -259,6 +341,7 @@ def save(
         "economize_version": __version__,
         "base_model": getattr(model.base_model.config, "_name_or_path", None),
         "teacher_fingerprint": _recorded_fingerprint(model, excluded),
+        **_calibration_fingerprints(model, excluded),
         "techniques": [nested_dict(t.config) for t in model.techniques.values()],
         "decoding": model.decoding.to_dict(),
     }

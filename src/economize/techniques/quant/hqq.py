@@ -21,6 +21,11 @@ or the fake backend); ``hqq_integer_zero=True`` rounds the final zero points (an
 integer-zero kernels of vLLM (Marlin, Machete, compressed-tensors), a deviation from the reference. The reference
 computes in fp16 on CUDA and in fp32 on the CPU; this implementation always computes in fp32, so it matches the
 reference's CPU path exactly.
+
+With ``keep_zeros`` (by default when at least :data:`~.gptq.KEEP_ZEROS_FRACTION` of the weight is exactly zero, as
+after pruning), the final zero points are rounded as with ``hqq_integer_zero`` and every pruned entry gets the zero
+point as its code, so it decodes to exactly 0 and the sparsity mask survives. Float zero points cannot represent 0
+exactly. The dense path is the reference unchanged.
 """
 
 from __future__ import annotations
@@ -32,6 +37,7 @@ import torch
 from torch import Tensor, nn
 
 from ...errors import ConfigError
+from .gptq import KEEP_ZEROS_FRACTION
 from .grid import IntGrid, QuantGrid, QuantizedWeight
 from .methods import QUANT_METHODS, QuantMethod, write_fake
 
@@ -70,6 +76,7 @@ def hqq_quantize(
     beta: float = 10.0,
     round_zero: bool = False,
     integer_zero: bool = False,
+    keep_zeros: bool | None = None,
 ) -> QuantizedWeight:
     """HQQ quantization of ``weight [out, in]`` with one scale and zero point per row and group of input columns.
 
@@ -82,6 +89,8 @@ def hqq_quantize(
         beta: The half-quadratic penalty weight.
         round_zero: Round the initial zero points (the reference's ``round_zero``).
         integer_zero: Round the final zero points and re-round the codes, for integer-zero kernels.
+        keep_zeros: Keep exactly-zero (pruned) entries at zero, which implies ``integer_zero`` (``None``: when at
+            least :data:`~.gptq.KEEP_ZEROS_FRACTION` of the entries are exactly zero).
 
     Returns:
         The codes, scales ``[out, groups]`` and zero points (float, integer-valued with ``integer_zero``).
@@ -94,6 +103,10 @@ def hqq_quantize(
     if in_features % size:
         raise ConfigError(f"group size {size} does not divide {in_features} input features")
     w = weight.detach().float().reshape(-1, size)
+    pruned = w == 0
+    if keep_zeros is None:
+        keep_zeros = bool(pruned.float().mean() >= KEEP_ZEROS_FRACTION)
+    integer_zero = integer_zero or keep_zeros
     maxq = float(grid.maxq)
     low, high = w.min(1, keepdim=True).values, w.max(1, keepdim=True).values
     denom = high - low
@@ -114,7 +127,10 @@ def hqq_quantize(
             break
     if integer_zero:
         zero = torch.round(zero).clamp(0, maxq)
-    codes = torch.round(w * inv_scale + zero).clamp(0, maxq).to(torch.uint8)
+    codes = torch.round(w * inv_scale + zero).clamp(0, maxq)
+    if keep_zeros:  # the zero point is an integer code here, and it decodes to exactly 0
+        codes = torch.where(pruned, zero.expand_as(codes), codes)
+    codes = codes.to(torch.uint8)
     groups = in_features // size
     return QuantizedWeight(
         grid,
@@ -133,11 +149,11 @@ class HQQMethod(QuantMethod):
     """
 
     needs_calibration = False
-    options = frozenset({"hqq_iters", "hqq_lp_norm", "hqq_beta", "hqq_round_zero", "hqq_integer_zero"})
+    options = frozenset({"hqq_iters", "hqq_lp_norm", "hqq_beta", "hqq_round_zero", "hqq_integer_zero", "keep_zeros"})
 
     @classmethod
     def float_zeros(cls, config: QuantConfig) -> bool:
-        return not config.hqq_integer_zero
+        return not config.hqq_integer_zero  # keep_zeros may round them; float storage holds integers exactly
 
     @classmethod
     def check_config(cls, config: QuantConfig) -> None:
@@ -170,6 +186,7 @@ class HQQMethod(QuantMethod):
                 beta=config.hqq_beta,
                 round_zero=config.hqq_round_zero,
                 integer_zero=config.hqq_integer_zero,
+                keep_zeros=config.keep_zeros,
             )
             write_fake(module, out[name])
         return out

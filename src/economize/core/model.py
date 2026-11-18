@@ -11,7 +11,17 @@ from torch import nn
 from torch.utils.hooks import RemovableHandle
 
 from ..arch import ArchAdapter, adapter_for
-from ..decoding import CycleDecoder, DecodeConfig, DecodeResult, StopCondition, TokenSelector, VerifyObserver
+from ..decoding import (
+    POLICIES,
+    VERIFIERS,
+    CycleDecoder,
+    DecodeConfig,
+    DecodeResult,
+    StopCondition,
+    TokenSelector,
+    TreePolicy,
+    VerifyObserver,
+)
 from ..errors import ConfigError, EconomizeError
 from ..registry import Registry
 from ..runtime import LayerPolicy, LayerRunner
@@ -19,8 +29,10 @@ from .cache_wrapping import CacheWrapping
 from .config import TechniqueConfig
 from .hub import EconomizeHubMixin
 from .metadata import Simulation
+from .plain_save import guard_plain_save
 from .recipe import States, attach_techniques
-from .technique import Capability, Technique
+from .serialization import source_digests
+from .technique import Capability, Technique, technique_for
 
 if TYPE_CHECKING:
     from collections.abc import ItemsView, ValuesView
@@ -41,6 +53,12 @@ GenerateFn = Callable[..., Any]
 #: root registers ``"transformers"`` (:func:`economize.integrations.generate.generate`, imported on first use), and
 #: :attr:`EfficientModel.generate_implementation` names the entry a model uses.
 GENERATE_IMPLEMENTATIONS: Registry[GenerateFn] = Registry("generate implementation")
+
+#: Capabilities that only define the model the exact pass runs (rewritten weights, activation hooks applied per
+#: token) or propose tokens it verifies. A lossy technique with any other capability (a compressed or evicting KV
+#: cache, a dynamic-depth policy, a sparse prefill) makes the exact pass depend on how tokens are grouped into
+#: passes, so ``DecodeConfig.lossless=True`` refuses it.
+LOSSLESS_COMPATIBLE = Capability.WEIGHTS | Capability.ACTIVATIONS | Capability.DRAFTER
 
 
 class EfficientModel(nn.Module, EconomizeHubMixin):
@@ -78,6 +96,10 @@ class EfficientModel(nn.Module, EconomizeHubMixin):
         self.decoding = decoding
         self._verify_observers: OrderedDict[int, VerifyObserver] = OrderedDict()
         self._graph_decoders: dict[DecodeConfig, CycleDecoder] = {}  # decoders that recorded CUDA graphs
+        #: Per-parameter hashes of the base weights before the weight techniques rewrote them (``None`` without
+        #: weight techniques); :func:`economize.save` records them so a reload can tell other base weights from other
+        #: calibration data (see :func:`~economize.core.serialization.source_digests`).
+        self.source_digests: dict[str, str] | None = None
         self.train(base_model.training)  # the wrapper starts in the base model's mode (e.g. eval after loading)
 
     def __getattr__(self, name: str) -> Any:
@@ -154,6 +176,30 @@ class EfficientModel(nn.Module, EconomizeHubMixin):
         self._verify_observers[handle.id] = observer
         return handle
 
+    @property
+    def decoding(self) -> DecodeConfig:
+        """The default decoding options; setting them runs :meth:`check_decoding` first."""
+        return self._decoding
+
+    @decoding.setter
+    def decoding(self, config: DecodeConfig) -> None:
+        self.check_decoding(config)
+        self._decoding = config
+
+    def check_decoding(self, config: DecodeConfig) -> None:
+        """Raise :class:`~economize.ConfigError` for decoding options the decoder would reject, before any decoding.
+
+        Builds the draft policy, which checks its options (e.g. a ``dynamic_tree`` whose ``total_tokens`` exceeds the
+        candidates of a tree as deep as ``cycle_length`` allows). Under a tree policy it also builds the drafter and
+        lets the policy wrap it, which rejects drafters that cannot step over trees and verifiers that cannot verify
+        them. Chain policies skip that step, since every drafter drafts chains.
+        """
+        verifier = VERIFIERS.get(config.verifier_name)(config)
+        policy = POLICIES.get(config.draft_policy_name)(config)
+        technique = self.drafting_technique
+        if isinstance(policy, TreePolicy) and technique is not None and config.cycle_length > 1:
+            policy.wrap(technique.drafter(self.runner), verifier)
+
     def decoder(self, decoding: DecodeConfig | None = None) -> CycleDecoder:
         """The decoding loop for ``decoding`` (default: the model's decoding options).
 
@@ -173,6 +219,8 @@ class EfficientModel(nn.Module, EconomizeHubMixin):
         return decoder
 
     def _new_decoder(self, config: DecodeConfig) -> CycleDecoder:
+        if config.lossless is True:
+            self._check_lossless()
         technique = self.drafting_technique
         drafter = technique.drafter(self.runner) if technique is not None and config.cycle_length > 1 else None
         depth = self._first(Capability.DEPTH)
@@ -243,9 +291,29 @@ class EfficientModel(nn.Module, EconomizeHubMixin):
         """
         return GENERATE_IMPLEMENTATIONS.get(self.generate_implementation)(self, inputs, **kwargs)
 
+    def lossy_techniques(self, compatible: Capability = Capability.NONE) -> list[str]:
+        """Names of the attached lossy techniques that have a capability outside ``compatible``.
+
+        ``lossy_techniques(LOSSLESS_COMPATIBLE)`` lists those that make ``lossless=True`` impossible;
+        ``lossy_techniques(Capability.WEIGHTS | Capability.DRAFTER)`` those whose effect a plain forward of the
+        base model does not reproduce (``generate`` refuses ``output_scores`` with them).
+        """
+        return [t.name for t in self.techniques.values()
+                if not t.lossless and not (t.capabilities and t.capabilities in compatible)]
+
     # ---- helpers -----------------------------------------------------------------------------------------------
     def _first(self, capability: Capability) -> Technique | None:
         return next((t for t in self.techniques.values() if capability in t.capabilities), None)
+
+    def _check_lossless(self) -> None:
+        """Raise :class:`ConfigError` when a lossy technique outside :data:`LOSSLESS_COMPATIBLE` is attached."""
+        lossy = self.lossy_techniques(LOSSLESS_COMPATIBLE)
+        if lossy:
+            raise ConfigError(
+                f"lossless=True contradicts the lossy technique(s) {lossy}: they change the exact pass itself "
+                "(KV cache, layer skipping or sparse prefill), so the output differs from step-by-step decoding of "
+                "the model; detach them or decode with lossless=None / False"
+            )
 
 
 def apply(
@@ -286,8 +354,14 @@ def build_model(
     """:func:`apply` that also loads saved technique ``states`` before the techniques attach (used by
     :func:`economize.attach` for checkpoints)."""
     adapter = adapter_for(model)
+    rewrites = any(Capability.WEIGHTS in technique_for(c).capabilities for c in configs)
+    digests = source_digests(model) if rewrites and adapter.tensor_parallel_size == 1 else None
     techniques = attach_techniques(adapter.model, adapter, configs, states=states, calibration=calibration)
+    issues = [f"{t.name}: {issue}" for t in techniques if (issue := t.plain_save_issue()) is not None]
+    guard_plain_save(list({id(m): m for m in (model, adapter.model)}.values()), issues)
     if decoding is None:
         drafts = any(Capability.DRAFTER in t.capabilities for t in techniques)
         decoding = DecodeConfig(cycle_length=4 if drafts else 1)
-    return EfficientModel(model, adapter, techniques, decoding)
+    result = EfficientModel(model, adapter, techniques, decoding)
+    result.source_digests = digests
+    return result
