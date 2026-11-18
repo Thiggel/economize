@@ -99,6 +99,8 @@
 - The attention kernels run in Triton's CPU interpreter (`TRITON_INTERPRET=1`): the interpreter cannot call
   libdevice, so the round-to-nearest helpers of the decode, MInference and KIVI kernels are plain operators there,
   and the Quest kernel no longer masks a block with a scalar bool.
+- The TEAL CUDA-graph test compares replay and eager outputs within bf16 rounding: the split-K GEMV adds its
+  float32 partial sums atomically in a run-dependent order, so bit equality failed intermittently.
 
 ## 0.4.0 (2026-11-04)
 

@@ -200,11 +200,16 @@ def test_cuda_graph_replay_reads_the_live_threshold_and_input() -> None:
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
             static_out = linear(static_x)
+        previous = static_out.clone()
         for seed, sparsity in ((1, 0.4), (2, 0.6)):
             static_x.copy_(_inputs(1, 4096, seed=seed).reshape(1, 1, 4096))
             t.copy_(_threshold(static_x, sparsity))
             graph.replay()
-            assert torch.equal(static_out, linear(static_x))
+            # split-K partial sums meet through float32 atomic adds in a run-dependent order, so a replay and an eager
+            # call may differ in the last bf16 bit; a stale input or threshold would change the output entirely
+            torch.testing.assert_close(static_out, linear(static_x), atol=1e-2, rtol=1e-2)
+            assert not torch.allclose(static_out, previous, atol=1e-2, rtol=1e-2)
+            previous = static_out.clone()
     finally:
         installed.remove()
 
