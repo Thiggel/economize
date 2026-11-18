@@ -159,6 +159,18 @@ def test_per_block_widths_and_shortcuts(adapter_of, attach_context, calib) -> No
     assert technique.summary["width"] == 48 and technique.summary["removed_parameters"] > 0
 
 
+def test_sliced_layers_still_return_attention_weights(adapter_of, attach_context, calib) -> None:
+    """``output_attentions=True`` still records every layer's attention weights through the shortcut forward
+    (``transformers`` records them with hooks on the attention modules, which the sliced layers still call)."""
+    model = make_tiny_model()
+    model.config._attn_implementation = "eager"
+    _attach(model, SliceGPTConfig(sparsity=0.25), adapter_of, attach_context, calib)
+    attentions = model(TOKENS, output_attentions=True).attentions
+    assert attentions is not None and len(attentions) == len(model.model.layers)
+    assert all(a.shape == (2, model.config.num_attention_heads, 16, 16) for a in attentions)
+    assert all(torch.allclose(a.sum(-1), torch.ones(())) for a in attentions)
+
+
 def test_global_rotation_rewrites_the_config(adapter_of, attach_context, calib) -> None:
     model = make_tiny_model()
     _attach(model, SliceGPTConfig(sparsity=0.25, rotation="global"), adapter_of, attach_context, calib)
