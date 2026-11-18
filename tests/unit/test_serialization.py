@@ -150,6 +150,34 @@ def test_the_fingerprint_covers_the_frozen_teacher(tiny_factory, tmp_path: Path)
         assert not check_teacher(model, meta)
 
 
+def test_reloading_a_calibrated_technique_checks_its_calibration(tiny_factory, tmp_path: Path) -> None:
+    """A weight technique is replayed on load: other calibration data must not give another model silently."""
+    from economize.techniques.quant import QuantConfig
+
+    def tokens(seed: int) -> torch.Tensor:
+        return torch.randint(0, 100, (8, 32), generator=torch.Generator().manual_seed(seed))
+
+    config = QuantConfig(format="int4", method="gptq", group_size=32, backend="fake")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", economize.SimulatedPathWarning)
+        economize.save(economize.apply(tiny_factory(), config, calibration=tokens(0)), tmp_path)
+        meta = json.loads((tmp_path / CONFIG_FILE).read_text())
+        assert {"source_fingerprint", "calibrated_fingerprint"} <= meta.keys()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", economize.TeacherMismatchWarning)
+            warnings.simplefilter("error", economize.CalibrationMismatchWarning)
+            economize.load(tiny_factory(), tmp_path, calibration=tokens(0))  # the same data: the same model
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            economize.load(tiny_factory(), tmp_path, calibration=tokens(7))
+            economize.load(tiny_factory(seed=1), tmp_path, calibration=tokens(0))
+    kinds = [w.category for w in caught if w.category is not economize.SimulatedPathWarning]
+    assert kinds == [economize.CalibrationMismatchWarning, economize.TeacherMismatchWarning]
+
+    economize.save(_trained(tiny_factory(), CONFIGS["frozen"]), tmp_path / "plain")
+    assert "source_fingerprint" not in json.loads((tmp_path / "plain" / CONFIG_FILE).read_text())
+
+
 def test_the_core_imports_no_integration() -> None:
     import os
     import subprocess

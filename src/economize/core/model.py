@@ -20,7 +20,8 @@ from .config import TechniqueConfig
 from .hub import EconomizeHubMixin
 from .metadata import Simulation
 from .recipe import States, attach_techniques
-from .technique import Capability, Technique
+from .serialization import source_digests
+from .technique import Capability, Technique, technique_for
 
 if TYPE_CHECKING:
     from collections.abc import ItemsView, ValuesView
@@ -84,6 +85,10 @@ class EfficientModel(nn.Module, EconomizeHubMixin):
         self.decoding = decoding
         self._verify_observers: OrderedDict[int, VerifyObserver] = OrderedDict()
         self._graph_decoders: dict[DecodeConfig, CycleDecoder] = {}  # decoders that recorded CUDA graphs
+        #: Per-parameter hashes of the base weights before the weight techniques rewrote them (``None`` without
+        #: weight techniques); :func:`economize.save` records them so a reload can tell other base weights from other
+        #: calibration data (see :func:`~economize.core.serialization.source_digests`).
+        self.source_digests: dict[str, str] | None = None
         self.train(base_model.training)  # the wrapper starts in the base model's mode (e.g. eval after loading)
 
     def __getattr__(self, name: str) -> Any:
@@ -314,8 +319,12 @@ def build_model(
     """:func:`apply` that also loads saved technique ``states`` before the techniques attach (used by
     :func:`economize.attach` for checkpoints)."""
     adapter = adapter_for(model)
+    rewrites = any(Capability.WEIGHTS in technique_for(c).capabilities for c in configs)
+    digests = source_digests(model) if rewrites and adapter.tensor_parallel_size == 1 else None
     techniques = attach_techniques(adapter.model, adapter, configs, states=states, calibration=calibration)
     if decoding is None:
         drafts = any(Capability.DRAFTER in t.capabilities for t in techniques)
         decoding = DecodeConfig(cycle_length=4 if drafts else 1)
-    return EfficientModel(model, adapter, techniques, decoding)
+    result = EfficientModel(model, adapter, techniques, decoding)
+    result.source_digests = digests
+    return result

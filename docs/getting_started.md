@@ -168,8 +168,10 @@ model = economize.load(base, "my_model", calibration=calibration)
 techniques are saved, not those of the base model. Techniques that rewrite the base weights store their settings
 and repeat the rewrite when the checkpoint is loaded, so they need an unmodified base model and, if their method
 reads calibration data, the same calibration data again. Each checkpoint records a fingerprint of the base weights, and
-loading it onto a different base model raises an `economize.TeacherMismatchWarning`, which `check_teacher=False`
-turns off. Published checkpoints of other libraries (EAGLE, EAGLE-3, Medusa, Hydra, speculators) are recognized and
+loading it onto a different base model raises an `economize.TeacherMismatchWarning`. A checkpoint with such
+techniques also records a fingerprint of the rewritten weights, and a reload that rewrites the same base into other
+weights (other calibration data, for example) raises an `economize.CalibrationMismatchWarning`. `check_teacher=False`
+turns both checks off. Published checkpoints of other libraries (EAGLE, EAGLE-3, Medusa, Hydra, speculators) are recognized and
 converted when they are loaded, and further formats can be added through the `FORMATS` registry.
 
 ## Where to go next

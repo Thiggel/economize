@@ -74,6 +74,7 @@ from .decoding import (
     VerifyEvent,
 )
 from .errors import (
+    CalibrationMismatchWarning,
     CheckpointFormatError,
     ConfigError,
     DuplicateNameError,
@@ -96,6 +97,7 @@ __all__ = [
     "VERIFIERS",
     "AttachContext",
     "BackendSupport",
+    "CalibrationMismatchWarning",
     "Capability",
     "Checkpoint",
     "CheckpointFormat",
