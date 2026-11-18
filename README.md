@@ -14,12 +14,12 @@
 
 economize makes text generation with Hugging Face causal language models faster and cheaper. It implements more
 than 50 published efficiency techniques, from speculative decoding and early exit to pruning, quantization and
-KV-cache compression, and attaches any combination of them to an unmodified `transformers` model with a single
-function call.
+KV-cache compression, and attaches them, alone or in validated combinations, to an unmodified `transformers` model
+with a single function call. `economize.compatible` tells which techniques combine.
 
 - **One interface for many methods.** Drafters such as EAGLE-3 and Medusa, dynamic-depth methods, weight
   compression and KV-cache compression share the same configuration and decoding API.
-- **Free combination.** Techniques can be stacked, for example layer pruning, int4 quantization, an fp8 KV cache
+- **Validated combinations.** Techniques can be stacked, for example layer pruning, int4 quantization, an fp8 KV cache
   and a drafter in one model. economize attaches them in a well-defined order and refuses pairs whose kernels do not
   fit together.
 - **The base model stays intact.** The model keeps its modules and its `forward` method, so it continues to work

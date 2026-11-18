@@ -1,6 +1,6 @@
 # Serving on vLLM
 
-`economize.backends.vllm.serving` turns an EfficientModel, with any combination of its techniques, into what vLLM
+`economize.backends.vllm.serving` turns an EfficientModel, with the techniques attached to it, into what vLLM
 loads: a target checkpoint, an optional drafter folder, and the engine arguments (`kv_cache_dtype`, `dtype`,
 `speculative_config`, ...). Techniques that vLLM lacks are served through economize's vLLM plugin
 (`economize.backends.vllm`, see `ecosystem.md`), which registers draft models, a linear method, attention backends and

@@ -2,8 +2,8 @@
 
 economize makes text generation with Hugging Face causal language models faster and cheaper. It implements more
 than 50 published efficiency techniques, from speculative decoding and early exit to pruning, quantization and
-KV-cache compression, and attaches any combination of them to an unmodified `transformers` model with a single
-function call.
+KV-cache compression, and attaches them, alone or in validated combinations, to an unmodified `transformers` model
+with a single function call. `economize.compatible` tells which techniques combine.
 
 ```bash
 pip install economize

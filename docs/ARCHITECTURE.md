@@ -5,7 +5,8 @@ layers. A change to a contract in Section 3 is written here first.
 
 ## 1. Goals
 
-1. Equip any Hugging Face decoder-only causal LM with any combination of efficiency techniques in two lines.
+1. Equip any Hugging Face decoder-only causal LM with efficiency techniques, alone or in validated combinations
+   (`economize.compatible`), in two lines.
 2. Open-closed everywhere: a new technique, model family, verifier, cache, objective or backend is added by
    registering a class, never by editing an existing module.
 3. One numerical contract: the exact path equals plain `transformers` logits, spec decoding is lossless (greedy:
