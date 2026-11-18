@@ -9,7 +9,10 @@ tokens old. With ``l`` committed tokens, ``floor(l / R) * R`` keys and ``max(0, 
 The prompt is quantized at the end of its pass, later entries at the start of each exact pass, and only committed
 ones (see :mod:`.wrapper`); draft K/V written between exact passes stay in full precision, so draft rollback and
 tree compaction need no extra work. The byte accounting counts ``bits / 8`` bytes per quantized element plus an
-fp16 scale and zero point per group, as the paper's kernels store them.
+fp16 scale and zero point per group, as the paper's kernels store them (fp32, 4 bytes each, once a scale or zero point
+of the simulated storage exceeded the fp16 range and stayed in fp32). A head dimension that is not a multiple of
+``group_size`` quantizes each value token as one group of the whole head dimension (:func:`value_group`, with a
+warning); the accounting counts one scale and zero point per value token then.
 
 How the cache holds the entries is a storage of :data:`~.storage.KIVI_STORAGES`. The default ``"packed"`` storage
 (:class:`~.packed.PackedKIVICache`) keeps the quantized entries as packed codes with fp16 scales and zero points and
@@ -20,6 +23,7 @@ with the full dense memory, graph-safe, and the storage used when another KV tec
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, overload
 
@@ -38,7 +42,9 @@ from .storage import KIVI_STORAGES
 if TYPE_CHECKING:
     from ...arch import ArchAdapter
 
-__all__ = ["KIVI_BITS", "KIVICache", "KIVIConfig", "KIVITechnique", "fake_quantize", "kivi_bytes", "quantize"]
+__all__ = [
+    "KIVI_BITS", "KIVICache", "KIVIConfig", "KIVITechnique", "fake_quantize", "kivi_bytes", "quantize", "value_group",
+]
 
 KIVI_BITS = (2, 4, 8)
 
@@ -106,7 +112,7 @@ def fake_quantize(x: torch.Tensor, bits: int, dim: int) -> torch.Tensor:
 
     Scale and zero point are rounded to fp16, the format in which the KIVI kernels store them. A scale or zero point
     beyond the fp16 range (``|K/V|`` above 65504, which bf16 and fp32 caches can hold) stays in fp32 instead of
-    overflowing to ``inf``; the byte accounting still counts 2 bytes for it.
+    overflowing to ``inf``; :class:`KIVICache` then counts 4 bytes per scale and zero point.
     """
     codes, scale, low = quantize(x, bits, dim)
     return (codes * scale + low).to(x.dtype)
@@ -134,21 +140,37 @@ def _fp16_rounded(x: torch.Tensor) -> torch.Tensor:
     return torch.where(x.abs() <= _FP16_MAX, x.half().float(), x)
 
 
+def value_group(dim: int, group_size: int) -> int:
+    """Channels per value group for a head dimension ``dim``: ``group_size``, or the whole ``dim`` (one group per
+    token, coarser than the paper's grouping) with a :class:`UserWarning` when ``dim`` is not a multiple of it."""
+    if dim % group_size == 0:
+        return group_size
+    warnings.warn(
+        f"KIVI: head dim {dim} is not a multiple of group_size {group_size}; values are quantized with one scale "
+        f"and zero point per token over all {dim} channels",
+        UserWarning,
+        stacklevel=3,
+    )
+    return dim
+
+
 @overload
 def kivi_bytes(tokens: int, keys_quantized: int, values_quantized: int, heads: int, dim: int, element: int,
-               config: KIVIConfig) -> float: ...
+               config: KIVIConfig, scale_bytes: int = 2) -> float: ...
 @overload
 def kivi_bytes(tokens: torch.Tensor, keys_quantized: torch.Tensor, values_quantized: torch.Tensor, heads: int,
-               dim: int, element: int, config: KIVIConfig) -> torch.Tensor: ...
+               dim: int, element: int, config: KIVIConfig, scale_bytes: int = 2) -> torch.Tensor: ...
 def kivi_bytes(tokens: Any, keys_quantized: Any, values_quantized: Any, heads: int, dim: int, element: int,
-               config: KIVIConfig) -> Any:
+               config: KIVIConfig, scale_bytes: int = 2) -> Any:
     """Bytes of one layer's K and V for ``tokens`` entries of which the first ``keys_quantized`` keys and
-    ``values_quantized`` values are quantized (integers, or per-row tensors computed elementwise)."""
+    ``values_quantized`` values are quantized (integers, or per-row tensors computed elementwise), with
+    ``scale_bytes`` bytes per scale and per zero point (2 for fp16, 4 for the fp32 fallback)."""
     g = config.group_size
     value_groups = dim // g if dim % g == 0 else 1
     per_bit = config.bits / 8
-    keys = keys_quantized * heads * dim * per_bit + (keys_quantized // g) * heads * dim * 4
-    values = values_quantized * heads * dim * per_bit + values_quantized * heads * value_groups * 4
+    pair = 2 * scale_bytes  # one scale and one zero point per group
+    keys = keys_quantized * heads * dim * per_bit + (keys_quantized // g) * heads * dim * pair
+    values = values_quantized * heads * dim * per_bit + values_quantized * heads * value_groups * pair
     full = ((tokens - keys_quantized) + (tokens - values_quantized)) * heads * dim * element
     return keys + values + full
 
@@ -163,9 +185,12 @@ class KIVICache(CacheWrapper):
         self.keys_quantized = [0] * inner.batch_size  # per row: quantized key prefix (a multiple of R)
         self.values_quantized = [0] * inner.batch_size  # per row: quantized value prefix
         self._prompt_ends: list[int | None] | None = None  # per row, during the prompt pass: its end
+        self.scale_bytes = 2  # bytes per scale and zero point: 4 once one stayed in fp32 (beyond the fp16 range)
+        self._wide: list[torch.Tensor] = []  # per quantized block of the simulated storage: [] bool, fp32 fallback
 
     def pass_begin(self, frontier: list[int | None]) -> None:
         self._quantize_committed(frontier)
+        self._check_wide()
         self.account(frontier, self._layer_bytes)
         self._prompt_ends = self._pass_ends() if current_phase() == "prefill" else None
 
@@ -175,6 +200,14 @@ class KIVICache(CacheWrapper):
         if self._prompt_ends is not None:
             ends, self._prompt_ends = self._prompt_ends, None
             self._quantize_committed(ends)
+
+    def _check_wide(self) -> None:
+        """Switch the accounting to fp32 scales once a quantized block kept one (one host sync per pass at most)."""
+        if self._wide:
+            device = self._wide[0].device
+            if bool(torch.stack([flag.to(device) for flag in self._wide]).any()):
+                self.scale_bytes = 4
+            self._wide = []
 
     def _pass_ends(self) -> list[int | None]:
         """One past the last slot every row writes in the current (eager) pass."""
@@ -232,11 +265,13 @@ class KIVICache(CacheWrapper):
         rows, heads, tokens, dim = block.shape
         g = self.config.group_size
         if kind == "k":  # per channel, groups of g tokens
-            grouped = block.reshape(rows, heads, tokens // g, g, dim)
-            return fake_quantize(grouped, self.config.bits, dim=3).reshape(block.shape)
-        group = g if dim % g == 0 else dim  # per token, groups of g channels
-        grouped = block.reshape(rows, heads, tokens, dim // group, group)
-        return fake_quantize(grouped, self.config.bits, dim=4).reshape(block.shape)
+            grouped, axis = block.reshape(rows, heads, tokens // g, g, dim), 3
+        else:  # per token, groups of g channels
+            group = value_group(dim, g)
+            grouped, axis = block.reshape(rows, heads, tokens, dim // group, group), 4
+        codes, scale, low = quantize(grouped, self.config.bits, dim=axis)
+        self._wide.append((scale.abs() > _FP16_MAX).any() | (low.abs() > _FP16_MAX).any())
+        return (codes * scale + low).to(block.dtype).reshape(block.shape)
 
     def _layer_bytes(
         self, layer_idx: int, keys: torch.Tensor, committed: torch.Tensor
@@ -244,7 +279,9 @@ class KIVICache(CacheWrapper):
         heads, dim = keys.shape[1], keys.shape[3]
         quantized_keys = torch.tensor(self.keys_quantized, dtype=torch.float64)
         quantized_values = torch.tensor(self.values_quantized, dtype=torch.float64)
-        stored = kivi_bytes(committed, quantized_keys, quantized_values, heads, dim, keys.element_size(), self.config)
+        stored = kivi_bytes(
+            committed, quantized_keys, quantized_values, heads, dim, keys.element_size(), self.config, self.scale_bytes
+        )
         return stored, self.dense_bytes(keys, committed)
 
     def on_reorder(self, rows: torch.Tensor) -> None:
@@ -254,6 +291,8 @@ class KIVICache(CacheWrapper):
 
     def on_restart(self) -> None:
         self._prompt_ends = None
+        self.scale_bytes = 2
+        self._wide = []
         self.keys_quantized = [0] * self.batch_size
         self.values_quantized = [0] * self.batch_size
 

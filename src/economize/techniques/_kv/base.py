@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
+from ...core.metadata import Saving
 from ...core.technique import Capability, Technique
 from ...errors import ConfigError, UnsupportedModelError
 from ...runtime import KVCache
@@ -52,13 +53,23 @@ class KVCacheTechnique(Technique, ABC):
         return wrapper
 
     def kv_stats(self, row: int = 0) -> dict[str, float]:
-        """Memory statistics of row ``row`` of the last generation (see :class:`~.wrapper.RowStats`)."""
-        return self.last_stats.row(row).as_dict()
+        """Memory statistics of row ``row`` of the last generation: the modelled bytes of the row (see
+        :class:`~.wrapper.RowStats`) and ``kv_bytes_allocated_batch``, the measured bytes the cache held for the whole
+        batch (:attr:`~.wrapper.KVStats.allocated_bytes`). ``kv_bytes_simulated`` is 1.0 when the path keeps the
+        dense buffers (:meth:`simulation` names ``KV_MEMORY``), so ``kv_bytes`` is a model of a saving it does not
+        realize."""
+        simulation = self.simulation()
+        simulated = simulation is not None and bool(simulation.savings & Saving.KV_MEMORY)
+        return {
+            **self.last_stats.row(row).as_dict(),
+            "kv_bytes_allocated_batch": float(self.last_stats.allocated_bytes),
+            "kv_bytes_simulated": float(simulated),
+        }
 
-    def cost_summary(self, result: Any, row: int = 0) -> dict[str, Any]:
-        """``result.cost_summary()`` of a :class:`~economize.decoding.DecodeResult` of the last generation (row
-        ``row`` of its batch) together with this technique's memory statistics."""
-        return {**result.cost_summary(), **self.kv_stats(row)}
+    def cost_summary(self, result: Any, row: int | None = None) -> dict[str, Any]:
+        """``result.cost_summary()`` of a :class:`~economize.decoding.DecodeResult` of the last generation together
+        with this technique's memory statistics of row ``row`` of its batch (default: the result's own row)."""
+        return {**result.cost_summary(), **self.kv_stats(getattr(result, "row", 0) if row is None else row)}
 
 
 def check_positional(adapter: Any, technique: str) -> None:

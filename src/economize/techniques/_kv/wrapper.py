@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 import torch
+from torch import nn
 
 from ...errors import IncompatibleTechniquesError
 from ...modules.kv_cache import write_slots  # re-exported: KV techniques import it from the package
@@ -41,8 +42,8 @@ from ...runtime import KVCache, StaticKVCache, current_phase
 LayerBytes = Callable[[int, torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]]
 
 __all__ = [
-    "CacheWrapper", "KVStats", "LayerBytes", "RowStats", "SlotStore", "find_wrapper", "frontiers", "innermost",
-    "write_slots",
+    "CacheWrapper", "KVStats", "LayerBytes", "RowStats", "SlotStore", "find_wrapper", "frontiers", "held_bytes",
+    "innermost", "write_slots",
 ]
 
 W = TypeVar("W", bound="CacheWrapper")
@@ -51,6 +52,11 @@ W = TypeVar("W", bound="CacheWrapper")
 @dataclass
 class RowStats:
     """Memory accounting of one row of a generation, in bytes.
+
+    The sizes are modelled: the bytes the row's committed entries take in the technique's storage format (codes,
+    scales, kept entries), whether or not the Hugging Face path realizes that format (a simulated technique keeps
+    the dense buffers, see :meth:`~economize.Technique.simulation`). :attr:`KVStats.allocated_bytes` is the
+    measured counterpart.
 
     Attributes:
         kv_bytes: Size of the row's committed cache entries (all layers) at its last exact pass.
@@ -80,9 +86,16 @@ class RowStats:
 
 @dataclass
 class KVStats:
-    """Memory accounting of one generation, per original batch row (the row order of the decode call)."""
+    """Memory accounting of one generation, per original batch row (the row order of the decode call).
+
+    Attributes:
+        rows: Modelled bytes per row (:class:`RowStats`).
+        allocated_bytes: Measured bytes of every tensor storage the cache held (:func:`held_bytes` of the wrapper
+            chain, all rows and layers, the largest value seen at an exact pass): the memory the path really uses.
+    """
 
     rows: dict[int, RowStats] = field(default_factory=dict)
+    allocated_bytes: int = 0
 
     def row(self, index: int) -> RowStats:
         """Statistics of original row ``index`` (zeros if the row made no exact pass)."""
@@ -413,6 +426,7 @@ class CacheWrapper(KVCache):
             [None if pad else v for pad, v in zip(padding, stored.tolist())],
             [None if pad else v for pad, v in zip(padding, full.tolist())],
         )
+        self.stats.allocated_bytes = max(self.stats.allocated_bytes, held_bytes(self))
 
     def record_bytes(self, stored: Sequence[float | None], full: Sequence[float | None]) -> None:
         """Account one exact pass: ``stored[b]`` and ``full[b]`` bytes of committed entries of current row ``b``.
@@ -479,6 +493,41 @@ def frontiers(slots: torch.Tensor, trash: int, batch_size: int) -> list[int | No
         return [value] * batch_size
     smallest = slots.amin(dim=1).tolist()  # the trash slot is above every real slot
     return [None if s >= trash else int(s) for s in smallest]
+
+
+def held_bytes(cache: KVCache) -> int:
+    """Measured bytes of the tensor storages that ``cache`` and every cache it wraps hold (K/V buffers, packed codes,
+    scales, keep masks, compact copies; each storage counted once, modules and the statistics excluded).
+
+    The walk follows the attributes of the caches into containers and into objects of economize's own classes, so a
+    new wrapper's side state is measured without declaring it.
+    """
+    storages: dict[tuple[str, int], int] = {}
+
+    def visit(obj: object, depth: int) -> None:
+        if isinstance(obj, torch.Tensor):
+            storage = obj.untyped_storage()
+            storages[(str(obj.device), storage.data_ptr())] = storage.nbytes()
+            return
+        if depth > 6 or isinstance(obj, (nn.Module, KVStats)):
+            return
+        if isinstance(obj, dict):
+            items: Iterator[object] = iter(obj.values())
+        elif isinstance(obj, (list, tuple, set, frozenset)):
+            items = iter(obj)
+        elif type(obj).__module__.startswith("economize.") and hasattr(obj, "__dict__"):
+            items = iter(vars(obj).values())
+        else:
+            return
+        for item in items:
+            visit(item, depth + 1)
+
+    node: KVCache = cache
+    while isinstance(node, CacheWrapper):
+        visit([value for key, value in vars(node).items() if key != "inner"], 0)
+        node = node.inner
+    visit(node, 0)
+    return sum(storages.values())
 
 
 def innermost(cache: KVCache) -> KVCache:

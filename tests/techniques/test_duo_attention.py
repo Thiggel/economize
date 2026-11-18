@@ -226,7 +226,9 @@ def test_all_streaming_is_streaming_llm_and_none_is_the_model() -> None:
     model = economize.apply(make_tiny_model(), _config(sparsity=1.0, threshold=None))
     logits, _ = _teacher_forced(model, seq, "duo_attention")
     assert torch.equal(logits, expected)
-    assert model.techniques["duo_attention"].kv_stats() == streaming.techniques["kv_evict"].kv_stats()
+    modelled = {key: value for key, value in streaming.techniques["kv_evict"].kv_stats().items()
+                if key != "kv_bytes_allocated_batch"}
+    assert modelled.items() <= model.techniques["duo_attention"].kv_stats().items()
     base = make_tiny_model()
     exact = economize.apply(base, _config(sparsity=0.0, threshold=None))
     logits, _ = _teacher_forced(exact, seq, "duo_attention")

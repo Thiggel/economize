@@ -52,8 +52,9 @@ result = model.decode(prompt[0], 64)
 print(tokenizer.decode(result.tokens))
 
 stats = model.techniques["kivi"].cost_summary(result)
-print(stats["kv_bytes"], stats["kv_bytes_full"])     # KV bytes stored, and in the model's dtype
+print(stats["kv_bytes"], stats["kv_bytes_full"])     # modelled KV bytes, packed and in the model's dtype
 print(stats["kv_compression"])                       # kv_bytes_full / kv_bytes
+print(stats["kv_bytes_allocated_batch"])             # measured bytes the cache held (whole batch)
 print((result.tokens == reference).float().mean().item())   # agreement with the plain model
 model.detach()
 ```
