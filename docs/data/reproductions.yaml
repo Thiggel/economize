@@ -298,3 +298,56 @@ studies:
         config: economize.load(base, "yuhuili/EAGLE3-LLaMA3.1-Instruct-8B", decoding=DecodeConfig(cycle_length=6))
         paper: 4.44
         economize: 2.822
+
+  - id: kv-eviction-llama-3-8b-instruct
+    title: KV-cache eviction in Llama-3-8B-Instruct
+    technique: kv_evict
+    model: meta-llama/Meta-Llama-3-8B-Instruct (bf16)
+    hardware: NVIDIA A100-SXM4-80GB
+    metric: Mean score over the 16 English LongBench tasks
+    better: higher
+    paper:
+      source: PyramidKV, Table 11
+      arxiv: "2406.02069"
+      baseline: 41.46
+    economize:
+      version: 0.2.0 (H2O 0.3.2)
+      date: 2026-10-10 (H2O 2026-10-17)
+      baseline: 43.13
+    command: effeval repro run B27
+    result: data/results/B27.json
+    note: >-
+      The paper runs the KVCache-Factory baselines with prompts middle-truncated to 7500 tokens, the model's chat
+      template, LongBench's per-task generation lengths and greedy decoding, and so does the reproduction. A budget of
+      B entries per head keeps an 8-token window plus B - 8 selected entries for SnapKV and H2O, and 4 sinks plus
+      B - 4 recent tokens for StreamingLLM. H2O uses method "h2o_prefill", which selects once from the prompt as
+      KVCache-Factory does. The method "h2o" also evicts during decoding with scores accumulated over the generated
+      tokens and scores 33.15 at budget 128 and 41.02 at budget 2048. KVCache-Factory's own code, run with the same
+      prompts, scores 43.62 with the full cache, 40.52 with SnapKV and 36.58 with H2O at budget 128. economize
+      selects entries per KV head, while KVCache-Factory repeats the keys and values for every query head and selects
+      per query head, which keeps more distinct entries in a model with grouped-query attention.
+    rows:
+      - setting: SnapKV, budget 128
+        config: KVEvictConfig(method="snapkv", heavy=120, observation_window=8, kernel_size=7, pooling="max")
+        paper: 35.50
+        economize: 39.87
+      - setting: H2O, budget 128
+        config: KVEvictConfig(method="h2o_prefill", sinks=0, recent=8, heavy=120)
+        paper: 35.37
+        economize: 35.37
+      - setting: StreamingLLM, budget 128
+        config: KVEvictConfig(method="streaming", sinks=4, recent=124)
+        paper: 32.00
+        economize: 34.33
+      - setting: SnapKV, budget 2048
+        config: KVEvictConfig(method="snapkv", heavy=2040, observation_window=8, kernel_size=7, pooling="max")
+        paper: 41.35
+        economize: 42.86
+      - setting: H2O, budget 2048
+        config: KVEvictConfig(method="h2o_prefill", sinks=0, recent=8, heavy=2040)
+        paper: 39.35
+        economize: 41.82
+      - setting: StreamingLLM, budget 2048
+        config: KVEvictConfig(method="streaming", sinks=4, recent=2044)
+        paper: 37.82
+        economize: 40.65

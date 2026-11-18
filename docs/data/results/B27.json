@@ -1,0 +1,458 @@
+{
+ "schema": "economize.reproduction-result/1",
+ "note": "Trimmed copy of the evaluation harness's result file: metrics and configurations unchanged, machine paths and harness internals removed, the key 'effkit' renamed 'economize' (economize was released as effkit before 0.3.0). The variants h2o_prefill_128 and h2o_prefill_2048 ran later with economize 0.3.2 ('later_variants'); every other variant ran with 0.2.0.",
+ "id": "B27",
+ "title": "SnapKV / H2O / StreamingLLM at KV budgets 128 and 2048 (kv_evict), Llama-3-8B-Instruct, LongBench 16 tasks",
+ "paper": "2406.02069 (PyramidKV Tab. 11, KVCache-Factory baselines)",
+ "date": "2026-10-10T21:11:55+00:00",
+ "gpu": "NVIDIA A100-SXM4-80GB",
+ "versions": {
+  "economize": "0.2.0",
+  "python": "3.12.3",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.17.0",
+  "lm_eval": "0.4.13",
+  "datasets": "5.1.0",
+  "cuda": "13.0"
+ },
+ "groups": [
+  {
+   "name": "Meta-Llama-3-8B-Instruct",
+   "model": "meta-llama/Meta-Llama-3-8B-Instruct",
+   "dtype": "bfloat16",
+   "baseline": "full",
+   "variants": {
+    "full": {
+     "techniques": [],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "score/longbench_narrativeqa": 21.372533314875582,
+      "score/longbench_qasper": 42.85607026366406,
+      "score/longbench_multifieldqa_en": 48.080803243924684,
+      "score/longbench_hotpotqa": 46.48602756892231,
+      "score/longbench_2wikimqa": 37.68108529401633,
+      "score/longbench_musique": 22.287117457705694,
+      "score/longbench_gov_report": 30.274485678101296,
+      "score/longbench_qmsum": 22.561755197816698,
+      "score/longbench_multi_news": 27.520713275959967,
+      "score/longbench_trec": 73.5,
+      "score/longbench_triviaqa": 90.49761904761904,
+      "score/longbench_samsum": 42.2614865700658,
+      "score/longbench_passage_count": 9.0,
+      "score/longbench_passage_retrieval_en": 67.5,
+      "score/longbench_lcc": 56.938,
+      "score/longbench_repobench_p": 51.22,
+      "score/mean": 43.127356057041965
+     }
+    },
+    "snapkv_128": {
+     "techniques": [
+      {
+       "technique": "kv_evict",
+       "method": "snapkv",
+       "observation_window": 8,
+       "kernel_size": 7,
+       "pooling": "max",
+       "heavy": 120
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "score/longbench_narrativeqa": 20.595907132942735,
+      "score/longbench_qasper": 32.10606258412162,
+      "score/longbench_multifieldqa_en": 45.711005950822226,
+      "score/longbench_hotpotqa": 46.026199102829544,
+      "score/longbench_2wikimqa": 36.05570818070818,
+      "score/longbench_musique": 21.88241660300484,
+      "score/longbench_gov_report": 20.093095790758415,
+      "score/longbench_qmsum": 20.75432360756221,
+      "score/longbench_multi_news": 20.794096446775708,
+      "score/longbench_trec": 60.5,
+      "score/longbench_triviaqa": 90.23968253968255,
+      "score/longbench_samsum": 38.94838499772365,
+      "score/longbench_passage_count": 7.0,
+      "score/longbench_passage_retrieval_en": 67.0,
+      "score/longbench_lcc": 57.072,
+      "score/longbench_repobench_p": 53.126,
+      "score/mean": 39.86905518355823
+     }
+    },
+    "h2o_128": {
+     "techniques": [
+      {
+       "technique": "kv_evict",
+       "method": "h2o",
+       "sinks": 0,
+       "recent": 8,
+       "heavy": 120
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "score/longbench_narrativeqa": 18.262586054494538,
+      "score/longbench_qasper": 25.37587140137256,
+      "score/longbench_multifieldqa_en": 34.17121840345832,
+      "score/longbench_hotpotqa": 42.95297619047619,
+      "score/longbench_2wikimqa": 30.174739965916437,
+      "score/longbench_musique": 19.66684173669468,
+      "score/longbench_gov_report": 11.68088205131769,
+      "score/longbench_qmsum": 14.537699273721039,
+      "score/longbench_multi_news": 14.62169470516798,
+      "score/longbench_trec": 58.5,
+      "score/longbench_triviaqa": 86.30631386157702,
+      "score/longbench_samsum": 21.05506884473081,
+      "score/longbench_passage_count": 3.916666666666667,
+      "score/longbench_passage_retrieval_en": 65.75,
+      "score/longbench_lcc": 44.816,
+      "score/longbench_repobench_p": 38.606,
+      "score/mean": 33.14965994722462
+     }
+    },
+    "streaming_128": {
+     "techniques": [
+      {
+       "technique": "kv_evict",
+       "method": "streaming",
+       "sinks": 4,
+       "recent": 124
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "score/longbench_narrativeqa": 16.837787066734435,
+      "score/longbench_qasper": 25.722874585537546,
+      "score/longbench_multifieldqa_en": 31.196277188947853,
+      "score/longbench_hotpotqa": 41.3968954248366,
+      "score/longbench_2wikimqa": 31.66777437444279,
+      "score/longbench_musique": 17.332572003160237,
+      "score/longbench_gov_report": 16.613082469103205,
+      "score/longbench_qmsum": 19.283546629013152,
+      "score/longbench_multi_news": 17.478410677184378,
+      "score/longbench_trec": 45.5,
+      "score/longbench_triviaqa": 73.80524676587976,
+      "score/longbench_samsum": 35.601695492438495,
+      "score/longbench_passage_count": 6.0,
+      "score/longbench_passage_retrieval_en": 66.5,
+      "score/longbench_lcc": 53.66,
+      "score/longbench_repobench_p": 50.664,
+      "score/mean": 34.328760167329904
+     }
+    },
+    "snapkv_2048": {
+     "techniques": [
+      {
+       "technique": "kv_evict",
+       "method": "snapkv",
+       "observation_window": 8,
+       "kernel_size": 7,
+       "pooling": "max",
+       "heavy": 2040
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "score/longbench_narrativeqa": 21.263489258656602,
+      "score/longbench_qasper": 42.133568059373495,
+      "score/longbench_multifieldqa_en": 46.78855189911625,
+      "score/longbench_hotpotqa": 46.31842105263158,
+      "score/longbench_2wikimqa": 37.02055138348241,
+      "score/longbench_musique": 22.060768251356485,
+      "score/longbench_gov_report": 27.5638264845525,
+      "score/longbench_qmsum": 22.069336534594505,
+      "score/longbench_multi_news": 27.130995516574707,
+      "score/longbench_trec": 73.5,
+      "score/longbench_triviaqa": 90.55873015873016,
+      "score/longbench_samsum": 42.0984062158619,
+      "score/longbench_passage_count": 9.0,
+      "score/longbench_passage_retrieval_en": 67.5,
+      "score/longbench_lcc": 57.476,
+      "score/longbench_repobench_p": 53.2,
+      "score/mean": 42.85516530093316
+     }
+    },
+    "h2o_2048": {
+     "techniques": [
+      {
+       "technique": "kv_evict",
+       "method": "h2o",
+       "sinks": 0,
+       "recent": 8,
+       "heavy": 2040
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "score/longbench_narrativeqa": 20.389183798022472,
+      "score/longbench_qasper": 39.03091487183347,
+      "score/longbench_multifieldqa_en": 44.01855222131634,
+      "score/longbench_hotpotqa": 42.811027568922306,
+      "score/longbench_2wikimqa": 35.56026248936999,
+      "score/longbench_musique": 20.85930735930736,
+      "score/longbench_gov_report": 26.11285173878673,
+      "score/longbench_qmsum": 16.769301085985198,
+      "score/longbench_multi_news": 27.71115867172728,
+      "score/longbench_trec": 72.5,
+      "score/longbench_triviaqa": 89.90873015873017,
+      "score/longbench_samsum": 36.775956365724866,
+      "score/longbench_passage_count": 7.5,
+      "score/longbench_passage_retrieval_en": 67.5,
+      "score/longbench_lcc": 56.682,
+      "score/longbench_repobench_p": 52.266,
+      "score/mean": 41.02470289560789
+     }
+    },
+    "streaming_2048": {
+     "techniques": [
+      {
+       "technique": "kv_evict",
+       "method": "streaming",
+       "sinks": 4,
+       "recent": 2044
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "score/longbench_narrativeqa": 20.38451630069277,
+      "score/longbench_qasper": 36.16157169971925,
+      "score/longbench_multifieldqa_en": 36.138171246763804,
+      "score/longbench_hotpotqa": 43.978641456582636,
+      "score/longbench_2wikimqa": 35.74439698232802,
+      "score/longbench_musique": 19.2450539656422,
+      "score/longbench_gov_report": 26.472555637276397,
+      "score/longbench_qmsum": 21.4293915511023,
+      "score/longbench_multi_news": 27.13018064849288,
+      "score/longbench_trec": 70.0,
+      "score/longbench_triviaqa": 89.58492063492064,
+      "score/longbench_samsum": 41.33934068051378,
+      "score/longbench_passage_count": 6.5,
+      "score/longbench_passage_retrieval_en": 64.0,
+      "score/longbench_lcc": 58.408,
+      "score/longbench_repobench_p": 53.896,
+      "score/mean": 40.65079630025217
+     }
+    },
+    "h2o_prefill_128": {
+     "techniques": [
+      {
+       "technique": "kv_evict",
+       "method": "h2o_prefill",
+       "sinks": 0,
+       "recent": 8,
+       "heavy": 120
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "score/longbench_narrativeqa": 18.418640786047234,
+      "score/longbench_qasper": 27.48676559508593,
+      "score/longbench_multifieldqa_en": 35.20679042445295,
+      "score/longbench_hotpotqa": 42.39893347499183,
+      "score/longbench_2wikimqa": 29.798881673881674,
+      "score/longbench_musique": 19.29551820728291,
+      "score/longbench_gov_report": 22.84798715055804,
+      "score/longbench_qmsum": 17.971032254667886,
+      "score/longbench_multi_news": 24.960098667292808,
+      "score/longbench_trec": 58.5,
+      "score/longbench_triviaqa": 86.27097006730874,
+      "score/longbench_samsum": 23.777053422848418,
+      "score/longbench_passage_count": 4.583333333333333,
+      "score/longbench_passage_retrieval_en": 65.58333333333333,
+      "score/longbench_lcc": 48.122,
+      "score/longbench_repobench_p": 40.716,
+      "score/mean": 35.37108364944282
+     }
+    },
+    "h2o_prefill_2048": {
+     "techniques": [
+      {
+       "technique": "kv_evict",
+       "method": "h2o_prefill",
+       "sinks": 0,
+       "recent": 8,
+       "heavy": 2040
+      }
+     ],
+     "checkpoint": null,
+     "decoding": {},
+     "metrics": {
+      "score/longbench_narrativeqa": 20.09250189797366,
+      "score/longbench_qasper": 40.6881731225387,
+      "score/longbench_multifieldqa_en": 44.6698225111036,
+      "score/longbench_hotpotqa": 42.899855407750145,
+      "score/longbench_2wikimqa": 35.511178240285744,
+      "score/longbench_musique": 21.13073593073593,
+      "score/longbench_gov_report": 28.82316671640478,
+      "score/longbench_qmsum": 20.203021739888573,
+      "score/longbench_multi_news": 27.245334737263878,
+      "score/longbench_trec": 72.5,
+      "score/longbench_triviaqa": 90.30873015873016,
+      "score/longbench_samsum": 36.71860310641246,
+      "score/longbench_passage_count": 6.916666666666666,
+      "score/longbench_passage_retrieval_en": 67.5,
+      "score/longbench_lcc": 59.002,
+      "score/longbench_repobench_p": 54.962,
+      "score/mean": 41.823236889734645
+     }
+    }
+   }
+  }
+ ],
+ "comparisons": [
+  {
+   "group": "Meta-Llama-3-8B-Instruct",
+   "variant": "snapkv_128",
+   "metric": "score/mean",
+   "kind": "acc",
+   "economize": 39.86905518355823,
+   "paper": 35.5,
+   "baseline": 43.127356057041965,
+   "paper_baseline": 41.46,
+   "delta": -3.2583008734837335,
+   "paper_delta": -5.960000000000001,
+   "status": "above",
+   "tolerance": 0.5,
+   "error": 2.7016991265162673
+  },
+  {
+   "group": "Meta-Llama-3-8B-Instruct",
+   "variant": "h2o_128",
+   "metric": "score/mean",
+   "kind": "acc",
+   "economize": 33.14965994722462,
+   "paper": 35.37,
+   "baseline": 43.127356057041965,
+   "paper_baseline": 41.46,
+   "delta": -9.977696109817344,
+   "paper_delta": -6.090000000000003,
+   "status": "fail",
+   "tolerance": 0.5,
+   "error": -3.887696109817341
+  },
+  {
+   "group": "Meta-Llama-3-8B-Instruct",
+   "variant": "streaming_128",
+   "metric": "score/mean",
+   "kind": "acc",
+   "economize": 34.328760167329904,
+   "paper": 32.0,
+   "baseline": 43.127356057041965,
+   "paper_baseline": 41.46,
+   "delta": -8.798595889712061,
+   "paper_delta": -9.46,
+   "status": "above",
+   "tolerance": 0.5,
+   "error": 0.6614041102879398
+  },
+  {
+   "group": "Meta-Llama-3-8B-Instruct",
+   "variant": "snapkv_2048",
+   "metric": "score/mean",
+   "kind": "acc",
+   "economize": 42.85516530093316,
+   "paper": 41.35,
+   "baseline": 43.127356057041965,
+   "paper_baseline": 41.46,
+   "delta": -0.27219075610880594,
+   "paper_delta": -0.10999999999999943,
+   "status": "pass",
+   "tolerance": 0.5,
+   "error": -0.1621907561088065
+  },
+  {
+   "group": "Meta-Llama-3-8B-Instruct",
+   "variant": "h2o_2048",
+   "metric": "score/mean",
+   "kind": "acc",
+   "economize": 41.02470289560789,
+   "paper": 39.35,
+   "baseline": 43.127356057041965,
+   "paper_baseline": 41.46,
+   "delta": -2.102653161434077,
+   "paper_delta": -2.1099999999999994,
+   "status": "pass",
+   "tolerance": 0.5,
+   "error": 0.007346838565922553
+  },
+  {
+   "group": "Meta-Llama-3-8B-Instruct",
+   "variant": "streaming_2048",
+   "metric": "score/mean",
+   "kind": "acc",
+   "economize": 40.65079630025217,
+   "paper": 37.82,
+   "baseline": 43.127356057041965,
+   "paper_baseline": 41.46,
+   "delta": -2.476559756789797,
+   "paper_delta": -3.6400000000000006,
+   "status": "above",
+   "tolerance": 0.5,
+   "error": 1.1634402432102036
+  },
+  {
+   "group": "Meta-Llama-3-8B-Instruct",
+   "variant": "h2o_prefill_128",
+   "metric": "score/mean",
+   "kind": "acc",
+   "economize": 35.37108364944282,
+   "paper": 35.37,
+   "baseline": 43.127356057041965,
+   "paper_baseline": 41.46,
+   "delta": -7.756272407599148,
+   "paper_delta": -6.090000000000003,
+   "status": "fail",
+   "tolerance": 0.5,
+   "error": -1.6662724075991449
+  },
+  {
+   "group": "Meta-Llama-3-8B-Instruct",
+   "variant": "h2o_prefill_2048",
+   "metric": "score/mean",
+   "kind": "acc",
+   "economize": 41.823236889734645,
+   "paper": 39.35,
+   "baseline": 43.127356057041965,
+   "paper_baseline": 41.46,
+   "delta": -1.30411916730732,
+   "paper_delta": -2.1099999999999994,
+   "status": "above",
+   "tolerance": 0.5,
+   "error": 0.8058808326926794
+  }
+ ],
+ "later_variants": [
+  {
+   "variant": "h2o_prefill_128",
+   "date": "2026-10-17T11:03:20+00:00",
+   "versions": {
+    "economize": "0.3.2",
+    "python": "3.12.3",
+    "torch": "2.13.0+cu130",
+    "transformers": "5.17.0",
+    "lm_eval": "0.4.13",
+    "datasets": "5.1.0",
+    "cuda": "13.0"
+   }
+  },
+  {
+   "variant": "h2o_prefill_2048",
+   "date": "2026-10-17T12:44:20+00:00",
+   "versions": {
+    "economize": "0.3.2",
+    "python": "3.12.3",
+    "torch": "2.13.0+cu130",
+    "transformers": "5.17.0",
+    "lm_eval": "0.4.13",
+    "datasets": "5.1.0",
+    "cuda": "13.0"
+   }
+  }
+ ]
+}
