@@ -52,6 +52,29 @@ def test_a_committing_verifier_cannot_claim_trees() -> None:
         VERIFIERS.unregister("test_commits_trees")
 
 
+@pytest.mark.parametrize("verifier", ["typical", "accept_all"])
+def test_lossless_refuses_a_lossy_verifier(verifier: str) -> None:
+    with pytest.raises(ConfigError, match="lossless=True contradicts verifier"):
+        CycleDecoder(_runner(), ScriptedDrafter(SCRIPT), DecodeConfig(cycle_length=3, lossless=True, verifier=verifier))
+    CycleDecoder(_runner(), ScriptedDrafter(SCRIPT), DecodeConfig(cycle_length=3, verifier=verifier))
+    for lossless in ("greedy", "rejection"):
+        CycleDecoder(_runner(), ScriptedDrafter(SCRIPT), DecodeConfig(cycle_length=3, lossless=True, verifier=lossless))
+
+
+def test_lossless_refuses_a_lossy_technique_that_changes_the_exact_pass() -> None:
+    from economize import apply
+    from economize.techniques.early_exit import EarlyExitConfig
+    from economize.techniques.kv_evict import KVEvictConfig
+    from economize.techniques.quant import QuantConfig
+
+    evicting = apply(make_tiny_model(), KVEvictConfig(method="h2o", recent=4, heavy=4), EarlyExitConfig(exit_layer=3))
+    with pytest.raises(ConfigError, match=r"lossy technique\(s\) \['kv_evict'\]"):
+        evicting.decoder(DecodeConfig(cycle_length=3, lossless=True))
+    evicting.decoder(DecodeConfig(cycle_length=3))  # lossless=None: the caller accepts the technique's loss
+    quantized = apply(make_tiny_model(), QuantConfig(backend="fake", group_size=None), EarlyExitConfig(exit_layer=3))
+    quantized.decoder(DecodeConfig(cycle_length=3, lossless=True))  # the exact pass runs the quantized model
+
+
 # ---- cost logs -----------------------------------------------------------------------------------------------------
 def test_truncate_after_step_drops_later_draft_steps_and_keeps_the_rest() -> None:
     log = CostLog()

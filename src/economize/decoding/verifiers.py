@@ -77,6 +77,7 @@ class AcceptAllVerifier(Verifier):
     """Lossy decoding: drafts are final, the exact pass refreshes the cache and emits one exact token."""
 
     commits_drafts = True
+    lossless = False
 
     def verify(
         self,
@@ -310,6 +311,7 @@ class TypicalVerifier(Verifier):
     """
 
     supports_trees = True
+    lossless = False
     default_options: ClassVar[Mapping[str, Any]] = {"threshold": 0.09, "alpha": 0.3}
 
     def __init__(self, config: DecodeConfig) -> None:

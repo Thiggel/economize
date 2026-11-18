@@ -42,6 +42,12 @@ GenerateFn = Callable[..., Any]
 #: :attr:`EfficientModel.generate_implementation` names the entry a model uses.
 GENERATE_IMPLEMENTATIONS: Registry[GenerateFn] = Registry("generate implementation")
 
+#: Capabilities that only define the model the exact pass runs (rewritten weights, activation hooks applied per
+#: token) or propose tokens it verifies. A lossy technique with any other capability (a compressed or evicting KV
+#: cache, a dynamic-depth policy, a sparse prefill) makes the exact pass depend on how tokens are grouped into
+#: passes, so ``DecodeConfig.lossless=True`` refuses it.
+LOSSLESS_COMPATIBLE = Capability.WEIGHTS | Capability.ACTIVATIONS | Capability.DRAFTER
+
 
 class EfficientModel(nn.Module, EconomizeHubMixin):
     """A Hugging Face causal LM with efficiency techniques attached.
@@ -173,6 +179,8 @@ class EfficientModel(nn.Module, EconomizeHubMixin):
         return decoder
 
     def _new_decoder(self, config: DecodeConfig) -> CycleDecoder:
+        if config.lossless is True:
+            self._check_lossless()
         technique = self.drafting_technique
         drafter = technique.drafter(self.runner) if technique is not None and config.cycle_length > 1 else None
         depth = self._first(Capability.DEPTH)
@@ -246,6 +254,17 @@ class EfficientModel(nn.Module, EconomizeHubMixin):
     # ---- helpers -----------------------------------------------------------------------------------------------
     def _first(self, capability: Capability) -> Technique | None:
         return next((t for t in self.techniques.values() if capability in t.capabilities), None)
+
+    def _check_lossless(self) -> None:
+        """Raise :class:`ConfigError` when a lossy technique outside :data:`LOSSLESS_COMPATIBLE` is attached."""
+        lossy = [t.name for t in self.techniques.values()
+                 if not t.lossless and not (t.capabilities and t.capabilities in LOSSLESS_COMPATIBLE)]
+        if lossy:
+            raise ConfigError(
+                f"lossless=True contradicts the lossy technique(s) {lossy}: they change the exact pass itself "
+                "(KV cache, layer skipping or sparse prefill), so the output differs from step-by-step decoding of "
+                "the model; detach them or decode with lossless=None / False"
+            )
 
 
 def apply(

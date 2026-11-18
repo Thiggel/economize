@@ -50,7 +50,8 @@ The economize attention kernel (`attn_implementation="economize"`) takes boolean
 
 ## Requirements and limits
 
-- Lossless verifiers that accept trees only: `greedy` (the default) and `typical`. The `rejection` verifier needs
+- Verifiers that accept trees only: the lossless `greedy` (the default) and the lossy `typical`, which reduces to
+  `greedy` for greedy decoding and is refused under `lossless=True`. The `rejection` verifier needs
   the drafter's probabilities along a chain and is rejected, as is lossy decoding (`lossless=False`), whose verifier
   commits drafts without checking them.
 - The drafter implements `economize.decoding.TreeStepDrafter` (`supports_tree_steps`, `tree_begin`, `tree_state`,

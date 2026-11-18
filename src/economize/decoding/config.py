@@ -25,8 +25,12 @@ class DecodeConfig:
         lossless: Verify drafts against the exact pass and keep only those the model itself would have produced
             (speculative decoding, output identical to greedy decoding). With ``False`` every draft is kept and
             the exact pass only refreshes the cache (lossy, cheaper). ``None`` (the default) means ``True`` unless
-            ``verifier`` names another verifier; an explicit ``True`` together with a verifier that commits drafts
-            unverified (``"accept_all"``) raises :class:`~economize.errors.ConfigError` when the decoder is built.
+            ``verifier`` names another verifier. An explicit ``True`` is enforced when the decoder is built: a
+            lossy verifier (``"accept_all"``, ``"typical"``) or an attached lossy technique that changes the exact
+            pass itself (a compressed or evicting KV cache, dynamic depth, a sparse prefill) raises
+            :class:`~economize.errors.ConfigError`. Weight and activation techniques define the model the exact
+            pass runs, so they combine with ``True``: the output is that of step-by-step decoding of the
+            transformed model.
         min_confidence: Stop drafting early when the drafter's top probability falls below this value (the first
             draft of a cycle is always made).
         verifier: Advanced. Name of a registered verifier, used instead of the one ``lossless`` picks.

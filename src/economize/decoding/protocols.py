@@ -336,6 +336,9 @@ class Verifier(ABC):
         needs_draft_probs: :meth:`draft` returns the distribution each draft was drawn from, and :meth:`verify`
             reads it.
         supports_trees: :meth:`verify_tree` is implemented.
+        lossless: Every committed token is distributed exactly as the selector applied to the exact logits (for
+            greedy decoding: equals the token of step-by-step decoding). ``DecodeConfig.lossless=True`` refuses a
+            verifier that sets it to ``False``.
         default_options: The options the verifier takes from ``DecodeConfig.verifier_options``, with their
             defaults. :attr:`options` holds the merged values; an unknown option is a :class:`ConfigError`.
     """
@@ -344,6 +347,7 @@ class Verifier(ABC):
     requires_greedy: ClassVar[bool] = False
     needs_draft_probs: ClassVar[bool] = False
     supports_trees: ClassVar[bool] = False
+    lossless: ClassVar[bool] = True
     default_options: ClassVar[Mapping[str, Any]] = {}
 
     def __init__(self, config: DecodeConfig) -> None:
