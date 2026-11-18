@@ -98,7 +98,7 @@ model streamed from host memory) is a deployment choice outside the policy; the 
 The requirements are those of [`dynamic_tree`](dynamic_tree.md#requirements-and-limits): a drafter that implements
 `TreeStepDrafter`, a tree verifier (`greedy` or `typical`), no recurrent layers, and `total_tokens <= 63` for the
 economize attention kernel's boolean tree masks. Two-model drafting,
-vendor MTP heads and drafters with their own static trees are rejected with `ConfigError` when the decoder is built.
+vendor MTP heads and drafters with their own static trees are rejected with `ConfigError` when the decoding options reach the model.
 Draft policies belong to economize's own decoder. A vLLM or SGLang export serves the drafting technique with the
 engine's speculative decoding and its own proposal shapes, so neither policy carries over to a served model.
 

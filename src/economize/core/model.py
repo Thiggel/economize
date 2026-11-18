@@ -11,7 +11,17 @@ from torch import nn
 from torch.utils.hooks import RemovableHandle
 
 from ..arch import ArchAdapter, adapter_for
-from ..decoding import CycleDecoder, DecodeConfig, DecodeResult, StopCondition, TokenSelector, VerifyObserver
+from ..decoding import (
+    POLICIES,
+    VERIFIERS,
+    CycleDecoder,
+    DecodeConfig,
+    DecodeResult,
+    StopCondition,
+    TokenSelector,
+    TreePolicy,
+    VerifyObserver,
+)
 from ..errors import ConfigError, EconomizeError
 from ..registry import Registry
 from ..runtime import LayerPolicy, LayerRunner
@@ -165,6 +175,30 @@ class EfficientModel(nn.Module, EconomizeHubMixin):
         handle = RemovableHandle(self._verify_observers)
         self._verify_observers[handle.id] = observer
         return handle
+
+    @property
+    def decoding(self) -> DecodeConfig:
+        """The default decoding options; setting them runs :meth:`check_decoding` first."""
+        return self._decoding
+
+    @decoding.setter
+    def decoding(self, config: DecodeConfig) -> None:
+        self.check_decoding(config)
+        self._decoding = config
+
+    def check_decoding(self, config: DecodeConfig) -> None:
+        """Raise :class:`~economize.ConfigError` for decoding options the decoder would reject, before any decoding.
+
+        Builds the draft policy, which checks its options (e.g. a ``dynamic_tree`` whose ``total_tokens`` exceeds the
+        candidates of a tree as deep as ``cycle_length`` allows). Under a tree policy it also builds the drafter and
+        lets the policy wrap it, which rejects drafters that cannot step over trees and verifiers that cannot verify
+        them. Chain policies skip that step, since every drafter drafts chains.
+        """
+        verifier = VERIFIERS.get(config.verifier_name)(config)
+        policy = POLICIES.get(config.draft_policy_name)(config)
+        technique = self.drafting_technique
+        if isinstance(policy, TreePolicy) and technique is not None and config.cycle_length > 1:
+            policy.wrap(technique.drafter(self.runner), verifier)
 
     def decoder(self, decoding: DecodeConfig | None = None) -> CycleDecoder:
         """The decoding loop for ``decoding`` (default: the model's decoding options).
