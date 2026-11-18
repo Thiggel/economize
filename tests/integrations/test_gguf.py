@@ -197,6 +197,7 @@ def test_groups_that_are_not_blocks_of_32_are_refused(tmp_path: Path) -> None:
                                                            backend="compressed-tensors"))
     with pytest.raises(UnsupportedBackendError, match="group_size=16 is not a multiple of GGUF's 32-value blocks"):
         to_gguf(model, tmp_path / "real", outtype="f32")
+    pytest.importorskip("gguf")  # writing the reference needs gguf
     reference = economize.apply(make_tiny_model(), QuantConfig(format="int4", group_size=16, backend="fake"))
     with pytest.warns(SimulatedPathWarning):
         export = to_gguf(reference, tmp_path / "fake", outtype="f32")

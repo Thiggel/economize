@@ -42,11 +42,18 @@ def test_no_default_is_simulated(name: str) -> None:
             assert len(support.detail) > 20, (name, backend, support.detail)  # an honest reason, not a blank
 
 
+def _no_kernel_installed(name: str) -> bool:
+    """Whether backend="auto" found no installed kernel for the default of ``name`` (CI installs none)."""
+    support = economize.backend_support(name)["transformers"]
+    return support.status is SupportStatus.UNSUPPORTED and "found no real kernel" in support.detail
+
+
 @pytest.mark.parametrize("name", sorted(REAL_DEFAULTS))
 def test_real_defaults_are_the_documented_ones(name: str) -> None:
     real = {backend for backend, support in economize.backend_support(name).items()
             if support.status is SupportStatus.REAL}
-    assert real & BACKENDS == REAL_DEFAULTS[name]
+    expected = REAL_DEFAULTS[name] - ({"transformers"} if _no_kernel_installed(name) else set())
+    assert real & BACKENDS == expected
 
 
 @pytest.mark.parametrize(

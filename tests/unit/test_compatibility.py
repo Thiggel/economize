@@ -3,6 +3,8 @@ simulated-path report per backend (:func:`economize.backend_support`)."""
 
 from __future__ import annotations
 
+import importlib.util
+
 import pytest
 
 import economize
@@ -217,8 +219,10 @@ def test_simulation_names_only_declared_savings() -> None:
 
 
 def test_the_kernel_decides_whether_a_path_is_simulated() -> None:
-    assert _status(QuantConfig(), "transformers") is SupportStatus.REAL  # backend="auto": the best installed kernel
-    assert _status(QuantConfig(backend="torchao"), "transformers") is SupportStatus.REAL
+    auto = economize.backend_support(QuantConfig())["transformers"]  # backend="auto": the best installed kernel
+    assert auto.status is SupportStatus.REAL or "found no real kernel" in auto.detail
+    if importlib.util.find_spec("torchao") is not None:
+        assert _status(QuantConfig(backend="torchao"), "transformers") is SupportStatus.REAL
     assert _status(QuantConfig(backend="fake"), "transformers") is SupportStatus.SIMULATED  # the reference
     assert _status(PruneConfig(), "transformers") is SupportStatus.REAL  # 2:4 sparse tensors
     assert _status(PruneConfig(semi_structured=False), "transformers") is SupportStatus.SIMULATED  # masked dense
