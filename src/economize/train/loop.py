@@ -26,16 +26,17 @@ from collections.abc import Callable, Iterable
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import torch
 
-from ..validation import check_positive, check_registered
+from ..errors import ConfigError, NonFiniteLossError
+from ..validation import check_choice, check_positive, check_registered
 from .checkpoint import RunCheckpointer, latest_checkpoint, load_trained, save_trained
 from .data import BatchSource, as_source, shard_source
 from .evaluate import MetricMeans, evaluate
 from .module import ObjectiveModule
-from .objective import Objective, OptimDefaults, build_objective, default_objective
+from .objective import Batch, Objective, OptimDefaults, build_objective, default_objective
 from .optim import build_optimizer, build_scheduler
 from .schedule import SCHEDULES
 from .teacher import TeacherHead, make_teacher_head
@@ -51,6 +52,11 @@ __all__ = ["TrainConfig", "TrainResult", "build_optimizer", "fit", "latest_check
 logger = logging.getLogger("economize.train")
 
 LOG_FILE = "train_log.jsonl"
+
+#: Consecutive batches without a counted prediction after which :func:`fit` gives up on the data.
+MAX_EMPTY_DRAWS = 1000
+
+NonFinitePolicy = Literal["raise", "skip", "warn"]
 
 
 @dataclass
@@ -72,7 +78,13 @@ class TrainConfig:
         min_lr_ratio: Final learning rate as a fraction of the peak.
         grad_clip: Maximum gradient norm (``0``: no clipping).
         autocast: Autocast dtype for the objective's forward (``"bfloat16"``, ``torch.float16``, ...; ``None``:
-            none, the model's own dtypes). Teacher passes always run without autocast.
+            none, the model's own dtypes). Teacher passes always run without autocast. ``float16`` scales the
+            loss with a ``GradScaler`` (when the trained parameters are float32), so small gradients do not
+            underflow and steps with overflowing gradients are skipped.
+        nonfinite: What a step whose loss is ``NaN`` or infinite does: ``"raise"`` stops the run with a
+            :class:`~economize.errors.TrainingError` before the optimizer applies the step, ``"skip"`` drops the
+            step's gradients (the step still counts, the learning rate still advances) and ``"warn"`` logs a warning
+            and applies the step.
         log_every: Log every this many steps (and the last step).
         eval_every: Evaluate on ``eval_data`` every this many steps (``None``: only after the last step).
         eval_batch_size: Rows per evaluation batch for tensor evaluation data.
@@ -113,6 +125,7 @@ class TrainConfig:
     min_lr_ratio: float | None = None
     grad_clip: float | None = None
     autocast: str | torch.dtype | None = None
+    nonfinite: NonFinitePolicy = "raise"
     log_every: int = 50
     eval_every: int | None = None
     eval_batch_size: int = 8
@@ -129,6 +142,7 @@ class TrainConfig:
         check_positive("steps", self.steps)
         check_positive("grad_accum", self.grad_accum)
         check_positive("batch_size", self.batch_size)
+        check_choice("nonfinite", self.nonfinite, ("raise", "skip", "warn"))
         if self.schedule is not None:
             check_registered("schedule", self.schedule, SCHEDULES)
 
@@ -248,6 +262,8 @@ class _Run:
         if self.accelerator is not None and self.accelerator.num_processes > 1:
             self.forward = self.accelerator.prepare_model(self.module)
         self.autocast = autocast_dtype(config.autocast)
+        self.scaler = self._grad_scaler()
+        self.empty_batches = 0
         self.output_dir = None if config.output_dir is None else Path(config.output_dir)
         self.checkpoints = RunCheckpointer(self.output_dir, rank=rank, world=self.world,
                                            keep=config.keep_checkpoints, barrier=self._barrier)
@@ -279,37 +295,47 @@ class _Run:
             loss_sum: torch.Tensor | float = 0.0
             metrics = MetricMeans()
             for micro in range(config.grad_accum):
-                batch = self.source.next_batch()
+                batch = self._next_batch()
                 sync = micro == config.grad_accum - 1 or self.forward is self.module
                 with nullcontext() if sync else self.forward.no_sync():
                     with torch.autocast(self.model.adapter.device.type, self.autocast,
                                         enabled=self.autocast is not None):
                         out = self.forward(batch.input_ids, batch.attention_mask, batch.loss_mask)
                     loss = out["loss"] / config.grad_accum
+                    scaled = loss if self.scaler is None else self.scaler.scale(loss)
                     if self.accelerator is not None:
-                        self.accelerator.backward(loss)
+                        self.accelerator.backward(scaled)
                     else:
-                        loss.backward()
+                        scaled.backward()
                 loss_sum = loss_sum + loss.detach()
                 if logged:
                     metrics.add(out["metrics"])
-            if self.settings.grad_clip is not None:
-                if self.accelerator is not None:
-                    self.accelerator.clip_grad_norm_(params, self.settings.grad_clip)
+            total = self._mean_over_processes(torch.as_tensor(loss_sum, dtype=torch.float32)).item()  # one sync
+            if self._check_finite(step, total):
+                if self.scaler is not None:
+                    self.scaler.unscale_(self.optimizer)
+                if self.settings.grad_clip is not None:
+                    if self.accelerator is not None:
+                        self.accelerator.clip_grad_norm_(params, self.settings.grad_clip)
+                    else:
+                        torch.nn.utils.clip_grad_norm_(params, self.settings.grad_clip)
+                if self.scaler is not None:
+                    self.scaler.step(self.optimizer)  # skips the step when the gradients overflowed
+                    self.scaler.update()
                 else:
-                    torch.nn.utils.clip_grad_norm_(params, self.settings.grad_clip)
-            self.optimizer.step()
+                    self.optimizer.step()
             lr = self.optimizer.param_groups[0]["lr"]
             self.scheduler.step()
             self.step += 1
-            total = self._mean_over_processes(torch.as_tensor(loss_sum, dtype=torch.float32)).item()  # one sync
             self.losses.append(total)
-            if not math.isfinite(total):
-                logger.warning("step %d: loss is %s", step, total)
             if logged:
                 if self.world > 1:
                     metrics.all_reduce(self._sum_over_processes, self.model.adapter.device)
-                self._log({"step": step, "loss": total, "lr": lr, **metrics.means(), "time": time.time() - start})
+                extra: dict[str, float] = {"skipped_batches": self.empty_batches} if self.empty_batches else {}
+                if self.scaler is not None:
+                    extra["loss_scale"] = self.scaler.get_scale()
+                self._log({"step": step, "loss": total, "lr": lr, **metrics.means(), **extra,
+                           "time": time.time() - start})
             last = self.step == config.steps
             if self.eval_data is not None and config.eval_every and self.step % config.eval_every == 0 and not last:
                 self._evaluate()
@@ -323,6 +349,48 @@ class _Run:
         self.checkpoints.save_result({"steps": self.step, "losses": self.losses, "history": self.history,
                                       "eval": self.last_eval})
         return TrainResult(self.step, self.losses, self.history, self.last_eval, self.output_dir, final)
+
+    def _next_batch(self) -> Batch:
+        """The source's next batch with a counted prediction. Batches in which every prediction is masked (e.g.
+        chat rows whose answer was cut off) would enter the step as a loss of ``0`` and are drawn past; every
+        process still runs ``grad_accum`` forward passes, so data-parallel processes stay in step."""
+        for _ in range(MAX_EMPTY_DRAWS):
+            batch = self.source.next_batch()
+            if batch.has_targets():
+                return batch
+            if self.empty_batches == 0:
+                logger.warning("skipping batches in which every prediction is masked (attention_mask, loss_mask); "
+                               "the training records count them as skipped_batches")
+            self.empty_batches += 1
+        raise ConfigError(f"{MAX_EMPTY_DRAWS} consecutive training batches have no position that counts in the "
+                          "loss: check the attention_mask and loss_mask of the data")
+
+    def _check_finite(self, step: int, loss: float) -> bool:
+        """Whether the step's gradients are applied, under ``TrainConfig.nonfinite``."""
+        if math.isfinite(loss):
+            return True
+        if self.config.nonfinite == "raise":
+            raise NonFiniteLossError(
+                f"step {step}: the loss is {loss}; the step was not applied. Lower the learning rate, use bfloat16 "
+                "or float32, or set TrainConfig(nonfinite='skip') to drop such steps"
+            )
+        if self.config.nonfinite == "skip":
+            logger.warning("step %d: the loss is %s, the step is skipped", step, loss)
+            self.optimizer.zero_grad(set_to_none=True)
+            return False
+        logger.warning("step %d: the loss is %s", step, loss)
+        return True
+
+    def _grad_scaler(self) -> torch.amp.GradScaler | None:
+        """A loss scaler for float16 autocast (bfloat16 and float32 need none)."""
+        if self.autocast != torch.float16:
+            return None
+        low = sorted({str(p.dtype) for p in self.module.params if p.dtype != torch.float32})
+        if low:
+            logger.warning("autocast float16 without loss scaling: the trained parameters are %s, and a GradScaler "
+                           "only unscales float32 gradients (keep the trained parameters in float32)", ", ".join(low))
+            return None
+        return torch.amp.GradScaler(self.model.adapter.device.type)
 
     def _finished(self) -> TrainResult:
         """The result of a finished run, with its final weights loaded into the model."""
@@ -392,6 +460,7 @@ class _Run:
             shared_state=lambda: {
                 "step": self.step,
                 "optimizer": self.optimizer.state_dict(),
+                **({} if self.scaler is None else {"scaler": self.scaler.state_dict()}),
                 "rng": rng_state(),
                 "data": self.source.state_dict(),
                 "history": self.history,
@@ -423,6 +492,8 @@ class _Run:
         load_trained(self.model, path, owned=self.module.owned)
         state = self.checkpoints.load_state(path)
         self.optimizer.load_state_dict(state["optimizer"])
+        if self.scaler is not None and "scaler" in state:
+            self.scaler.load_state_dict(state["scaler"])
         self.source.load_state_dict(state["data"])
         set_rng_state(state["rng"])
         self.step = int(state["step"])

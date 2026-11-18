@@ -8,6 +8,7 @@ __all__ = [
     "DuplicateNameError",
     "EconomizeError",
     "IncompatibleTechniquesError",
+    "NonFiniteLossError",
     "SimulatedPathWarning",
     "TeacherMismatchWarning",
     "UnknownFieldWarning",
@@ -51,6 +52,10 @@ class IncompatibleTechniquesError(EconomizeError, ValueError):
 
 class CheckpointFormatError(EconomizeError, ValueError):
     """A checkpoint could not be recognised or does not match its configuration."""
+
+
+class NonFiniteLossError(EconomizeError, FloatingPointError):
+    """A training step's loss is ``NaN`` or infinite (see ``TrainConfig.nonfinite``)."""
 
 
 class SimulatedPathWarning(UserWarning):

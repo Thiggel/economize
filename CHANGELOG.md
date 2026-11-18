@@ -19,6 +19,15 @@
   different (equally distributed) batches than in 0.5.0 for the same seed.
 - A `LoaderSource` (what `fit` and `as_source` make of a `DataLoader`) reseeds the loader's shuffling generator from the seed and
   epoch, so resuming through a shuffling `DataLoader` reproduces the batches of an uninterrupted run.
+- `fit` raises `NonFiniteLossError` when a loss is NaN or infinite, before the optimizer step is applied (it used
+  to apply the step and corrupt the weights). `TrainConfig(nonfinite="skip")` drops such steps with a warning,
+  `"warn"` keeps the old behaviour.
+- `TrainConfig(autocast="float16")` scales the loss with `torch.amp.GradScaler`; the scale is logged as `loss_scale`
+  and checkpointed.
+- `fit` draws past batches in which no next-token prediction counts (logged as `skipped_batches`), and `evaluate`
+  leaves them out instead of averaging a 0/0. A source that only yields such batches raises `ConfigError`.
+- `larger_teacher` keeps the teacher in evaluation mode, so dropout in the larger model no longer perturbs the
+  distillation targets.
 
 ## 0.5.0 (2026-11-18)
 

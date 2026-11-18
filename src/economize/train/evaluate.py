@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +17,8 @@ if TYPE_CHECKING:
     from ..core.model import EfficientModel
 
 __all__ = ["MetricMeans", "evaluate", "evaluate_batch", "mean_metrics", "split_batches"]
+
+logger = logging.getLogger("economize.train")
 
 #: Sums a tensor over all processes of a data-parallel run (e.g. ``lambda t: accelerator.reduce(t, "sum")``).
 AllReduce = Callable[[torch.Tensor], torch.Tensor]
@@ -106,6 +109,9 @@ def evaluate(
 ) -> dict[str, float | list[float]]:
     """The objective's evaluation metrics, averaged over batches (each batch counts equally).
 
+    Batches without a counted prediction (:meth:`Batch.has_targets`, e.g. chat rows whose answer was cut off) are
+    left out with a warning instead of entering the means as a loss of ``0``.
+
     Vector metrics (one value per draft step) are averaged elementwise and returned as lists. The model's
     techniques are put in eval mode for the call and restored afterwards.
 
@@ -124,6 +130,14 @@ def evaluate(
     batches = split_batches(data, batch_size)
     if not batches:
         raise ConfigError("no evaluation data")
+    counted = [batch for batch in batches if batch.has_targets()]  # the same on every process: sharded below
+    if not counted:
+        raise ConfigError(f"none of the {len(batches)} evaluation batches has a position that counts in the loss "
+                          "(attention_mask and loss_mask mask every prediction)")
+    if len(counted) < len(batches):
+        logger.warning("evaluation: left out %d of %d batches in which every prediction is masked",
+                       len(batches) - len(counted), len(batches))
+    batches = counted
     sharded = world > 1 and len(batches) >= world
     if sharded:
         if all_reduce is None:

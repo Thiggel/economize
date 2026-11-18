@@ -117,6 +117,19 @@ class Batch:
     def shape(self) -> torch.Size:
         return self.input_ids.shape
 
+    def has_targets(self) -> bool:
+        """Whether any next-token prediction of the batch counts: a position with a real next token
+        (``attention_mask``) that ``loss_mask`` marks. A batch without one gives no training signal (a masked
+        loss of such a batch is ``0`` or ``NaN``)."""
+        if self.input_ids.shape[-1] < 2:
+            return False
+        counted = torch.ones(self.input_ids[..., 1:].shape, dtype=torch.bool, device=self.input_ids.device)
+        if self.attention_mask is not None:
+            counted &= self.attention_mask[..., 1:].bool()
+        if self.loss_mask is not None:
+            counted &= self.loss_mask[..., :-1].bool()
+        return bool(counted.any())
+
 
 @dataclass(frozen=True)
 class TeacherRequest:

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
+import math
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -13,11 +16,23 @@ from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModelForCausalLM
 
 import economize
+from economize.errors import ConfigError, NonFiniteLossError
 from economize.techniques.early_exit import LayerSkip
 from economize.techniques.jump import JumpRollout
-from economize.train import CrossEntropy, DistillKL, TensorSource, TrainConfig, fit, latest_checkpoint, load_trained
+from economize.train import (
+    Batch,
+    CrossEntropy,
+    DistillKL,
+    TensorSource,
+    TrainConfig,
+    evaluate,
+    fit,
+    latest_checkpoint,
+    load_trained,
+)
 from economize.train.checkpoint import BASE_FILE, STATE_FILE
 from economize.train.loop import LOG_FILE
+from economize.train.objective import ObjectiveOutput, TeacherOutputs
 from economize.train.utils import autocast_dtype as _dtype
 from helpers import VOCAB, make_tiny_model
 
@@ -238,6 +253,90 @@ def test_fit_with_bfloat16_autocast(rows: torch.Tensor) -> None:
     result = fit(_jump_model(), rows, _objective(), steps=2, batch_size=2, autocast="bf16", eval_data=rows[:2])
     assert all(torch.isfinite(torch.tensor(loss)) for loss in result.losses)
     assert result.eval is not None
+
+
+@dataclass
+class _NanAt(JumpRollout):
+    """The jump objective, whose loss is ``NaN`` at step ``at``."""
+
+    at: int = 2
+    step: int = -1
+
+    def begin_step(self, step: int, total_steps: int) -> None:
+        self.step = step
+
+    def loss(self, model: Any, batch: Batch, teacher: TeacherOutputs | None) -> ObjectiveOutput:
+        out = super().loss(model, batch, teacher)
+        return ObjectiveOutput(out.loss * math.nan, out.metrics) if self.step == self.at else out
+
+
+def _nan_objective() -> _NanAt:
+    return _NanAt(horizon=4, stride=4, eval_horizon=4, eval_stride=6, eval_first=6)
+
+
+def test_a_nonfinite_loss_stops_the_run_before_the_step_is_applied(rows: torch.Tensor) -> None:
+    model = _jump_model()
+    with pytest.raises(NonFiniteLossError, match="step 2: the loss is nan"):
+        fit(model, rows, _nan_objective(), steps=5, batch_size=2, lr=1e-3, seed=0)
+    two_steps = _jump_model()
+    fit(two_steps, rows, _objective(), steps=2, batch_size=2, lr=1e-3, seed=0)
+    for name, value in _state(two_steps).items():
+        torch.testing.assert_close(_state(model)[name], value, msg=name)
+
+
+def test_a_skipped_nonfinite_step_leaves_the_weights_finite(rows: torch.Tensor,
+                                                             caplog: pytest.LogCaptureFixture) -> None:
+    model = _jump_model()
+    with caplog.at_level(logging.WARNING, "economize.train"):
+        result = fit(model, rows, _nan_objective(), steps=5, batch_size=2, lr=1e-3, seed=0, nonfinite="skip")
+    assert "step 2: the loss is nan, the step is skipped" in caplog.text
+    assert [math.isfinite(loss) for loss in result.losses] == [True, True, False, True, True]
+    assert all(torch.isfinite(value).all() for value in _state(model).values())
+    warned = _jump_model()
+    fit(warned, rows, _nan_objective(), steps=5, batch_size=2, lr=1e-3, seed=0, nonfinite="warn")
+    assert not all(torch.isfinite(value).all() for value in _state(warned).values())
+    unknown: dict[str, Any] = {"nonfinite": "ignore"}
+    with pytest.raises(ValueError, match="nonfinite"):
+        TrainConfig(**unknown)
+
+
+def _half_masked(rows: torch.Tensor) -> Batch:
+    """``rows`` whose odd rows have every prediction masked out."""
+    loss_mask = torch.ones_like(rows)
+    loss_mask[1::2] = 0
+    return Batch(rows, loss_mask=loss_mask)
+
+
+def test_batches_without_a_counted_prediction_are_drawn_past(rows: torch.Tensor) -> None:
+    result = fit(_jump_model(), _half_masked(rows), _objective(), steps=6, batch_size=1, lr=1e-3, seed=0,
+                 log_every=1)
+    assert all(loss > 0 for loss in result.losses)
+    assert result.history[-1]["skipped_batches"] > 0
+    nothing = Batch(rows, loss_mask=torch.zeros_like(rows))
+    with pytest.raises(ConfigError, match="no position that counts"):
+        fit(_jump_model(), nothing, _objective(), steps=1, batch_size=1)
+
+
+def test_evaluation_leaves_out_batches_without_a_counted_prediction(rows: torch.Tensor) -> None:
+    model, objective = _jump_model(), _objective()
+    counted = Batch(rows[:4])
+    empty = Batch(rows[4:8], loss_mask=torch.zeros_like(rows[4:8]))
+    assert not empty.has_targets() and counted.has_targets()
+    assert evaluate(model, objective, [counted, empty]) == evaluate(model, objective, [counted])
+    with pytest.raises(ConfigError, match="none of the 1 evaluation batches"):
+        evaluate(model, objective, [empty])
+
+
+def test_float16_autocast_scales_the_loss_and_checkpoints_the_scale(rows: torch.Tensor, tmp_path: Path) -> None:
+    result = fit(_jump_model(), rows, _objective(), steps=2, batch_size=2, autocast="fp16", log_every=1,
+                 save_every=1, output_dir=tmp_path)
+    assert all(math.isfinite(loss) for loss in result.losses)
+    assert all(record["loss_scale"] > 1 for record in result.history if "loss" in record)
+    state = torch.load(tmp_path / "checkpoint-1" / STATE_FILE, weights_only=True)
+    assert state["scaler"]["scale"] > 1
+    resumed = fit(_jump_model(), rows, _objective(), steps=2, batch_size=2, autocast="fp16", log_every=1,
+                  save_every=1, output_dir=tmp_path, resume=tmp_path / "checkpoint-1")
+    assert resumed.steps == 2
 
 
 def test_train_config_overrides() -> None:

@@ -343,6 +343,23 @@ def test_standalone_larger_teacher_matches_the_replaced_outputs(ids: torch.Tenso
     assert alone.logits is not None and alone.logits.shape[-1] == 100
 
 
+def test_the_larger_teacher_runs_without_dropout(ids: torch.Tensor) -> None:
+    other = make_tiny_model(seed=3, num_layers=3)
+    for module in other.modules():
+        if isinstance(module, torch.nn.Dropout):
+            module.p = 0.5
+    other.config.attention_dropout = 0.5
+    for layer in other.model.layers:
+        layer.self_attn.attention_dropout = 0.5
+    teacher = larger_teacher(other.train(), vocab_size=100)
+    assert not other.training
+    batch, request = Batch(ids), TeacherRequest(logits=True, own_pass=False)
+    first = teacher.standalone(batch, request).log_probs(slice(None))
+    other.train()  # e.g. a caller's .train() on a module holding the teacher
+    torch.testing.assert_close(teacher.standalone(batch, request).log_probs(slice(None)), first, rtol=0, atol=0)
+    assert not other.training
+
+
 def test_teacher_pass_skips_the_own_pass_only_when_the_request_allows_it(
     ids: torch.Tensor, monkeypatch: pytest.MonkeyPatch
 ) -> None:

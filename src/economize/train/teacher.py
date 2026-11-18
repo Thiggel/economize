@@ -110,6 +110,8 @@ class LargerTeacher:
     :meth:`standalone` runs the other model alone, for objectives that read only its distributions (requests with
     ``own_pass=False``, such as ``logit_distill``).
 
+    The other model runs in eval mode (no dropout), also after a caller's ``.train()`` on a module that holds it.
+
     Args:
         teacher_model: An :class:`~economize.EfficientModel` or a ``transformers`` causal LM, on any device.
         vocab_size: Truncate the teacher's logits to this many entries (models of one family often pad their
@@ -120,6 +122,7 @@ class LargerTeacher:
         from ..core.model import EfficientModel, apply
 
         self.teacher = teacher_model if isinstance(teacher_model, EfficientModel) else apply(teacher_model)
+        self.teacher.eval()
         self.vocab_size = vocab_size
         self._request = TeacherRequest(hidden_layers=(self.teacher.adapter.num_layers,))
 
@@ -132,15 +135,20 @@ class LargerTeacher:
 
         return logits
 
+    def _run(self, batch: Batch) -> TeacherOutputs:
+        if self.teacher.training or self.teacher.base_model.training:
+            self.teacher.eval()
+        return run_teacher(self.teacher, batch, self._request)
+
     def __call__(self, batch: Batch, outputs: TeacherOutputs) -> TeacherOutputs:
         device = outputs.final.device
-        big = run_teacher(self.teacher, batch, self._request)
+        big = self._run(batch)
         logits = self._head(big.final, device)
         full = None if outputs.logits is None else logits(big.final)
         return replace(outputs, final=big.final.to(device), head=logits, logits=full)
 
     def standalone(self, batch: Batch, request: TeacherRequest) -> TeacherOutputs:
-        big = run_teacher(self.teacher, batch, self._request)
+        big = self._run(batch)
         logits = self._head(big.final, big.final.device)
         return TeacherOutputs({}, big.final, logits, None, logits(big.final) if request.logits else None)
 
