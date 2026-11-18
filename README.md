@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="https://raw.githubusercontent.com/Thiggel/economize/main/docs/assets/logo.svg" alt="" width="40" height="40">
+  <img src="https://raw.githubusercontent.com/Thiggel/economize/main/docs/assets/logo.svg" alt="" width="40" height="40" align="middle">
   economize
 </h1>
 
