@@ -29,7 +29,7 @@ NEW = 24
 
 def _weights() -> list[TechniqueConfig]:
     return [PruneConfig(method="wanda", sparsity="2:4", semi_structured=False),
-            QuantConfig(backend="fake")]
+            QuantConfig(group_size=64, backend="fake")]
 
 
 def _apply(*configs: TechniqueConfig) -> economize.EfficientModel:

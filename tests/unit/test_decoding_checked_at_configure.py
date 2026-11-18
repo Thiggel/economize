@@ -17,17 +17,24 @@ def _model(name: str, assets: Path, decoding: DecodeConfig | None = None) -> eco
     return economize.apply(make_tiny_model("sdpa"), specimen(name, assets), decoding=decoding)
 
 
-def test_default_tree_budget_above_a_short_cycle_raises_at_apply(tmp_path: Path) -> None:
-    # depth defaults to cycle_length - 1 = 1, so topk 8 offers 8 candidates for the default total_tokens 60
-    with pytest.raises(ConfigError, match="total_tokens=60 exceeds the 8 candidates"):
-        _model("jump", tmp_path, DecodeConfig(cycle_length=2, draft_policy="dynamic_tree"))
+def test_tree_budget_above_a_short_cycle_raises_at_apply(tmp_path: Path) -> None:
+    # depth defaults to cycle_length - 1 = 1, so topk 10 offers 10 candidates for a budget of 60
+    with pytest.raises(ConfigError, match="total_tokens=60 exceeds the 10 candidates"):
+        _model("jump", tmp_path, DecodeConfig(cycle_length=2, draft_policy="dynamic_tree",
+                                              draft_policy_options={"total_tokens": 60}))
+
+
+def test_default_tree_budget_shrinks_to_a_short_cycle(tmp_path: Path) -> None:
+    model = _model("jump", tmp_path, DecodeConfig(cycle_length=2, draft_policy="dynamic_tree"))
+    assert model.decoding.draft_policy == "dynamic_tree"
 
 
 def test_setting_an_invalid_tree_budget_raises_and_keeps_the_old_options(tmp_path: Path) -> None:
     model = _model("jump", tmp_path)
     before = model.decoding
-    with pytest.raises(ConfigError, match="exceeds the 8 candidates"):
-        model.decoding = DecodeConfig(cycle_length=2, draft_policy="dynamic_tree")
+    with pytest.raises(ConfigError, match="exceeds the 10 candidates"):
+        model.decoding = DecodeConfig(cycle_length=2, draft_policy="dynamic_tree",
+                                      draft_policy_options={"total_tokens": 60})
     assert model.decoding is before
 
 

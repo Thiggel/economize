@@ -49,7 +49,6 @@ one level of `topk` candidates and all of them are verified.
 
 Unknown options, non-positive values and a `total_tokens` above the number of candidates raise `ConfigError` as soon as
 the options reach the model (`economize.apply(..., decoding=...)` or `model.decoding = ...`), before any decoding. The
-default `total_tokens=60` therefore needs `cycle_length >= 3` (depth 2, 72 candidates) or a smaller budget. The
 options enter the hash of `DecodeConfig`, so two trees of different shape never share a decoder or its CUDA graphs.
 
 The economize attention kernel (`attn_implementation="economize"`) takes boolean masks of up to 64 queries, so keep
