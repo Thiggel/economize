@@ -10,9 +10,11 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 import torch
+from torch.utils.data import DataLoader, RandomSampler
 
 from ...errors import ConfigError
 from ..objective import Batch
+from ..utils import spawn_seed
 from .masks import loss_mask_from_labels
 from .tokens import TokenStream
 
@@ -65,15 +67,16 @@ class _Shuffled:
         self._order = self._permutation()
 
     def shard(self, rank: int, world: int) -> None:
-        """Shuffle with ``seed + rank``: every process reads all examples in its own order."""
+        """Shuffle with the seed of stream ``rank`` (:func:`~economize.train.utils.spawn_seed`): every process reads
+        all examples in its own order."""
         if world > 1:
-            self.seed = self.base_seed + rank
+            self.seed = spawn_seed(self.base_seed, rank)
             self._order = self._permutation()
 
     def _permutation(self) -> torch.Tensor:
         if not self.shuffle:
             return torch.arange(self.n)
-        generator = torch.Generator().manual_seed(self.seed + self.epoch)
+        generator = torch.Generator().manual_seed(spawn_seed(self.seed, self.epoch))
         return torch.randperm(self.n, generator=generator)
 
     def next_indices(self) -> torch.Tensor:
@@ -98,7 +101,7 @@ class _ShuffledSource:
     _order: _Shuffled
 
     def shard(self, rank: int, world: int) -> None:
-        """Read the rows of process ``rank`` of ``world``: every process shuffles all rows with ``seed + rank``, so the
+        """Read the rows of process ``rank`` of ``world``: every process shuffles all rows with its own seed, so the
         processes see independent orders (call before the first batch)."""
         self._order.shard(rank, world)
 
@@ -183,6 +186,13 @@ class LoaderSource:
     ``attention_mask`` / ``loss_mask`` or ``labels``, where ``-100`` labels mark positions that do not count).
     The source cycles over epochs; resuming skips the batches already consumed in the current epoch.
 
+    Resuming re-creates the iterator of the current epoch, so its order must be a function of the epoch. With a
+    ``seed`` the source makes it one before every epoch: it calls ``set_epoch(epoch)`` on the loader and on its
+    sampler where they have one (Hugging Face iterable datasets, ``DistributedSampler``), and reseeds the generator
+    of a ``DataLoader`` and of its ``RandomSampler`` with ``spawn_seed(seed, epoch)``. A shuffling ``DataLoader``
+    then yields the same batches in an uninterrupted and in a resumed run, and the same order on every process.
+    :func:`~economize.train.fit` passes its data seed. Without a seed the loader is iterated as given.
+
     In a run of several processes (see :meth:`shard`) process ``rank`` reads items ``rank``, ``rank + world``, ...
     of every epoch, so that the processes train on disjoint batches. The loader must then yield the same items in
     the same order on every process (no shuffling, or a ``DataLoader`` whose ``generator`` has the same seed
@@ -192,10 +202,12 @@ class LoaderSource:
         loader: The re-iterable.
         rank: Index of this process.
         world: Number of processes.
+        seed: Seed of the order of every epoch (``None``: leave the loader's own order).
     """
 
-    def __init__(self, loader: Iterable[Any], *, rank: int = 0, world: int = 1) -> None:
+    def __init__(self, loader: Iterable[Any], *, rank: int = 0, world: int = 1, seed: int | None = None) -> None:
         self.loader = loader
+        self.seed = seed
         self.epoch, self.consumed = 0, 0
         self._iterator: Iterator[Any] | None = None
         self.shard(rank, world)
@@ -210,20 +222,26 @@ class LoaderSource:
 
     def next_batch(self) -> Batch:
         if self._iterator is None:
-            self._iterator = iter(self.loader)
+            self._iterator = self._epoch_iterator()
             for _ in range(self.consumed * self.world):
                 next(self._iterator)
         try:
             item = self._next_round()
         except StopIteration:
             self.epoch, self.consumed = self.epoch + 1, 0
-            self._iterator = iter(self.loader)
+            self._iterator = self._epoch_iterator()
             try:
                 item = self._next_round()
             except StopIteration:
                 raise ConfigError(f"the loader yields fewer than {self.world} items per epoch") from None
         self.consumed += 1
         return as_batch(item)
+
+    def _epoch_iterator(self) -> Iterator[Any]:
+        """An iterator over the items of epoch ``self.epoch``, in the order the seed fixes for it."""
+        if self.seed is not None:
+            _seed_epoch(self.loader, spawn_seed(self.seed, self.epoch), self.epoch)
+        return iter(self.loader)
 
     def _next_round(self) -> Any:
         """This process's item of the next ``world`` items (``StopIteration`` at an incomplete round)."""
@@ -241,6 +259,21 @@ class LoaderSource:
     def load_state_dict(self, state: Mapping[str, Any]) -> None:
         self.epoch, self.consumed = int(state["epoch"]), int(state["consumed"])
         self._iterator = None
+
+
+def _seed_epoch(loader: Iterable[Any], seed: int, epoch: int) -> None:
+    """Make the order of ``loader``'s next iteration a function of ``seed`` and ``epoch``.
+
+    See :class:`LoaderSource`."""
+    for owner in (loader, getattr(loader, "sampler", None)):
+        set_epoch = getattr(owner, "set_epoch", None)
+        if callable(set_epoch):
+            set_epoch(epoch)
+    if isinstance(loader, DataLoader):
+        # the DataLoader's generator seeds its workers (drawn at iter()), the sampler's the shuffled order
+        loader.generator = torch.Generator().manual_seed(seed)
+        if isinstance(loader.sampler, RandomSampler):
+            loader.sampler.generator = torch.Generator().manual_seed(seed)
 
 
 def as_batch(item: Any) -> Batch:
@@ -282,7 +315,7 @@ def as_source(data: Any, batch_size: int = 8, *, seq_len: int = 1024, seed: int 
     if isinstance(data, Sequence) and data and isinstance(data[0], Example):
         return SequenceSource(data, batch_size, seed=seed)
     if isinstance(data, Iterable):
-        return LoaderSource(data)
+        return LoaderSource(data, seed=seed)
     raise TypeError(f"cannot read training batches from {type(data).__name__}")
 
 

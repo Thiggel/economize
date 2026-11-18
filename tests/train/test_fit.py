@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 import torch
+from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModelForCausalLM
 
 import economize
@@ -46,6 +47,17 @@ def _state(model: Any) -> dict[str, torch.Tensor]:
 
 class Interrupt(Exception):
     pass
+
+
+class _Rows(Dataset[torch.Tensor]):
+    def __init__(self, rows: torch.Tensor) -> None:
+        self.rows = rows
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+    def __getitem__(self, index: int) -> torch.Tensor:
+        return self.rows[index]
 
 
 # ---- training -----------------------------------------------------------------------------------------------------
@@ -100,13 +112,19 @@ def test_checkpoints_are_pruned(rows: torch.Tensor, tmp_path: Path) -> None:
     assert latest_checkpoint(tmp_path / "missing") is None
 
 
-@pytest.mark.parametrize("source", ["tensor", "token_file"])
+@pytest.mark.parametrize("source", ["tensor", "token_file", "shuffling_loader"])
 def test_resume_continues_the_same_run(rows: torch.Tensor, tmp_path: Path, token_file: Path, source: str) -> None:
     """A run interrupted after step 4 and resumed from its checkpoint at step 3 ends where an uninterrupted run
-    ends: same losses, same weights."""
-    data: Any = rows if source == "tensor" else token_file
+    ends: same losses, same weights. A shuffling ``DataLoader`` is re-iterated on resume and must reshuffle into the
+    same order."""
+
+    def data() -> Any:
+        if source == "shuffling_loader":
+            return DataLoader(_Rows(rows), batch_size=4, shuffle=True)
+        return rows if source == "tensor" else token_file
+
     options = dict(steps=6, batch_size=4, seq_len=LENGTH, lr=2e-3, warmup_steps=2, save_every=3, log_every=1, seed=0)
-    full = fit(_jump_model(), data, _objective(), output_dir=tmp_path / "full", **options)
+    full = fit(_jump_model(), data(), _objective(), output_dir=tmp_path / "full", **options)
     expected = _state(_jump_model())  # every run below starts from these weights
 
     def stop(record: dict[str, Any]) -> None:
@@ -114,11 +132,11 @@ def test_resume_continues_the_same_run(rows: torch.Tensor, tmp_path: Path, token
             raise Interrupt
 
     with pytest.raises(Interrupt):
-        fit(_jump_model(), data, _objective(), output_dir=tmp_path / "cut", callbacks=[stop], **options)
+        fit(_jump_model(), data(), _objective(), output_dir=tmp_path / "cut", callbacks=[stop], **options)
     assert latest_checkpoint(tmp_path / "cut") == tmp_path / "cut" / "checkpoint-3"
     model = _jump_model()
     assert all(torch.equal(v, expected[k]) for k, v in _state(model).items())
-    resumed = fit(model, data, _objective(), output_dir=tmp_path / "cut", resume=True, **options)
+    resumed = fit(model, data(), _objective(), output_dir=tmp_path / "cut", resume=True, **options)
     assert resumed.steps == 6 and resumed.losses == full.losses
     assert [r["step"] for r in resumed.history] == list(range(6))
     reference = economize.load(make_tiny_model(), tmp_path / "full" / "final")

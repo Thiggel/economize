@@ -12,6 +12,7 @@ import torch
 
 from ...errors import ConfigError
 from ..objective import Batch
+from ..utils import spawn_seed
 
 __all__ = ["TokenStream", "fixed_windows"]
 
@@ -50,10 +51,10 @@ class TokenStream:
         self.rng = np.random.default_rng(seed)
 
     def shard(self, rank: int, world: int) -> None:
-        """Draw the windows of process ``rank`` of ``world``: positions seeded with ``seed + rank``, independent of
-        the other processes' (call before the first batch)."""
+        """Draw the windows of process ``rank`` of ``world``: positions seeded with ``spawn_seed(seed, rank)``,
+        independent of the other processes' (call before the first batch)."""
         if world > 1:
-            self.rng = np.random.default_rng(self.seed + rank)
+            self.rng = np.random.default_rng(spawn_seed(self.seed, rank))
 
     def next_batch(self) -> Batch:
         size, length = self.tokens.size, self.seq_len

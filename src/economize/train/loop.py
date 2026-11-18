@@ -39,7 +39,7 @@ from .objective import Objective, OptimDefaults, build_objective, default_object
 from .optim import build_optimizer, build_scheduler
 from .schedule import SCHEDULES
 from .teacher import TeacherHead, make_teacher_head
-from .utils import autocast_dtype, jsonable, rng_state, seed_everything, set_rng_state
+from .utils import autocast_dtype, jsonable, rng_state, seed_everything, set_rng_state, spawn_seed
 
 if TYPE_CHECKING:
     from torch import nn
@@ -86,7 +86,7 @@ class TrainConfig:
             turns into a source (``None``: no seeding, the current random state is used, and data seed 0).
         accelerate: Run on ``accelerate`` (``accelerate launch`` for several processes): data-parallel gradient
             averaging, one log and checkpoint writer. Each process reads its own batches through
-            :func:`~economize.train.data.shard_source`: random sources draw with ``seed + rank``, a
+            :func:`~economize.train.data.shard_source`: random sources draw with ``spawn_seed(seed, rank)``, a
             :class:`~economize.train.LoaderSource` gives every process disjoint items, and a user-defined source needs
             a ``shard(rank, world)`` method (otherwise every process reads the same batches, with a warning).
         offload_optimizer: Keep the AdamW moments in CPU memory (:class:`~economize.train.OffloadedAdamW`), for
@@ -233,10 +233,10 @@ class _Run:
         self.rank = rank
         self.main = rank == 0
         if config.seed is not None:
-            seed_everything(config.seed + rank)
+            seed_everything(config.seed if self.world == 1 else spawn_seed(config.seed, rank))
         data_seed = 0 if config.seed is None else config.seed
         source = as_source(data, config.batch_size, seq_len=config.seq_len, seed=data_seed)
-        self.source: BatchSource = shard_source(source, rank, self.world)  # random sources draw with seed + rank
+        self.source: BatchSource = shard_source(source, rank, self.world)  # random sources draw with a seed per rank
         self.eval_data = eval_data
         self.teacher_head: TeacherHead | None = make_teacher_head(model, teacher_model)
         self.module = ObjectiveModule(model, objective, self.teacher_head)

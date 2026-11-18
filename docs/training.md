@@ -222,7 +222,7 @@ Resuming restores the weights, the optimizer state, the RNG states and the data 
 resume reproduce those of an uninterrupted run (tested to float tolerance for token files and tensors).
 
 Several GPUs: `fit(..., accelerate=True)` under `accelerate launch --num_processes 4 train.py` averages
-gradients over processes, gives each process its own data seed (`seed + rank`) and writes logs and checkpoints
+gradients over processes, gives each process its own data seed (`spawn_seed(seed, rank)`) and writes logs and checkpoints
 from the main process only.
 
 ## EffTrainer

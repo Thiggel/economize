@@ -723,7 +723,7 @@ class MyObjective(Objective):        # dataclass fields = the objective's hyperp
   `TeacherMismatchWarning`.
 - **Loops.** `fit(model, data, objective=None, *, config=TrainConfig(), eval_data, teacher_model, callbacks,
   **overrides) -> TrainResult`: plain loop, gradient accumulation, optional autocast, `accelerate=True` for
-  data-parallel runs (one writer, data seed `seed + rank`). `output_dir` gets `train_config.json`,
+  data-parallel runs (one writer, data seed `spawn_seed(seed, rank)`). `output_dir` gets `train_config.json`,
   `train_log.jsonl`, `checkpoint-<step>/` (weights + `trainer_state.pt` with optimizer, RNG and data position;
   `keep_checkpoints` newest kept) and `final/`. `resume=True|path` reproduces an uninterrupted run.
   `EffTrainer(transformers.Trainer)(model, objective=None, args, ..., lr_backbone, teacher_model, schedule,

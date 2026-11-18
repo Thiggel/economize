@@ -130,6 +130,52 @@ def test_loader_source_cycles_and_resumes() -> None:
     assert int(other.next_batch().input_ids[0, 0]) == 1
 
 
+def test_spawned_seeds_of_neighbouring_runs_do_not_overlap() -> None:
+    """``seed + key`` made the epoch-1 (or rank-1) stream of seed 0 the epoch-0 stream of seed 1."""
+    from economize.train.utils import spawn_seed
+
+    seeds = {spawn_seed(seed, key) for seed in range(8) for key in range(8)}
+    assert len(seeds) == 64 and all(0 <= s < 2**63 for s in seeds)
+    assert spawn_seed(0, 1) != spawn_seed(1, 0) and spawn_seed(5, 2) == spawn_seed(5, 2)
+    assert spawn_seed(0, 1, 2) != spawn_seed(0, 2, 1)
+    with pytest.raises(ConfigError, match="non-negative"):
+        spawn_seed(-1)
+    first = TensorSource(torch.arange(64).view(16, 4), 2, seed=0)
+    neighbour = TensorSource(torch.arange(64).view(16, 4), 2, seed=1)
+    epoch_one = [first.next_batch().input_ids for _ in range(16)][8:]
+    assert not all(torch.equal(a, neighbour.next_batch().input_ids) for a in epoch_one)
+
+
+@pytest.mark.parametrize("workers", [0, 2])
+def test_a_shuffling_loader_resumes_into_the_batches_of_an_uninterrupted_run(workers: int) -> None:
+    """Resuming re-creates the epoch's iterator; with a seed its shuffled order is the one the interrupted run read,
+    whatever the global random state is at that point."""
+    from torch.utils.data import DataLoader, Dataset
+
+    class Rows(Dataset[torch.Tensor]):
+        def __len__(self) -> int:
+            return 20
+
+        def __getitem__(self, index: int) -> torch.Tensor:
+            return torch.tensor([2 * index, 2 * index + 1])
+
+    def loader() -> DataLoader[torch.Tensor]:
+        return DataLoader(Rows(), batch_size=4, shuffle=True, num_workers=workers)
+
+    torch.manual_seed(0)
+    full = LoaderSource(loader(), seed=11)
+    uninterrupted = [full.next_batch().input_ids for _ in range(13)]  # 2.6 epochs of 5 batches
+    assert not torch.equal(uninterrupted[0], uninterrupted[5])  # every epoch has its own order
+    torch.manual_seed(0)
+    cut = LoaderSource(loader(), seed=11)
+    head = [cut.next_batch().input_ids for _ in range(7)]
+    torch.manual_seed(1234)  # the run is restarted with another global random state
+    resumed = LoaderSource(loader(), seed=11)
+    resumed.load_state_dict(copy.deepcopy(cut.state_dict()))
+    tail = [resumed.next_batch().input_ids for _ in range(6)]
+    assert all(torch.equal(a, b) for a, b in zip(head + tail, uninterrupted, strict=True))
+
+
 def test_as_batch_turns_labels_into_a_loss_mask() -> None:
     ids = torch.tensor([[4, 5, 6, 7]])
     labels = torch.tensor([[-100, -100, 6, 7]])
@@ -313,23 +359,25 @@ def test_sharded_loader_source_resumes_its_position(rows: torch.Tensor) -> None:
 
 
 @pytest.mark.filterwarnings("ignore:User provided device_type of 'cuda'")
-def test_random_sources_draw_with_seed_plus_rank(monkeypatch: pytest.MonkeyPatch, rows: torch.Tensor,
-                                                 tmp_path: Path) -> None:
-    """Sources built by ``fit`` draw with ``seed + rank`` as before; a ready source passed by the user is now
-    sharded the same way (it was read as given, identical on every process)."""
+def test_random_sources_draw_with_a_spawned_seed_per_rank(monkeypatch: pytest.MonkeyPatch, rows: torch.Tensor,
+                                                            tmp_path: Path) -> None:
+    """Sources built by ``fit`` draw with ``spawn_seed(seed, rank)``; a ready source passed by the user is sharded
+    the same way (it was read as given, identical on every process)."""
     from economize.train import TensorSource, TokenStream
+    from economize.train.utils import spawn_seed
 
     token_file = tmp_path / "tokens.bin"
     rows.numpy().astype("uint32").tofile(token_file)
     for rank in (0, 1):
         built = _process_run(monkeypatch, rank, str(token_file), seed=3).source
         given = _process_run(monkeypatch, rank, TokenStream(token_file, 8, 2, seed=3)).source
-        reference = TokenStream(token_file, 8, 2, seed=3 + rank)
+        reference = TokenStream(token_file, 8, 2, seed=spawn_seed(3, rank))
         expected = reference.next_batch().input_ids
         assert torch.equal(built.next_batch().input_ids, expected)
         assert torch.equal(given.next_batch().input_ids, expected)
         tensor = _process_run(monkeypatch, rank, rows, seed=3).source
-        assert torch.equal(tensor.next_batch().input_ids, TensorSource(rows, 2, seed=3 + rank).next_batch().input_ids)
+        reference_rows = TensorSource(rows, 2, seed=spawn_seed(3, rank)).next_batch().input_ids
+        assert torch.equal(tensor.next_batch().input_ids, reference_rows)
 
 
 @pytest.mark.filterwarnings("ignore:User provided device_type of 'cuda'")
