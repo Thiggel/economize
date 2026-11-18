@@ -23,7 +23,7 @@ from .backends import (
 from .config import DraftQuantConfig, QuantConfig, QuantSpec
 from .constraints import KernelConstraints
 from .cutlass import CutlassBackend, CutlassInt8Weight, cutlass_available
-from .draft import DraftSnapshot, draft_modules, quantize_draft, quantized_copy, restore_draft
+from .draft import DraftSnapshot, draft_modules, quantize_draft, quantized_copy, restore_draft, split_draft_modules
 from .fp4 import E2M1_VALUES, Fp4Grid, Mxfp4Grid, Nvfp4Grid
 from .gptq import gptq_quantize
 from .grid import QUANT_FORMATS, Fp8Grid, IntGrid, QParams, QuantGrid, QuantizedWeight, make_grid, quantize_rtn
@@ -31,7 +31,7 @@ from .hqq import HQQMethod, hqq_quantize
 from .machete import MacheteBackend, MacheteWeight, machete_available
 from .marlin import MARLIN_FORMATS, MarlinBackend, MarlinFormat, MarlinWeight, marlin_available, marlin_layout_error
 from .methods import QUANT_METHODS, QuantMethod
-from .model import quantizable, quantize_model, quantize_modules
+from .model import quantizable, quantize_model, quantize_modules, require_divisible
 from .readback import CODE_READERS, CodeReader, read_quantized_weight
 from .smoothquant import SmoothQuantMethod, smoothquant_scales
 from .technique import DraftQuantTechnique, QuantTechnique
@@ -104,8 +104,10 @@ __all__ = [
     "quantized_copy",
     "read_quantized_weight",
     "register_torchao_format",
+    "require_divisible",
     "restore_draft",
     "search_scale",
     "smoothquant_scales",
+    "split_draft_modules",
     "triton_available",
 ]

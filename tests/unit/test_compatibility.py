@@ -252,7 +252,7 @@ def test_sglang_reports_the_simulation_of_the_vllm_checkpoint_it_loads() -> None
 
 def test_attaching_a_simulated_path_warns() -> None:
     with pytest.warns(SimulatedPathWarning, match="quant runs on a simulated path") as caught:
-        model = economize.apply(make_tiny_model(), QuantConfig(backend="fake"))
+        model = economize.apply(make_tiny_model(), QuantConfig(group_size=32, backend="fake"))
     assert set(model.simulations()) == {"quant"}
     # the warning names only the savings the path loses (a KV-eviction path still decodes at the technique's speed)
     message = str(caught[0].message)

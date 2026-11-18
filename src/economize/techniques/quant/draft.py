@@ -27,9 +27,9 @@ from ...core.calibration import select_modules
 from .._drafting.drafters import DraftModules
 from .._weights.snapshot import ParameterSnapshot
 from .config import DraftQuantConfig
-from .model import quantizable, quantize_modules
+from .model import quantizable, quantize_modules, split_quantizable
 
-__all__ = ["DraftSnapshot", "draft_modules", "quantize_draft", "quantized_copy", "restore_draft"]
+__all__ = ["DraftSnapshot", "draft_modules", "quantize_draft", "quantized_copy", "restore_draft", "split_draft_modules"]
 
 
 def draft_modules(
@@ -38,8 +38,26 @@ def draft_modules(
     """The drafter's own linear maps selected by ``config`` (shared base-model weights are excluded).
 
     A weight counts as shared when it lives in the same storage as a base parameter, so a drafter that wraps a base
-    weight in a new ``nn.Parameter`` (or holds a view of one) never gets it quantized in place.
+    weight in a new ``nn.Parameter`` (or holds a view of one) never gets it quantized in place. Maps whose input
+    size ``config.group_size`` does not divide are left out with a warning (:func:`split_draft_modules` returns them).
     """
+    return quantizable(_selected(drafter, config, base_parameters), config.group_size, "draft_quant: ")
+
+
+def split_draft_modules(
+    drafter: nn.Module, config: DraftQuantConfig, base_parameters: Iterable[nn.Parameter] = ()
+) -> tuple[dict[str, nn.Linear], dict[str, nn.Linear]]:
+    """``(quantizable maps, maps left out)`` of :func:`draft_modules`: the second part holds the selected maps whose
+    input size ``config.group_size`` does not divide, which stay in full precision."""
+    selected = _selected(drafter, config, base_parameters)
+    kept, skipped = split_quantizable(selected, config.group_size)
+    quantizable(selected, config.group_size, "draft_quant: ")  # warns about the skipped maps
+    return kept, {name: selected[name] for name in skipped}
+
+
+def _selected(
+    drafter: nn.Module, config: DraftQuantConfig, base_parameters: Iterable[nn.Parameter]
+) -> dict[str, nn.Linear]:
     shared = {_storage_key(p) for p in base_parameters}
     own = drafter.draft_modules() if isinstance(drafter, DraftModules) else drafter.named_modules()
     candidates: dict[str, nn.Module] = dict(own)
@@ -49,7 +67,7 @@ def draft_modules(
         if isinstance(module, nn.Linear) and _storage_key(module.weight) not in shared
     }
     selected = select_modules(linears, config.targets, config.exclude)
-    return quantizable(selected, config.group_size, "draft_quant: ")
+    return {name: module for name, module in selected.items() if isinstance(module, nn.Linear)}
 
 
 def _storage_key(tensor: Tensor) -> tuple[str, int]:
@@ -75,8 +93,11 @@ class DraftSnapshot:
 
 
 @torch.no_grad()
-def quantize_draft(modules: dict[str, nn.Linear], config: DraftQuantConfig) -> DraftSnapshot:
-    """Quantize ``modules`` in place and return a snapshot that :func:`restore_draft` reverts.
+def quantize_draft(
+    modules: dict[str, nn.Linear], config: DraftQuantConfig, skipped: dict[str, nn.Linear] | None = None
+) -> DraftSnapshot:
+    """Quantize ``modules`` in place and return a snapshot that :func:`restore_draft` reverts. ``skipped`` (the
+    candidates left in full precision) only enters the summary's ``skipped`` and ``coverage``.
 
     All or nothing: if quantizing or converting any module fails, every module gets its original parameters back
     before the error propagates.
@@ -85,7 +106,7 @@ def quantize_draft(modules: dict[str, nn.Linear], config: DraftQuantConfig) -> D
     for module in modules.values():
         snapshot.params.take(module)
     try:
-        snapshot.summary = quantize_modules(modules, config)
+        snapshot.summary = quantize_modules(modules, config, skipped)
     except BaseException:
         restore_draft(snapshot)
         raise
@@ -105,5 +126,7 @@ def quantized_copy(module: nn.Module, config: DraftQuantConfig) -> tuple[nn.Modu
     """A deep copy of ``module`` with its linear maps quantized (for shared layers on a drafter's path)."""
     clone = copy.deepcopy(module).requires_grad_(False)
     linears = {name: m for name, m in clone.named_modules() if isinstance(m, nn.Linear)}
-    selected = quantizable(select_modules(linears, config.targets, config.exclude), config.group_size, "draft_quant: ")
-    return clone, quantize_modules(selected, config)
+    selected = select_modules(linears, config.targets, config.exclude)
+    kept, skipped = split_quantizable(selected, config.group_size)
+    quantizable(selected, config.group_size, "draft_quant: ")  # warns about the skipped maps
+    return clone, quantize_modules(kept, config, {name: selected[name] for name in skipped})

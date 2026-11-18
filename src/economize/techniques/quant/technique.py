@@ -15,7 +15,7 @@ from ...registry import Registry
 from .._weights.technique import CalibratedWeightTransform
 from .backends import QUANT_BACKENDS
 from .config import DraftQuantConfig, QuantConfig
-from .draft import DraftSnapshot, draft_modules, quantize_draft, restore_draft
+from .draft import DraftSnapshot, quantize_draft, restore_draft, split_draft_modules
 from .methods import QUANT_METHODS
 from .model import quantize_model
 
@@ -93,10 +93,10 @@ class DraftQuantTechnique(Technique):
 
     def attach(self, model: Any, adapter: Any, context: Any = None) -> None:
         drafter = _the_drafter(getattr(context, "techniques", ()) if context is not None else ())
-        modules = draft_modules(drafter, self.config, adapter.model.parameters())
+        modules, skipped = split_draft_modules(drafter, self.config, adapter.model.parameters())
         if not modules:
             raise ConfigError(f"draft_quant found no quantizable linear maps in drafter {drafter.name!r}")
-        self._snapshot: DraftSnapshot | None = quantize_draft(modules, self.config)
+        self._snapshot: DraftSnapshot | None = quantize_draft(modules, self.config, skipped)
         self.summary = self._snapshot.summary
 
     def detach(self) -> None:

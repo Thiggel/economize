@@ -164,7 +164,7 @@ def test_cuda_graph_replay_matches_eager() -> None:
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"format": "int4", "group_size": 128},
+        {"format": "int4", "group_size": 64},
         {"format": "int4", "symmetric": True, "group_size": 64},
         {"format": "int8", "symmetric": True, "group_size": None},
     ],
@@ -182,9 +182,8 @@ def test_model_matches_fake_quantization(tiny_factory, adapter_of, held_out, kwa
     model = quantized("machete")
     layer = model.model.layers[0]
     assert isinstance(layer.mlp.down_proj.weight, MacheteWeight)
-    if kwargs["group_size"] in (None, 64):  # inputs of 64 are skipped at group 128 (not divisible)
-        assert isinstance(layer.mlp.up_proj.weight, MacheteWeight)
-        assert isinstance(layer.self_attn.k_proj.weight, MacheteWeight)  # padded from 32 x 64
+    assert isinstance(layer.mlp.up_proj.weight, MacheteWeight)
+    assert isinstance(layer.self_attn.k_proj.weight, MacheteWeight)  # padded from 32 x 64
     noise = _relative_error(fake_bf16, reference)
     assert _relative_error(model(tokens).logits, reference) < 2 * noise + 1e-2, noise
 
