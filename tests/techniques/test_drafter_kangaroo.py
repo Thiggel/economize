@@ -63,7 +63,7 @@ def trained() -> SimpleNamespace:
 def test_registration_and_validation() -> None:
     assert TECHNIQUES.get("kangaroo") is KangarooTechnique
     for bad in (dict(exit_layer=0), dict(num_heads=0), dict(num_heads=4, num_kv_heads=3), dict(rms_norm_eps=0.0),
-                dict(param_dtype="int8")):
+                dict(param_dtype="int8"), dict(stop_threshold=1.5), dict(max_draft=0)):
         with pytest.raises((ConfigError, ValueError)):
             KangarooConfig(**bad)
     with pytest.raises(ConfigError, match="exit_layer"):
@@ -109,6 +109,17 @@ def test_ragged_batch(trained: SimpleNamespace) -> None:
     prompts = [row[:n] for row, n in zip(trained.rows, (12, 17, 9, 22))]
     results = _assert_greedy(trained.model, trained.base, prompts, new=18)
     assert sum(a for r in results for _, a in r.acceptance) > 0
+
+
+def test_the_second_early_exit_is_the_default_decoding() -> None:
+    """Without ``decoding``, a model with Kangaroo drafts six tokens per cycle and stops at top-1 probability 0.6, as
+    in the paper; ``stop_threshold=None`` drafts full cycles and an explicit ``decoding`` wins."""
+    assert economize.apply(make_tiny_model(), KangarooConfig()).decoding == DecodeConfig(cycle_length=7,
+                                                                                         min_confidence=0.6)
+    full = economize.apply(make_tiny_model(), KangarooConfig(stop_threshold=None, max_draft=3)).decoding
+    assert full == DecodeConfig(cycle_length=4) and full.draft_policy_name == "fixed"
+    explicit = DecodeConfig(cycle_length=3)
+    assert economize.apply(make_tiny_model(), KangarooConfig(), decoding=explicit).decoding == explicit
 
 
 def test_the_second_early_exit_is_lossless(trained: SimpleNamespace) -> None:

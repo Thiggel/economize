@@ -199,13 +199,18 @@ head equals the narrow one. Tests: `tests/techniques/test_drafter_redrafter.py`.
 
 [@liu2024kangaroo]. A draft step runs the model's first `exit_layer` layers, a trained
 one-layer attention adapter with its own KV cache and the model's LM head. The paper's second early exit, which stops
-a cycle once the top-1 probability falls below 0.6, is the decoder's dynamic draft length:
+a cycle once the top-1 probability falls below 0.6, is the decoder's dynamic draft length. It is on by default: without
+`decoding`, `apply` uses `KangarooTechnique.decode_config()`, cycles of up to `max_draft=6` drafts (the paper's
+gamma) that stop at `stop_threshold=0.6`:
 
 ```python
-model = economize.apply(base, KangarooConfig(exit_layer=2),
-                        decoding=DecodeConfig(cycle_length=7, min_confidence=0.6))
+model = economize.apply(base, KangarooConfig(exit_layer=2))   # DecodeConfig(cycle_length=7, min_confidence=0.6)
 economize.train.fit(model, data, "step_distill", steps=...)   # trains the adapter only
 ```
+
+`KangarooConfig(stop_threshold=None)` drafts full cycles, and an explicit `decoding=` replaces the default.
+Kangaroo's reuse of the shallow layers' states for the exact pass is not implemented: the exact pass recomputes
+layers `1..exit_layer` of the drafted tokens, so the measured speedup is a lower bound of the paper's.
 
 The adapter's steps are logged as `kangaroo_adapter` events of the module `kangaroo`, next to the `draft` events of
 the shallow layers. Tests: `tests/techniques/test_drafter_kangaroo.py`.
