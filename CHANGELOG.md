@@ -112,6 +112,8 @@
 - `economize.backend_support` no longer imports `vllm` (and through it `triton`) on a host where vLLM is installed:
   the Marlin, Machete and CUTLASS backends report availability from the installation, and their ops load when a
   model is quantized.
+- The 2:4 GPU test asserts the sparse GEMM speed-up only on A100 and H100. On an A6000 the default cuSPARSELt
+  kernel is slower than dense, and the weights docs now say so.
 
 ## 0.4.0 (2026-11-04)
 
