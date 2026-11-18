@@ -75,19 +75,31 @@ attached KV techniques in recipe order, so `kivi` composes with `kv_evict` (but 
 
 **Cost accounting.** `DepthTechnique.cost_summary(result)` adds the policy's `DepthMeter` to the result's cost
 summary: `entered`, `ran` and `kv_filled` layer-token counts per phase and layer, `skipped_layer_tokens`,
-`kv_fill_layer_tokens` (layers that only computed K/V), `effective_layer_tokens` and
-`relative_effective_layer_tokens` (relative to plain decoding of the same output). `KVCacheTechnique.cost_summary`
+`kv_fill_layer_tokens` (K/V projections computed outside a full layer call), `effective_layer_tokens` and
+`relative_effective_layer_tokens` (relative to plain decoding of the same output). The counts are what the pass
+computed: in a batch a routed layer computes the same number of columns in every row, so a token that wanted to
+skip while another row of the pass ran the layer counts as executed (and in `padded_layer_tokens`; in a batched
+one-token step a per-token exit therefore saves compute only when every row exits). The meter keeps the counts per
+row of the batch as well: `cost_summary(result)` of a `decode_batch` result subtracts that row's own skips
+(`result.row`), and `depth_stats(row)` returns one row's counts. `KVCacheTechnique.cost_summary`
 and `kv_stats(row)` report, per row, `kv_bytes` (committed entries held at the last exact pass), `kv_bytes_read`
-(summed over exact passes), both again without compression (`*_full`), `kv_passes` and `kv_compression`. KIVI
-counts `bits / 8` bytes per quantized element plus an fp16 scale and zero point per group, fp8 one byte per
-element plus an fp32 scale per token and head under `scale="token"`, and eviction counts the entries that remain
-visible.
+(summed over exact passes), both again without compression (`*_full`), `kv_passes` and `kv_compression`. These
+values are modelled: KIVI counts `bits / 8` bytes per quantized element plus an fp16 scale and zero point per group
+(4 bytes each once a scale stayed in fp32), fp8 one byte per element plus an fp32 scale per token and head under
+`scale="token"`, and eviction counts the entries that remain visible, whatever storage the path really uses. Two
+more keys say what the path holds. `kv_bytes_allocated_batch` is measured: the bytes of every tensor storage of the
+cache and its wrappers (buffers, codes, scales, masks, rings), for the whole batch, the largest value at an exact
+pass. `kv_bytes_simulated` is 1.0 when the technique's path keeps the dense buffers (its `simulation()` names
+`KV_MEMORY`: masked eviction, simulated KIVI, the fused KIVI and eviction variants), so that `kv_bytes` there models a
+saving the path does not realize.
 
 ## Deviations from the papers
 
-All techniques are simulated where a kernel would be needed: the memory and compute that a real kernel saves are
-counted, while the tensors keep their full shapes. Only the first attached `DEPTH` technique is used (combining
-two is a request in `ARCHITECTURE.md`), and every dynamic-depth technique sets `graph_safe = False`, so a model
+A technique whose path needs a kernel that economize does not ship is simulated: the memory and compute that a real
+kernel saves are modelled while the tensors keep their full shapes, and `technique.simulation()` (with a
+`SimulatedPathWarning` at attach) names the savings that are not realized. fp8, packed KIVI and compact eviction
+store their entries for real; `kv_bytes_allocated_batch` measures what each path holds. Only the first attached
+`DEPTH` technique is used (combining two is a request in `ARCHITECTURE.md`), and every dynamic-depth technique sets `graph_safe = False`, so a model
 with one decodes without CUDA graphs.
 
 **GateSkip.** The paper gates the outputs of the attention and MLP modules with learned sigmoid gates and skips

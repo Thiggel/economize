@@ -67,7 +67,9 @@ def test_every_technique_has_an_mlx_status() -> None:
 
 
 def test_backend_support_reports_mlx() -> None:
-    assert economize.backend_support("draft_model")["mlx"].status.value == "real"
+    support = economize.backend_support("draft_model")
+    assert support["mlx"].status.value == "untested"  # economize writes the folder; no test runs MLX
+    assert "has not run MLX" in support["mlx"].detail and support["gguf"].status.value == "real"
     assert economize.backend_support("medusa")["mlx"].status.value == "unsupported"
     assert "Medusa" in economize.backend_support("medusa")["mlx"].detail
 

@@ -134,7 +134,7 @@ class ConfidenceMeasure(ABC):
     @abstractmethod
     def __call__(self, index: int, x: torch.Tensor, out: torch.Tensor) -> torch.Tensor:
         """``[B, S]`` confidences in ``[0, 1]`` (fp32) after layer ``index`` from its input ``x`` and output
-        ``out``."""
+        ``out``. A measure is computed per token: the policy passes only the live tokens (as one ``[1, n]`` row)."""
 
     def logit(self, index: int, hidden: torch.Tensor) -> torch.Tensor:
         """``[B, S]`` trainable pre-sigmoid confidence (fp32) of the state ``hidden`` after layer ``index``; only
@@ -216,13 +216,22 @@ class CalmPolicy(DepthPolicy):
         live = valid_mask(out, ctx) & ~exited
         if not bool(live.any()):
             return None
+        rows = self.row_ids(out.shape[0])
         if self.measure.head_calls:
-            self.meter.add("confidence_head_tokens", live.sum())
-        confidence = self.measure(index, x, out)
-        leaving = live & (confidence > self._threshold.to(out.device))
+            self.meter.add("confidence_head_tokens", live.sum(-1), rows)
+        leaving = live & (self._confidence(index, x, out, live) > self._threshold.to(out.device))
         self.exited = exited | leaving
-        self.meter.add("exits", leaving.sum())
+        self.meter.add("exits", leaving.sum(-1), rows)
         return None
+
+    def _confidence(self, index: int, x: torch.Tensor, out: torch.Tensor, live: torch.Tensor) -> torch.Tensor:
+        """``[B, S]`` confidences, computed on the live tokens only (a measure is per token, so exited and padded
+        tokens cost no head call); the other entries are 0."""
+        if bool(live.all()):
+            return self.measure(index, x, out)
+        confidence = torch.zeros(live.shape, dtype=torch.float32, device=out.device)
+        confidence[live] = self.measure(index, x[live].unsqueeze(0), out[live].unsqueeze(0))[0].float()
+        return confidence
 
 
 @register_technique

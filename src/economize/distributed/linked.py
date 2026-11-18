@@ -71,11 +71,12 @@ class CapturingTargetWorker(TargetWorker):
         self.start = 0
         self.hidden: dict[int, torch.Tensor] = {}
 
-    def _run(self, tokens: torch.Tensor, position: int, ctx: LayerContext) -> torch.Tensor:
-        self.cost.record(self.kind, tokens.numel(), position, 1, self.num_layers)
+    def _run(self, tokens: torch.Tensor, position: int, ctx: LayerContext, *, last_only: bool = False,
+             kind: str | None = None) -> torch.Tensor:
+        self._record(tokens, position, kind)
         exact = self.runner.forward(tokens.view(1, -1), ctx, capture=self.layers)
         self.start, self.hidden = position, {layer: state[0] for layer, state in exact.hidden.items()}
-        return self.runner.logits(exact.final)[0]
+        return self.runner.logits(exact.final[:, -1:] if last_only else exact.final)[0]
 
     def states_at(self, position: int) -> dict[int, torch.Tensor] | None:
         """Exact states of the token at ``position`` if the last pass covered it."""

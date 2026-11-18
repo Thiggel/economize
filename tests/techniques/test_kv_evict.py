@@ -151,7 +151,9 @@ def _streaming_runs(attn: str, cycle: int) -> tuple[torch.Tensor, list[list[int]
     logits, cache = _teacher_forced(model, _sequence())
     kept = torch.stack([cache.kept(layer) for layer in range(6)])
     results = model.decode_batch(_prompts(), [24, 17, 30])
-    stats = [model.techniques["kv_evict"].kv_stats(row) for row in range(3)]
+    # the window ring and the keep-mask cache lay out their buffers differently: compare the modelled bytes
+    stats = [{k: v for k, v in model.techniques["kv_evict"].kv_stats(row).items() if k != "kv_bytes_allocated_batch"}
+             for row in range(3)]
     return logits, [r.tokens.tolist() for r in results], stats, kept
 
 

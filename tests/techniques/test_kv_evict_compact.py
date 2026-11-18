@@ -64,7 +64,17 @@ def test_compact_decodes_like_masked(attn: str, cycle_length: int, headroom: int
     stats = [compact.techniques["kv_evict"].kv_stats(row) for row in range(3)]
     masked = _model(attn, "masked", cycle_length, headroom=headroom)
     assert tokens == _decode(masked)
-    assert stats == [masked.techniques["kv_evict"].kv_stats(row) for row in range(3)]
+    reference = [masked.techniques["kv_evict"].kv_stats(row) for row in range(3)]
+    measured = ("kv_bytes_allocated_batch", "kv_bytes_simulated")
+    assert [_without(row, measured) for row in stats] == [_without(row, measured) for row in reference]
+    # the modelled bytes agree; only the compact storage really holds fewer
+    assert stats[0]["kv_bytes_simulated"] == 0.0 and reference[0]["kv_bytes_simulated"] == 1.0
+    if headroom == 8:  # with headroom 64 the ring outgrows these short sequences and holds more than the dense cache
+        assert stats[0]["kv_bytes_allocated_batch"] < reference[0]["kv_bytes_allocated_batch"]
+
+
+def _without(stats: dict[str, float], keys: tuple[str, ...]) -> dict[str, float]:
+    return {key: value for key, value in stats.items() if key not in keys}
 
 
 @pytest.mark.parametrize("attn", ["sdpa", "eager"])

@@ -29,7 +29,12 @@ import economize
 
 economize.backend_support("draft_model")["gguf"].status    # real
 economize.backend_support("draft_model")["onnx"].detail    # why ONNX Runtime refuses it
+economize.backend_support("draft_model")["mlx"].status     # untested
 ```
+
+The status of a technique on MLX and TensorRT-LLM is `untested` where the other runtimes would say `real`: economize
+writes and checks their files, but no test runs `mlx_lm` or builds a TensorRT-LLM engine, so a saving there is
+unverified. The integration tests load and run the GGUF and ONNX exports with llama.cpp and ONNX Runtime when those are installed.
 
 A package adds an adapter by registering a class, either with the decorator of the runtime
 (`@GGUF.register`, `@ONNX.register`, ...) or through the entry-point groups `economize.gguf_techniques`,

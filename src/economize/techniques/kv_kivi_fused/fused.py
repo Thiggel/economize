@@ -12,10 +12,10 @@ from ...attention.packed import attach_packed
 from ...attention.registry import ATTENTION_KERNELS, accepts_packed_kv
 from ...core.metadata import Family, Saving, Simulation, TechniqueInfo
 from ...core.technique import register_technique
-from ...errors import IncompatibleTechniquesError
+from ...errors import ConfigError, IncompatibleTechniquesError
 from ...runtime import KVCache
 from .._kv import CacheWrapper, innermost, layer_indices
-from ..kv_quant.kivi import _FP16_MAX, KIVICache, KIVIConfig, KIVITechnique, quantize
+from ..kv_quant.kivi import _FP16_MAX, KIVICache, KIVIConfig, KIVITechnique, quantize, value_group
 
 __all__ = ["FusedKIVICache", "FusedKIVIConfig", "FusedKIVITechnique"]
 
@@ -55,7 +55,10 @@ class _LayerStore:
         batch, heads, slots, dim = keys.shape
         dim_v = values.shape[3]
         per_byte = 8 // bits
-        self.value_group = group if dim_v % group == 0 else dim_v
+        for name, d in (("key", dim), ("value", dim_v)):
+            if d % per_byte:
+                raise ConfigError(f"kv_kivi_fused: {name} head dim {d} does not pack into whole bytes at {bits} bits")
+        self.value_group = value_group(dim_v, group)
         device = keys.device
         self.key_codes = torch.zeros(batch, heads, slots, dim // per_byte, dtype=torch.uint8, device=device)
         self.key_scale = torch.zeros(batch, heads, -(-slots // group), dim, dtype=torch.float16, device=device)
@@ -163,7 +166,9 @@ class FusedKIVICache(KIVICache):
             store.value_codes[rows, :, start:stop] = pack_codes(codes.reshape(block.shape), bits)
             store.value_scale[rows, :, start:stop] = scale.squeeze(4).half()
             store.value_zero[rows, :, start:stop] = low.squeeze(4).half()
-        self._overflow.append((scale.abs() > _FP16_MAX).any() | (low.abs() > _FP16_MAX).any())
+        overflow = (scale.abs() > _FP16_MAX).any() | (low.abs() > _FP16_MAX).any()
+        self._overflow.append(overflow)
+        self._wide.append(overflow)  # the dense buffers keep the fp32 scale: account 4 bytes from then on
         return dense
 
     def _store(self, layer_idx: int) -> _LayerStore:

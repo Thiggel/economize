@@ -148,13 +148,16 @@ class JumpWorker(LinkedWorker[States]):
         source, mine = target.cache, self.cache
         if not isinstance(source, PositionalKVCache):
             raise ConfigError("JumpWorker copies K/V slots and needs a positional target cache")
+        missing = [index for index in self.window_keys if index not in source.keys]
+        if missing:  # the drafter would attend over slots nobody wrote
+            raise ConfigError(f"the target's cache holds no K/V for the window's cache indices {missing}; the "
+                              "target and the drafter replica must be the same model")
         slots = torch.arange(self._synced, end, device=self.device)
         with mine.writing_at(slots):
             for index in self.window_keys:
-                if index in source.keys:
-                    keys = source.keys[index][:, :, self._synced : end].to(self.device, non_blocking=True)
-                    values = source.values[index][:, :, self._synced : end].to(self.device, non_blocking=True)
-                    mine.update(keys, values, index)
+                keys = source.keys[index][:, :, self._synced : end].to(self.device, non_blocking=True)
+                values = source.values[index][:, :, self._synced : end].to(self.device, non_blocking=True)
+                mine.update(keys, values, index)
         exact = target.states_at(end - 1)
         if exact is not None:
             self._states[end - 1] = {layer: state.to(self.device, non_blocking=True) for layer, state in exact.items()}

@@ -27,9 +27,9 @@ hard dependencies. This page lists what works today, what is tested and what is 
 | Attention implementations | the base's `attn_implementation`: `sdpa`, `eager`, `flex_attention` | done: every mask pattern, draft trees included, as a flex `BlockMask` | `tests/unit/test_flex_attention.py` |
 | llama.cpp (GGUF) | `economize.backends.gguf.to_gguf`, `load_llama` (runtime `"gguf"` in `economize.backend_support`) | done: base model, `quant` codes as Q4_0 / Q4_1 / Q8_0, draft model (`--model-draft`), prompt lookup; other techniques densified or refused ([exports.md](exports.md)) | `test_gguf.py` |
 | ONNX Runtime | `economize.backends.onnx.to_onnx`, `load_onnx` (runtime `"onnx"`) | done: one graph with KV-cache inputs, `quant` codes as `MatMulNBits`; drafters refused ([exports.md](exports.md)) | `test_onnx.py` |
-| MLX (Apple silicon) | `economize.backends.mlx.to_mlx` (runtime `"mlx"`) | done, export only: `mlx_lm` folder, `quant` codes as affine quantization, draft model (`--draft-model`), StreamingLLM eviction (`--max-kv-size`); other drafters refused ([exports.md](exports.md)) | `test_mlx.py` (format level) |
+| MLX (Apple silicon) | `economize.backends.mlx.to_mlx` (runtime `"mlx"`) | export format only, status `untested` (no test runs the runtime): `mlx_lm` folder, `quant` codes as affine quantization, draft model (`--draft-model`), StreamingLLM eviction (`--max-kv-size`); other drafters refused ([exports.md](exports.md)) | `test_mlx.py` (format level) |
 | Unsloth `FastLanguageModel` | the loaded model, after clearing `_unsloth_fast_path` ([Unsloth](#unsloth)) | works on the `transformers` forward (bfloat16 and 4-bit Qwen2.5-0.5B): lossless decoding, drafter training, Unsloth LoRA policies; Unsloth's patched forward fails | `test_unsloth.py` |
-| TensorRT-LLM | `economize.backends.trtllm.to_trtllm` (runtime `"trtllm"`) | done, export only: checkpoint for `trtllm-build`, `quant` int4 codes as `W4A16_AWQ`, draft-target, Medusa and n-gram speculation, fp8 KV cache, sink-plus-window cache; EAGLE / EAGLE-3 / ReDrafter refused ([exports.md](exports.md)) | `test_trtllm.py` (format level) |
+| TensorRT-LLM | `economize.backends.trtllm.to_trtllm` (runtime `"trtllm"`) | export format only, status `untested` (no test runs the runtime): checkpoint for `trtllm-build`, `quant` int4 codes as `W4A16_AWQ`, draft-target, Medusa and n-gram speculation, fp8 KV cache, sink-plus-window cache; EAGLE / EAGLE-3 / ReDrafter refused ([exports.md](exports.md)) | `test_trtllm.py` (format level) |
 
 Tests that need an optional library skip when it is missing, and tests marked `gpu` (vLLM, SGLang, SSD and
 NCCL tensor parallelism on real devices, bitsandbytes) run only with `-m gpu`. Some plumbing tests run against a
@@ -407,7 +407,10 @@ print(costs.relative(result.cost, result.prompt_length, len(result.tokens), hard
 ```
 
 `relative` compares the generation with plain decoding of the same output and returns ratios of FLOPs, bytes and
-sequential calls, plus the modelled speedup. Calls of the target's own layers (an early exit, LayerSkip) are priced
+sequential calls, plus the roofline speedup under the key `modelled_speedup` (`speedup` is an alias kept for old
+code). The presets leave per-call launch and host overhead out (`call_overhead=0`), so set `call_overhead` on the
+`Hardware` before comparing methods that make different numbers of calls, and compare measured times only within one
+runtime (economize's loop against `model.generate` also changes the runtime). Calls of the target's own layers (an early exit, LayerSkip) are priced
 from `shape`; a separate draft network such as the EAGLE-3 layer is priced by the `CallSpec` given for its module
 name, and `CostModel` refuses a log with calls of a module it has no entry for. The dense FLOPs of one decode step match PyTorch's `FlopCounterMode`
 up to the rotary embedding, and parameter counts match the `transformers` models of Llama, Mixtral, Qwen2-MoE and

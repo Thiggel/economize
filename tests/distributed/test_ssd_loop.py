@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import itertools
 import types
+from collections.abc import Callable
 
 import pytest
 import torch
@@ -14,7 +15,7 @@ from transformers import Qwen2Config, Qwen2ForCausalLM
 from economize.decoding import DecodeResult
 from economize.decoding.cost import CostKind
 from economize.decoding.protocols import Verifier
-from economize.distributed import AsyncSpeculativeDecoder, ModelWorker, SSDConfig, SSDResult
+from economize.distributed import AsyncSpeculativeDecoder, ModelWorker, SSDConfig, SSDResult, TargetWorker
 from economize.errors import ConfigError
 from helpers import PROMPT_LEN, VOCAB, make_tiny_model, perturb, reference_greedy
 
@@ -43,9 +44,28 @@ def test_result_is_a_decode_result(target: nn.Module, drafter: nn.Module, prompt
     assert isinstance(result, SSDResult) and isinstance(result, DecodeResult)
     assert result.acceptance == [(3, a) for a in result.accepted] and result.rounds == len(result.acceptance)
     assert result.acceptance_length == pytest.approx(1 + result.mean_accepted)
-    assert result.summary()["generated"] == NEW and result.cost_summary().items() <= result.summary().items()
+    summary, target = result.summary(), result.cost_summary()
+    drafter_keys = {"draft_steps", "wasted_draft_steps", "module_layer_tokens"}
+    assert summary["generated"] == NEW
+    assert {k: v for k, v in target.items() if k not in drafter_keys}.items() <= summary.items()
     assert {e.kind for e in result.cost.events} == {CostKind.EXACT}
-    assert {e.kind for e in result.draft_cost.events} == {CostKind.DRAFT}
+    # the drafter's prompt pass fills its cache (catch-up); every later call is a draft step
+    kinds = [e.kind for e in result.draft_cost.events]
+    assert kinds[0] == CostKind.DRAFT_CATCHUP and set(kinds[1:]) == {CostKind.DRAFT}
+
+
+def test_summary_counts_the_drafters_work(target: nn.Module, drafter: nn.Module, prompt: torch.Tensor) -> None:
+    """The drafter's steps and layers appear in the summary; a separate draft LM is logged as its own module."""
+    result = AsyncSpeculativeDecoder(target, drafter, SSDConfig(draft_length=3)).generate(prompt, NEW)
+    summary = result.summary()
+    steps = result.draft_cost.count(CostKind.DRAFT)
+    assert steps > 0 and summary["draft_steps"] == steps
+    assert {e.module for e in result.cost.events} == {None}
+    assert {e.module for e in result.draft_cost.events} == {"draft_model"}
+    draft_layers = sum(e.layer_tokens for e in result.draft_cost.events)
+    assert summary["module_layer_tokens"] == {"draft_model": draft_layers}
+    assert summary["draft_layer_tokens"] == 0  # no layer of the target's architecture ran on the drafter
+    assert summary["relative_layer_tokens_with_draft"] == summary["relative_layer_tokens"]
 
 
 def test_stop_predicate_as_in_the_cycle_decoder(target: nn.Module, drafter: nn.Module, prompt: torch.Tensor) -> None:
@@ -187,3 +207,22 @@ def test_sampled_sequences_follow_the_target(draft_length: int, fanout: int) -> 
     pooled_counts[-1] += bucket[0]
     pooled_expected[-1] += bucket[1]
     assert chisquare(pooled_counts, pooled_expected).pvalue > 1e-3
+
+
+def test_prompt_passes_apply_the_lm_head_to_the_last_token_only(target: nn.Module, drafter: nn.Module,
+                                                                 prompt: torch.Tensor,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    decoder = AsyncSpeculativeDecoder(target, drafter, SSDConfig(draft_length=3, mode="sync"))
+    rows: list[int] = []
+    for worker in (decoder.target, decoder.drafter):
+        assert isinstance(worker, (TargetWorker, ModelWorker))
+        head = worker.runner.logits
+
+        def counting(final: torch.Tensor, head: Callable[[torch.Tensor], torch.Tensor] = head) -> torch.Tensor:
+            rows.append(final.shape[1])
+            return head(final)
+
+        monkeypatch.setattr(worker.runner, "logits", counting)
+    decoder.target.begin(prompt, 64)
+    decoder.drafter.begin(prompt, 64)
+    assert rows == [1, 1]

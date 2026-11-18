@@ -227,8 +227,11 @@ def test_jump_cycle_against_plain() -> None:
     # the exact pass recomputes the pending tokens, so the cycle spends more FLOPs and reads the weights less often
     assert relative["flops"] > 1 and relative["bytes"] < 1 and relative["speedup"] > 1
     assert relative["seconds"] == pytest.approx(1 / relative["speedup"])
+    # the roofline numbers are named as modelled; "seconds" and "speedup" stay as aliases
+    assert relative["modelled_speedup"] == relative["speedup"] and relative["modelled_seconds"] == relative["seconds"]
     assert CostModel(shape).relative(costs.plain_log(PROMPT_LEN, generated), PROMPT_LEN, generated, "a40") == {
-        "flops": 1.0, "bytes": 1.0, "calls": 1.0, "seconds": 1.0, "speedup": 1.0}
+        "flops": 1.0, "bytes": 1.0, "calls": 1.0, "modelled_seconds": 1.0, "modelled_speedup": 1.0, "seconds": 1.0,
+        "speedup": 1.0}
 
 
 def test_report_totals_and_roofline() -> None:
@@ -288,8 +291,10 @@ def test_prices_a_two_model_generation() -> None:
     shape, small = ModelShape.from_config(target.config), ModelShape.from_config(drafter.config)
     costs = CostModel(shape, draft=CallSpec(shape=small))
     target_report, draft_report = costs.log(result.cost), costs.log(result.draft_cost)
-    assert set(target_report.by_kind()) == {"exact"} and set(draft_report.by_kind()) == {"draft"}
+    assert set(target_report.by_kind()) == {"exact"} and set(draft_report.by_kind()) == {"draft", "draft_catchup"}
     assert draft_report.flops < target_report.flops
+    with pytest.raises(ConfigError, match="draft_model"):  # never priced with the target's shape by default
+        CostModel(shape).log(result.draft_cost)
     with pytest.raises(ConfigError):  # the drafter's events do not fit a 1-layer shape
         CostModel(shape, draft=CallSpec(shape=ModelShape(1, 64, 4, 2, 16, 128, VOCAB))).log(result.draft_cost)
 

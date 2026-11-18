@@ -74,7 +74,9 @@ for name, config in configs.items():
     model.detach()
 ```
 
-`kv_bytes` is the cache held at the last exact pass and `kv_compression` its ratio to the full cache. The agreement
+`kv_bytes` models the cache kept at the last exact pass and `kv_compression` its ratio to the full cache. The masked
+storage keeps every entry in memory, so its measured `kv_bytes_allocated_batch` stays at the dense size; the compact
+storage really holds only the kept entries. The agreement
 is the fraction of the 64 tokens that equal the plain model's.
 
 StreamingLLM and H2O evict before every exact pass, so their cache stays at the budget plus the tokens of one cycle.

@@ -30,6 +30,8 @@ class DecodeResult:
             token, conditioned on the same prefix (the drafts before it), from
             :func:`~economize.decoding.commit.distribution_match` (``[]`` for a cycle whose drafter did not report
             its logits). Empty otherwise.
+        row: Index of this result's prompt in its batch (``0`` for :meth:`~economize.EfficientModel.decode`); the
+            per-row statistics of the techniques (``technique.cost_summary(result)``) are looked up under it.
     """
 
     tokens: torch.Tensor
@@ -39,6 +41,7 @@ class DecodeResult:
     num_layers: int = 0
     confidence: list[list[float]] = field(default_factory=list)
     match: list[list[list[float]]] = field(default_factory=list)
+    row: int = 0
 
     def cost_summary(self) -> dict[str, Any]:
         """Aggregate cost of this generation (see :meth:`CostLog.summary`)."""

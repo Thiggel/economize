@@ -454,3 +454,33 @@ def test_cache_wrapper_accounts_covered_layers_through_the_hook_and_the_rest_den
     row = wrapper.stats.row(0)
     assert (row.kv_bytes, row.kv_bytes_full, row.passes) == (3.0 + dense, 7.0 + dense, 1)
     assert 1 not in wrapper.stats.rows
+
+
+def test_kivi_counts_fp32_scales_once_one_leaves_the_fp16_range() -> None:
+    """Values beyond the fp16 range keep their scale and zero point in fp32 on the simulated storage, and the byte
+    accounting then counts 4 bytes for each instead of 2."""
+    base = make_tiny_model()
+    with torch.no_grad():
+        for layer in base.model.layers:
+            layer.self_attn.v_proj.weight.mul_(1e7)
+    model = economize.apply(base, KIVIConfig(bits=2, group_size=4, residual_length=8, storage="simulated"))
+    result = model.decode(_sequence()[0, :PREFIX], 20)
+    summary = model.techniques["kivi"].cost_summary(result)
+    config = model.techniques["kivi"].config
+    assert summary["kv_bytes"] == 6 * kivi_bytes(30, 24, 22, 2, 16, 4, config, scale_bytes=4)
+    assert kivi_bytes(30, 24, 22, 2, 16, 4, config, scale_bytes=4) > kivi_bytes(30, 24, 22, 2, 16, 4, config)
+
+
+@pytest.mark.parametrize("storage", ["simulated", "packed"])
+def test_kivi_warns_when_the_value_group_falls_back_to_the_head_dim(storage: str) -> None:
+    model = economize.apply(make_tiny_model(), KIVIConfig(bits=2, group_size=5, residual_length=10, storage=storage))
+    with pytest.warns(UserWarning, match="not a multiple of group_size 5"):
+        model.decode(_sequence()[0, :PREFIX], 20)
+
+
+def test_fused_kivi_refuses_a_head_dim_that_does_not_pack() -> None:
+    from economize.techniques.kv_kivi_fused.fused import _LayerStore
+
+    keys = torch.zeros(1, 1, 8, 6)
+    with pytest.raises(ConfigError, match="does not pack into whole bytes"):
+        _LayerStore(keys, keys, bits=2, group=2)

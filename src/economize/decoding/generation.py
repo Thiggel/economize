@@ -178,6 +178,7 @@ class Generation:
             match=_host_cycles(self.match[row]),
             prompt_length=prompt_length,
             num_layers=self.num_layers,
+            row=row,
         )
 
     def outputs(self) -> list[DecodeResult]:

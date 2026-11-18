@@ -134,16 +134,17 @@ class GraphedTargetWorker(CapturingTargetWorker):
         self.cache = self.graphs.cache_for(capacity)
         self.cost = CostLog()
 
-    def _chain(self, tokens: torch.Tensor, position: int) -> torch.Tensor:
+    def _chain(self, tokens: torch.Tensor, position: int, *, last_only: bool = False,
+               kind: str | None = None) -> torch.Tensor:
         if position == 0 or tokens.numel() > self.max_width:
-            return super()._chain(tokens, position)
-        self.cost.record(self.kind, tokens.numel(), position, 1, self.num_layers)
+            return super()._chain(tokens, position, last_only=last_only, kind=kind)
+        self._record(tokens, position, kind)
         positions = torch.arange(position, position + tokens.numel(), device=self.device)[None]
         with self.graphs.on_device():
             logits, hidden = self._pass(tokens.view(1, -1), positions)
             self.start = position
             self.hidden = {layer: state[0].clone() for layer, state in zip(self._layers, hidden)}
-            return logits[0].clone()
+            return (logits[0, -1:] if last_only else logits[0]).clone()
 
     def _pass_fn(self, tokens: torch.Tensor, positions: torch.Tensor) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]]:
         ctx = self.runner.context(self.graphs.current, positions, trusted=True)

@@ -21,6 +21,7 @@ from .wrapper import (
     SlotStore,
     find_wrapper,
     frontiers,
+    held_bytes,
     innermost,
     write_slots,
 )
@@ -35,6 +36,7 @@ __all__ = [
     "check_positional",
     "find_wrapper",
     "frontiers",
+    "held_bytes",
     "innermost",
     "layer_indices",
     "write_slots",

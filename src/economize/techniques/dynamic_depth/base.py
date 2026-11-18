@@ -37,6 +37,7 @@ from torch import nn
 
 from ...core.config import TechniqueConfig
 from ...core.technique import Capability, Technique
+from ...errors import ConfigError
 from ...modules.norm import rms_normalize
 from ...runtime import current_phase
 from ...runtime.policy import Decision, LayerAction, LayerPolicy, Route
@@ -75,46 +76,97 @@ _ENTERED, _RAN, _FILLED = range(3)
 
 
 class DepthMeter:
-    """Counts of layer applications of one generation, per phase.
+    """Counts of layer applications of one generation, per phase, for the whole batch and per row.
 
-    ``counts[phase]`` is a ``[L + 1, 3]`` tensor whose row ``l`` holds the tokens that entered layer ``l``, ran it,
-    and skipped it with their K/V filled (padding excluded). ``extra`` holds named counters of a technique (e.g. the
-    LM-head calls of CALM's confidence).
+    ``counts[phase]`` is a ``[L + 1, 3]`` tensor whose row ``l`` holds the tokens that entered layer ``l``, had it
+    executed, and had their K/V filled without the rest of the layer (padding excluded; a routed layer fills the
+    K/V of all its tokens, also of the executed ones). A token counts as executed whenever the layer
+    computed it, also when the policy wanted it to skip but another row of the batch kept the layer running (a
+    :class:`~economize.runtime.Route` computes ``K`` columns in every row); those tokens are also counted in
+    ``extra["padded_layer_tokens"]``. ``row_counts[phase]`` is ``[R, L + 1, 3]`` with the same counts per row of
+    the batch the generation started with (:meth:`start_rows`). ``extra`` holds named counters of a technique (e.g.
+    the LM-head calls of CALM's confidence) and ``row_extra`` their per-row values where the technique gave them.
     """
 
     def __init__(self, num_layers: int) -> None:
         self.num_layers = num_layers
+        self.num_rows = 0
         self.counts: dict[str, torch.Tensor] = {}
+        self.row_counts: dict[str, torch.Tensor] = {}
         self.extra: dict[str, torch.Tensor | float] = {}
+        self.row_extra: dict[str, torch.Tensor] = {}
+
+    def start_rows(self, num_rows: int) -> None:
+        """Count per row from now on, for a batch of ``num_rows`` rows (row ids ``0..num_rows - 1``)."""
+        self.num_rows = num_rows
 
     def record(self, index: int, entered: torch.Tensor | int, ran: torch.Tensor | int, filled: torch.Tensor | int,
-               phase: str | None = None) -> None:
-        """Add the counts of one layer call (tensors stay on their device; nothing synchronizes)."""
+               phase: str | None = None, rows: torch.Tensor | None = None) -> None:
+        """Add the counts of one layer call (tensors stay on their device; nothing synchronizes).
+
+        The counts are numbers, or ``[B]`` tensors with one count per row of the pass; with ``rows`` (``[B]`` row
+        ids of :meth:`start_rows`) per-row counts are kept as well.
+        """
         key = str(phase if phase is not None else current_phase())
+        values = (entered, ran, filled)
+        device = next((v.device for v in values if isinstance(v, torch.Tensor)), None)
         table = self.counts.get(key)
-        device = entered.device if isinstance(entered, torch.Tensor) else None
         if table is None:
             table = self.counts[key] = torch.zeros(self.num_layers + 1, 3, dtype=torch.long, device=device)
-        for column, value in ((_ENTERED, entered), (_RAN, ran), (_FILLED, filled)):
-            table[index, column] += value
+        for column, value in zip((_ENTERED, _RAN, _FILLED), values):
+            table[index, column] += value.sum() if isinstance(value, torch.Tensor) else value
+        if rows is None or not self.num_rows:
+            return
+        per_row = self.row_counts.get(key)
+        if per_row is None:
+            per_row = self.row_counts[key] = torch.zeros(
+                self.num_rows, self.num_layers + 1, 3, dtype=torch.long, device=device
+            )
+        ids = rows.to(per_row.device)
+        for column, value in zip((_ENTERED, _RAN, _FILLED), values):
+            if isinstance(value, torch.Tensor) and value.dim() == 1:
+                per_row[:, index, column].index_add_(0, ids, value.to(per_row.device, torch.long))
+            elif isinstance(value, int) and value == 0:
+                continue
+            else:
+                raise ConfigError("per-row counts need a [B] tensor per column (or 0)")
 
-    def add(self, name: str, value: torch.Tensor | float) -> None:
-        """Add ``value`` to the counter ``name``."""
-        self.extra[name] = self.extra.get(name, 0) + (value.detach() if isinstance(value, torch.Tensor) else value)
+    def add(self, name: str, value: torch.Tensor | float, rows: torch.Tensor | None = None) -> None:
+        """Add ``value`` to the counter ``name``: a number, or a ``[B]`` tensor of per-row values, kept per row
+        too when ``rows`` (the row ids of :meth:`start_rows`) are given."""
+        if isinstance(value, torch.Tensor):
+            value = value.detach()
+            total: torch.Tensor | float = value.sum() if value.dim() else value
+        else:
+            total = value
+        self.extra[name] = self.extra.get(name, 0) + total
+        if rows is None or not self.num_rows or not isinstance(value, torch.Tensor) or value.dim() != 1:
+            return
+        per_row = self.row_extra.get(name)
+        if per_row is None:
+            per_row = self.row_extra[name] = torch.zeros(self.num_rows, dtype=value.dtype, device=value.device)
+        per_row.index_add_(0, rows.to(per_row.device), value.to(per_row.device, per_row.dtype))
 
-    def per_layer(self, phase: str | None = None) -> torch.Tensor:
-        """``[L, 3]`` counts of layers ``1..L`` (entered, ran, K/V filled) for one phase or all phases."""
-        tables = [t.cpu() for key, t in self.counts.items() if phase is None or key == phase]
+    def per_layer(self, phase: str | None = None, row: int | None = None) -> torch.Tensor:
+        """``[L, 3]`` counts of layers ``1..L`` (entered, executed, K/V filled) for one phase or all phases, of the
+        whole batch or of row ``row``."""
+        source = self.counts if row is None else {key: t[row] for key, t in self._rows(row).items()}
+        tables = [t.cpu() for key, t in source.items() if phase is None or key == phase]
         if not tables:
             return torch.zeros(self.num_layers, 3, dtype=torch.long)
         return torch.stack(tables).sum(0)[1:]
 
-    def summary(self) -> dict[str, Any]:
-        """Totals over all phases: layer applications entered, executed and skipped, and per-layer executed
-        fractions."""
-        table = self.per_layer()
+    def summary(self, row: int | None = None) -> dict[str, Any]:
+        """Totals over all phases, of the whole batch or of row ``row``: layer applications entered, executed and
+        skipped, and per-layer executed fractions.
+
+        Raises:
+            IndexError: ``row`` is not a row of the batch the counts were kept for.
+        """
+        table = self.per_layer(row=row)
         entered, ran, filled = (int(table[:, c].sum()) for c in (_ENTERED, _RAN, _FILLED))
         per_layer = (table[:, _RAN].double() / table[:, _ENTERED].clamp_min(1).double()).tolist()
+        phases = self.counts if row is None else {key: t[row] for key, t in self._rows(row).items()}
         out: dict[str, Any] = {
             "policy_layer_tokens": entered,
             "executed_layer_tokens": ran,
@@ -122,11 +174,26 @@ class DepthMeter:
             "kv_fill_layer_tokens": filled,
             "executed_fraction": ran / entered if entered else 1.0,
             "executed_fraction_per_layer": per_layer,
-            "phases": {key: _phase_counts(t) for key, t in self.counts.items()},
+            "phases": {key: _phase_counts(t) for key, t in phases.items()},
+            "padded_layer_tokens": 0,
         }
         for name, value in self.extra.items():
+            if row is not None and name in self.row_extra:
+                value = self.row_extra[name][row]
+            elif row is not None and self.num_rows > 1:
+                continue  # a batch total is no count of one row
             out[name] = float(value) if isinstance(value, torch.Tensor) else value
         return out
+
+    def _rows(self, row: int) -> dict[str, torch.Tensor]:
+        """The per-row tables (the batch tables of a one-row generation that kept none)."""
+        if self.row_counts or self.num_rows:
+            if not 0 <= row < self.num_rows:
+                raise IndexError(f"row {row} outside the {self.num_rows} rows of the last generation")
+            return self.row_counts
+        if row != 0:
+            raise IndexError(f"no per-row counts were kept; row {row} is unknown")
+        return {key: t[None] for key, t in self.counts.items()}
 
 
 def _phase_counts(table: torch.Tensor) -> dict[str, int]:
@@ -284,6 +351,7 @@ class DepthPolicy(LayerPolicy):
         self._last = 0
         self._active = True
         self._prompt_end: torch.Tensor | None = None  # [B], set by the prefill passes, kept by reorder
+        self._row_ids: torch.Tensor | None = None  # [B] row ids of the meter, set by the prefill, kept by reorder
 
     # ---- the LayerPolicy interface -------------------------------------------------------------------------
     def decide(self, index: int, hidden: torch.Tensor, ctx: LayerContext) -> Decision:
@@ -291,6 +359,9 @@ class DepthPolicy(LayerPolicy):
             if current_phase() == "prefill":  # chunked prefill: the last chunk sets the end
                 positions = torch.where(valid_mask(hidden, ctx), ctx.positions.to(hidden.device), -1)
                 self._prompt_end = positions.max(-1).values + 1
+                if self._row_ids is None or len(self._row_ids) != len(positions):
+                    self._row_ids = torch.arange(len(positions), device=hidden.device)
+                    self.meter.start_rows(len(positions))
                 self.begin_prompt()
             self._inputs.clear()
             self._masks.clear()
@@ -300,7 +371,8 @@ class DepthPolicy(LayerPolicy):
         valid = valid_mask(hidden, ctx)
         if not self._active:
             self._masks[index] = None
-            self.meter.record(index, valid.sum(), valid.sum(), 0)
+            count = valid.sum(-1)
+            self.meter.record(index, count, count, 0, rows=self.row_ids(len(count)))
             return LayerAction.RUN
         self._inputs[index] = hidden
         mask = None if self.training else self.choose(index, hidden, ctx)
@@ -319,6 +391,14 @@ class DepthPolicy(LayerPolicy):
         """Keep the prompt ends of the rows ``rows``, so that a row that stays in the batch keeps its own schedule."""
         if self._prompt_end is not None:
             self._prompt_end = self._prompt_end.index_select(0, rows.to(self._prompt_end.device))
+        if self._row_ids is not None:
+            self._row_ids = self._row_ids.index_select(0, rows.to(self._row_ids.device))
+
+    def row_ids(self, batch: int) -> torch.Tensor | None:
+        """``[batch]`` ids of the rows of the current pass in the meter's per-row counts (the rows of the batch the
+        generation started with), or ``None`` outside a generation (training, or a pass of another batch size)."""
+        ids = self._row_ids
+        return ids if ids is not None and len(ids) == batch else None
 
     def generated_positions(self, hidden: torch.Tensor, ctx: LayerContext) -> torch.Tensor:
         """``[B, S]`` positions of the tokens of a pass counted from the end of their row's prompt (``0``: the first
@@ -357,25 +437,34 @@ class DepthPolicy(LayerPolicy):
         return self._last == 0 or index <= self._last
 
     def _decision(self, index: int, mask: torch.Tensor | None, valid: torch.Tensor) -> Decision:
-        entered = valid.sum()
+        """The cheapest decision for the tokens ``mask`` and its counts in the meter.
+
+        A layer is skipped for a token only when the pass really leaves it out: ``SKIP``/``SKIP_FILL_KV`` when no
+        token of the pass runs it, and a :class:`~economize.runtime.Route` otherwise, which gathers the same number
+        ``K`` (the largest count of any row) of columns from every row. A row with fewer chosen tokens has the layer
+        computed on ``K`` of its tokens anyway (e.g. a row that exited in a batched one-token decode step while
+        another row runs the layer), so those tokens count as executed, and in ``padded_layer_tokens``. The route
+        fills the K/V of all tokens before it runs the layer, so every token counts in ``kv_fill_layer_tokens``.
+        """
+        entered = valid.sum(-1)  # [B]
+        rows = self.row_ids(len(entered))
         if mask is None:
-            self.meter.record(index, entered, entered, 0)
+            self.meter.record(index, entered, entered, 0, rows=rows)
             return LayerAction.RUN
         mask = mask.to(valid.device)
-        ran = (mask & valid).sum()
-        filled = entered - ran if self.fill_kv else 0
-        routed_kv = not self.fill_kv and runtime_supports_routed_kv()
-        run_all = mask | ~valid  # padding follows the cheapest decision
-        if bool(run_all.all()):
-            self.meter.record(index, entered, entered, 0)
+        chosen = mask & valid
+        if bool((mask | ~valid).all()):  # padding follows the cheapest decision
+            self.meter.record(index, entered, entered, 0, rows=rows)
             return LayerAction.RUN
-        if not bool((mask & valid).any()):
-            self.meter.record(index, entered, 0, filled)
+        selected = chosen.sum(-1)
+        if not bool(selected.any()):
+            self.meter.record(index, entered, torch.zeros_like(entered), entered if self.fill_kv else 0, rows=rows)
             return LayerAction.SKIP_FILL_KV if self.fill_kv else LayerAction.SKIP
-        # A Route fills the K/V of the tokens it routes around unless the runtime can leave them empty.
-        self.meter.record(index, entered, ran, 0 if routed_kv else entered - ran)
-        route = Route.from_mask(mask & valid)
-        return dataclasses.replace(route, fill_kv=False) if routed_kv else route  # type: ignore[call-arg]
+        # A Route fills the K/V of every token first (LayerRunner._apply), then computes K columns of every row.
+        executed = torch.minimum(entered, selected.max())
+        self.meter.record(index, entered, executed, entered, rows=rows)
+        self.meter.add("padded_layer_tokens", executed - selected, rows)
+        return Route.from_mask(chosen)
 
 
 class ScoredDepthPolicy(DepthPolicy):
@@ -478,19 +567,25 @@ class DepthTechnique(Technique, ABC):
         self.last_policy = self.make_policy()
         return self.last_policy
 
-    def depth_stats(self) -> dict[str, Any]:
-        """Layer applications of the last generation (see :meth:`DepthMeter.summary`)."""
+    def depth_stats(self, row: int | None = None) -> dict[str, Any]:
+        """Layer applications of the last generation, of the whole batch or of row ``row`` (see
+        :meth:`DepthMeter.summary`)."""
         if self.last_policy is None:
             return DepthMeter(self.adapter.num_layers).summary()
-        return self.last_policy.meter.summary()
+        return self.last_policy.meter.summary(row)
 
-    def cost_summary(self, result: Any) -> dict[str, Any]:
-        """``result.cost_summary()`` of the last generation (one prompt) with the skipped layer applications
-        subtracted: ``effective_layer_tokens`` counts every decoder-layer application that ran, and
+    def cost_summary(self, result: Any, row: int | None = None) -> dict[str, Any]:
+        """``result.cost_summary()`` of a result of the last generation with that row's skipped layer applications
+        subtracted: ``effective_layer_tokens`` counts every decoder-layer application that was computed, and
         ``relative_effective_layer_tokens`` relates it to plain decoding of the same output. Layers skipped with
-        their K/V filled count in ``kv_fill_layer_tokens`` (K/V projections only)."""
+        their K/V filled count in ``kv_fill_layer_tokens`` (K/V projections only).
+
+        ``row`` is the result's index in the batch of :meth:`~economize.EfficientModel.decode_batch` (default: the
+        result's own :attr:`~economize.decoding.DecodeResult.row`). In a batch a layer counts as skipped for a
+        row only when the pass really left it out for that row (see :meth:`DepthPolicy._decision`).
+        """
         summary = dict(result.cost_summary())
-        stats = self.depth_stats()
+        stats = self.depth_stats(getattr(result, "row", 0) if row is None else row)
         effective = summary["layer_tokens"] - stats["skipped_layer_tokens"]
         plain = summary["layer_tokens"] / summary["relative_layer_tokens"] if summary["relative_layer_tokens"] else 0
         summary.update(stats)

@@ -36,8 +36,8 @@ def info(name: str) -> economize.TechniqueInfo:
     return economize.TECHNIQUES.get(name).info
 
 
-def real(name: str, backend: str) -> bool:
-    return economize.backend_support(name)[backend].status.value == "real"
+def status(name: str, backend: str) -> str:
+    return economize.backend_support(name)[backend].status.value
 
 
 def test_every_row_names_a_listed_technique() -> None:
@@ -67,12 +67,17 @@ def test_reasons_agree_with_the_metadata(situation: str, names: list[str], reaso
             support = economize.backend_support(name)
             assert [b for b, s in support.items() if s.status.value == "real"] == ["transformers"], (situation, name)
         if "every backend" in reason and "except" not in reason:
-            assert all(s.status.value == "real" for s in economize.backend_support(name).values()), (situation, name)
+            # the page names the runtimes economize exports to but never runs
+            allowed = {"real", "untested"} if "untested" in reason else {"real"}
+            assert all(s.status.value in allowed for s in economize.backend_support(name).values()), (situation, name)
     if len(names) == 1:
         (name,) = names
         for word, backend in BACKENDS.items():
-            if re.search(rf"(?:runs under|exports to)[^.]*\b{re.escape(word)}\b", reason, re.IGNORECASE):
-                assert real(name, backend), (situation, name, backend)
+            claim = re.search(rf"(?:runs under|exports to)[^.]*?\b{re.escape(word)}\b( \(untested\))?", reason,
+                              re.IGNORECASE)
+            if claim:  # an unverified runtime is named as such, and a verified one is not
+                expected = "untested" if claim.group(1) else "real"
+                assert status(name, backend) == expected, (situation, name, backend)
 
 
 def test_lossless_row_matches_the_drafting_family() -> None:

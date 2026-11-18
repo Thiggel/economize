@@ -5,7 +5,8 @@ layers. A change to a contract in Section 3 is written here first.
 
 ## 1. Goals
 
-1. Equip any Hugging Face decoder-only causal LM with any combination of efficiency techniques in two lines.
+1. Equip any Hugging Face decoder-only causal LM with efficiency techniques, alone or in validated combinations
+   (`economize.compatible`), in two lines.
 2. Open-closed everywhere: a new technique, model family, verifier, cache, objective or backend is added by
    registering a class, never by editing an existing module.
 3. One numerical contract: the exact path equals plain `transformers` logits, spec decoding is lossless (greedy:
@@ -528,8 +529,10 @@ Shipped (`techniques/dynamic_depth/`, `docs/depth_kv.md`): `gateskip`, `mod`, `f
 (how a layer's output enters the residual stream, e.g. `x + g (layer(x) - x)`); the base turns the mask into the
 cheapest decision (an all-true mask is `RUN`, so trivial settings take the unmodified path and are bitwise equal
 to the base), restricts itself to the configured phases, and counts entered, run and K/V-filled layer tokens per
-phase and layer in a `DepthMeter`. `DepthTechnique.cost_summary(result)` subtracts the skipped applications from
-the result's `layer_tokens` (`effective_layer_tokens`, `relative_effective_layer_tokens`, `kv_fill_layer_tokens`).
+phase and layer in a `DepthMeter`, for the batch and per row. A token counts as executed whenever the pass computed
+it (a `Route` computes the same number of columns in every row), so a skip of one row in a batched step is no saving.
+`DepthTechnique.cost_summary(result)` subtracts the row's skipped applications from the result's `layer_tokens`
+(`effective_layer_tokens`, `relative_effective_layer_tokens`, `kv_fill_layer_tokens`, `padded_layer_tokens`).
 In training mode (`policy.training = True`, set by the objectives in `dynamic_depth/objective.py`) every layer runs
 on every token and `transform` applies soft or hard gates, which keeps the student pass differentiable; the
 objectives train only the technique's parameters. `RoutedDepthPolicy` (`dynamic_depth/base.py`) holds the routed combine of MoD and FlexiDepth: routed tokens take the gated residual, the others `skip_state` (the input for MoD, the adapter path for FlexiDepth). Depth techniques are not `graph_safe` (their decisions read

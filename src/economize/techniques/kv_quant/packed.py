@@ -39,7 +39,7 @@ from ...errors import ConfigError
 from ...modules.kv_cache import write_slots
 from ...modules.slot_gather import gather_slots
 from ...runtime import KVCache
-from .kivi import _FP16_MAX, KIVICache, KIVIConfig, quantize
+from .kivi import _FP16_MAX, KIVICache, KIVIConfig, quantize, value_group
 
 __all__ = ["PackedKIVICache"]
 
@@ -131,7 +131,7 @@ class PackedKIVICache(KIVICache):
                 raise ConfigError(
                     f"{name} head dim {d} does not pack into whole bytes at {bits} bits; use storage='simulated'"
                 )
-        value_group = g if dim_v % g == 0 else dim_v
+        group = value_group(dim_v, g)
         device = keys.device
 
         def codes(d: int) -> torch.Tensor:
@@ -141,13 +141,13 @@ class PackedKIVICache(KIVICache):
             return torch.zeros(*shape, dtype=torch.float16, device=device)
 
         store = _Store(
-            value_group=value_group,
+            value_group=group,
             key_codes=codes(dim),
             key_scale=half(batch, heads, -(-slots // g), dim),
             key_zero=half(batch, heads, -(-slots // g), dim),
             value_codes=codes(dim_v),
-            value_scale=half(batch, heads, slots, dim_v // value_group),
-            value_zero=half(batch, heads, slots, dim_v // value_group),
+            value_scale=half(batch, heads, slots, dim_v // group),
+            value_zero=half(batch, heads, slots, dim_v // group),
             key_ring=torch.zeros(batch, heads, self.residual_ring + 1, dim, dtype=keys.dtype, device=device),
             value_ring=torch.zeros(batch, heads, self.residual_ring + 1, dim_v, dtype=values.dtype, device=device),
         )

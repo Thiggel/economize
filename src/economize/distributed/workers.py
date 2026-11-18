@@ -45,11 +45,15 @@ __all__ = [
 class _CachedModel:
     """A model on its device with one KV cache and a cost log: the passes the target and :class:`ModelWorker` share.
 
-    Every pass is logged as one call of all the model's layers under the subclass's :attr:`kind`.
+    Every pass is logged as one call of all the model's layers under the subclass's :attr:`kind` (or the kind the
+    pass names) and :attr:`module`.
     """
 
     #: The cost-event kind of every pass.
     kind: str
+    #: The module the passes are logged under: ``None`` for the decoded (target) model, a name for a separate network,
+    #: whose layers :class:`~economize.bench.CostModel` prices with that network's own shape.
+    module: str | None = None
 
     def __init__(self, model: nn.Module) -> None:
         if is_tensor_parallel(model):
@@ -67,11 +71,17 @@ class _CachedModel:
         self.cache = self.runner.new_cache(capacity)
         self.cost = CostLog()
 
-    def _chain(self, tokens: torch.Tensor, position: int) -> torch.Tensor:
-        """Logits ``[S, V]`` after each of ``tokens`` ``[S]``, the first at ``position`` (writes their K/V)."""
+    def _chain(self, tokens: torch.Tensor, position: int, *, last_only: bool = False,
+               kind: str | None = None) -> torch.Tensor:
+        """Logits ``[S, V]`` after each of ``tokens`` ``[S]``, the first at ``position`` (writes their K/V).
+
+        ``last_only`` applies the LM head to the last token only (``[1, V]``), as a prompt pass needs. ``kind``
+        overrides :attr:`kind` in the cost log.
+        """
         assert self.cache is not None
         positions = torch.arange(position, position + tokens.numel(), device=self.device)
-        return self._run(tokens, position, self.runner.context(self.cache, positions, trusted=True))
+        ctx = self.runner.context(self.cache, positions, trusted=True)
+        return self._run(tokens, position, ctx, last_only=last_only, kind=kind)
 
     def _tree(self, tree: TreeLayout, nodes: torch.Tensor, valid: torch.Tensor, tokens: torch.Tensor,
               base: int) -> torch.Tensor:
@@ -79,9 +89,15 @@ class _CachedModel:
         assert self.cache is not None
         return self._run(tokens, base, self.runner.tree_context(self.cache, tree, trusted=True).select(nodes, valid))
 
-    def _run(self, tokens: torch.Tensor, position: int, ctx: LayerContext) -> torch.Tensor:
-        self.cost.record(self.kind, tokens.numel(), position, 1, self.num_layers)
-        return self.runner.logits(self.runner.forward(tokens.view(1, -1), ctx).final)[0]
+    def _record(self, tokens: torch.Tensor, position: int, kind: str | None = None) -> None:
+        """Log one pass of all layers over ``tokens``."""
+        self.cost.record(kind or self.kind, tokens.numel(), position, 1, self.num_layers, module=self.module)
+
+    def _run(self, tokens: torch.Tensor, position: int, ctx: LayerContext, *, last_only: bool = False,
+             kind: str | None = None) -> torch.Tensor:
+        self._record(tokens, position, kind)
+        final = self.runner.forward(tokens.view(1, -1), ctx).final
+        return self.runner.logits(final[:, -1:] if last_only else final)[0]
 
 
 class Chooser(Protocol):
@@ -361,6 +377,9 @@ class ModelWorker(_CachedModel, SpeculationWorker):
     """
 
     kind = CostKind.DRAFT
+    #: The drafter's layers are its own: they are logged as module ``"draft_model"``
+    #: (:data:`~economize.bench.cost_model.DRAFT_MODEL`), which ``CostModel(draft=CallSpec(shape=...))`` prices.
+    module = "draft_model"
 
     def __init__(self, model: nn.Module, fanout: int = 2) -> None:
         check_positive("fanout", fanout)
@@ -374,7 +393,8 @@ class ModelWorker(_CachedModel, SpeculationWorker):
     @torch.no_grad()
     def begin(self, prompt: torch.Tensor, capacity: int) -> None:
         self._reset(capacity)
-        self._chain(prompt.to(self.device), 0)
+        # the prompt pass only fills the cache: logged as catch-up, with the LM head on the last token alone
+        self._chain(prompt.to(self.device), 0, last_only=True, kind=CostKind.DRAFT_CATCHUP)
 
     @torch.no_grad()
     def draft(self, context: torch.Tensor, position: int, length: int, choose: Chooser) -> Spine:
@@ -426,7 +446,7 @@ class TargetWorker(_CachedModel):
     def begin(self, prompt: torch.Tensor, capacity: int) -> torch.Tensor:
         """Fresh cache and a pass over ``prompt`` ``[P]``; returns the logits after the last prompt token ``[V]``."""
         self._reset(capacity)
-        return self.verify(prompt.to(self.device), 0)[-1]
+        return self._chain(prompt.to(self.device), 0, last_only=True)[-1]
 
     @torch.no_grad()
     def verify(self, tokens: torch.Tensor, position: int) -> torch.Tensor:

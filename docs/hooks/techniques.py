@@ -62,14 +62,16 @@ FAMILY_TITLES = {
 }
 
 #: How a backend's support status reads in a cell, by ``SupportStatus.value``.
-STATUS_LABELS = {"real": "real", "simulated": "simulated", "unsupported": "no"}
+STATUS_LABELS = {"real": "real", "untested": "untested", "simulated": "simulated", "unsupported": "no"}
 #: The same in the compact support matrix: ``(symbol, CSS class)``.
-STATUS_SYMBOLS = {"real": ("✓", "yes"), "simulated": ("sim.", "sim"), "unsupported": ("✗", "no")}
+STATUS_SYMBOLS = {"real": ("✓", "yes"), "untested": ("?", "untested"), "simulated": ("sim.", "sim"),
+                  "unsupported": ("✗", "no")}
 #: The paragraph above the support matrix.
 BACKEND_LEGEND = (
-    "How each backend runs a technique with its default configuration: ✓ realizes the saving, sim. reproduces the "
-    "technique's outputs without realizing its saving, ✗ means the backend cannot run it. Hover over a symbol for "
-    "the reason. `economize.backend_support(config)` answers the same for any other configuration."
+    "How each backend runs a technique with its default configuration: ✓ realizes the saving, ? means economize "
+    "writes the backend's format but no test runs the backend on it, sim. reproduces the technique's outputs without "
+    "realizing its saving, ✗ means the backend cannot run it. Hover over a symbol for the reason. "
+    "`economize.backend_support(config)` answers the same for any other configuration."
 )
 
 #: The backend column shown first; the others follow by name.
