@@ -28,6 +28,9 @@
   leaves them out instead of averaging a 0/0. A source that only yields such batches raises `ConfigError`.
 - `larger_teacher` keeps the teacher in evaluation mode, so dropout in the larger model no longer perturbs the
   distillation targets.
+- `economize_training_args` sets the objective's schedule with its `min_lr_ratio` floor as `economize_schedule`,
+  so `EffTrainer` follows the learning rates of `fit` (it used to pick the `transformers` cosine, which decays to
+  zero). Pass `lr_scheduler_type=` for a `transformers` schedule.
 
 ## 0.5.0 (2026-11-18)
 

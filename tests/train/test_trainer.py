@@ -17,7 +17,7 @@ pytest.importorskip("transformers")
 
 import economize
 from economize.techniques.jump import JumpRollout
-from economize.train import CrossEntropy, EffCollator, EffTrainer, Example, economize_training_args
+from economize.train import CrossEntropy, EffCollator, EffTrainer, Example, economize_training_args, fit
 from economize.train.checkpoint import BASE_FILE, load_trained
 from economize.train.evaluate import MetricMeans, evaluate, mean_metrics
 from economize.train.schedule import lr_factor
@@ -71,10 +71,31 @@ def test_training_arguments_follow_the_objective(tmp_path: Path) -> None:
     args = economize_training_args(objective, str(tmp_path), report_to=[])
     assert args.learning_rate == objective.defaults.lr and args.warmup_steps == objective.defaults.warmup_steps
     assert args.max_grad_norm == objective.defaults.grad_clip
-    assert getattr(args.lr_scheduler_type, "value", None) == "cosine"
+    assert args.economize_schedule == objective.defaults.schedule
+    assert args.min_lr_ratio == objective.defaults.min_lr_ratio
     assert (args.adam_beta1, args.adam_beta2) == objective.defaults.betas
     args = economize_training_args("ce", str(tmp_path), learning_rate=1e-5, report_to=[])
     assert args.learning_rate == 1e-5
+    args = economize_training_args("ce", str(tmp_path), lr_scheduler_type="linear", report_to=[])
+    assert args.economize_schedule is None and getattr(args.lr_scheduler_type, "value", None) == "linear"
+
+
+def test_trainer_follows_the_learning_rates_of_fit(tmp_path: Path) -> None:
+    objective = _objective()
+    assert objective.defaults.min_lr_ratio > 0  # the floor that the transformers cosine schedule used to drop
+    steps, warmup = 6, 2
+    result = fit(_jump_model(), torch.stack([row["input_ids"] for row in _dataset()]), _objective(), steps=steps,
+                 batch_size=4, seq_len=24, warmup_steps=warmup, log_every=1)
+    trainer = EffTrainer(_jump_model(), objective, _args(objective, tmp_path, max_steps=steps, warmup_steps=warmup),
+                         train_dataset=_dataset())
+    trainer.create_optimizer_and_scheduler(steps)
+    lrs = []
+    for _ in range(steps):
+        lrs.append(trainer.lr_scheduler.get_last_lr()[0])
+        trainer.optimizer.step()
+        trainer.lr_scheduler.step()
+    assert lrs == pytest.approx([record["lr"] for record in result.history if "lr" in record])
+    assert lrs[-1] > 0
 
 
 # ---- training, logging, checkpoints, resume -------------------------------------------------------------------------

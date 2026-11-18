@@ -246,8 +246,8 @@ trainer.train()
 ```
 
 `economize_training_args` fills `TrainingArguments` with the objective's learning rate, weight decay, betas,
-warmup and clipping. The `transformers` cosine schedule decays to zero, so pass `schedule="cosine",
-min_lr_ratio=0.1` to `EffTrainer` for economize's schedule with a floor. `lr_backbone=` sets the rate of LoRA,
+warmup, clipping and schedule (economize's, with the `min_lr_ratio` floor), so `EffTrainer` follows the learning
+rates of `fit`. Pass `lr_scheduler_type=` to it for a `transformers` schedule instead (its cosine decays to zero). `lr_backbone=` sets the rate of LoRA,
 layer copies and base weights. The datasets hold `input_ids` (and optionally `attention_mask`, `labels`), or are
 lists of `Example`s, and `EffCollator` pads them. Logged metrics are the objective's (`kl1`, `acc1`, ... and
 `eval_kl1`, ... in evaluation). Each checkpoint holds the economize weights as in `final/` above next to the
