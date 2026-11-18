@@ -95,6 +95,34 @@ def test_long_masked_query_attends_in_chunks_with_the_same_result(monkeypatch, k
     torch.testing.assert_close(out.double(), _reference(q, k, v, mask), atol=1e-5, rtol=1e-5)
 
 
+class _QueryShapes(torch.overrides.TorchFunctionMode):
+    """Records the query shape of every ``scaled_dot_product_attention`` call."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.shapes: list[tuple[int, ...]] = []
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        if func is F.scaled_dot_product_attention:
+            self.shapes.append(tuple((args[0] if args else kwargs["query"]).shape))
+        return func(*args, **kwargs)
+
+
+@pytest.mark.parametrize("kv_heads", [1, 2])
+def test_a_single_query_reaches_sdpa_with_its_query_heads(kv_heads: int) -> None:
+    """``transformers`` >= 5.23 folds the query heads of a single masked query into the query axis; the guard keeps
+    the ``[B, H_q, 1, D]`` layout, so a mode that watches ``sdpa`` reads the query heads and changes no bit."""
+    q, k, v, mask = _inputs(1, 40, 64, kv_heads=kv_heads)
+    watch = _QueryShapes()
+    with watch:
+        out, _ = sdpa_attention_forward(_Attention(8 // kv_heads), q, k, v, mask)
+    assert watch.shapes == [(1, 8, 1, 64)]
+    torch.testing.assert_close(out.double(), _reference(q, k, v, mask), atol=1e-5, rtol=1e-5)
+    unwatched, _ = sdpa_attention_forward(_Attention(8 // kv_heads), q, k, v, mask)
+    assert torch.equal(unwatched, out)
+
+
 # ---- kernels --------------------------------------------------------------------------------------------------------
 
 

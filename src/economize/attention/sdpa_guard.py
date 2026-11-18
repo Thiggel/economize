@@ -17,6 +17,13 @@ fallback uses it; :func:`install` puts it under ``"sdpa"`` in ``transformers`` f
 It also takes a :class:`~.banded.StructuredMask` (a :class:`~.banded.BandMask`) in place of the mask tensor and lets
 it attend through the same function, one dense-masked or causal call per piece.
 
+``transformers`` >= 5.23 folds the query heads of a single-query masked call into the query axis (``pack_gqa``:
+``[B, H_q, 1, D]`` becomes ``[B, H_kv, H_q / H_kv, D]``) before it calls ``sdpa``. A torch function mode that
+watches ``sdpa`` (the score taps of ``kv_evict`` and TriForce's chunk selection) reads the query heads from that
+call, and the folded call rounds differently from the unfolded one, so a watched and an unwatched decode step would
+disagree in the last bit. Such a call gets K/V with one head per query head instead (:func:`packs_query`), the
+layout and the numerics of every earlier ``transformers``.
+
 A query longer than :data:`QUERY_CHUNK` with a dense mask attends in query chunks of that length over the same keys
 (the repeated K/V heads are materialized once for all chunks). PyTorch's masked kernels convert a boolean mask to the
 query's dtype in one piece, which is 2 GB at 32K queries over 32K keys; in chunks the conversion and the scores stay
@@ -32,7 +39,14 @@ import torch
 
 from .banded import StructuredMask
 
-__all__ = ["QUERY_CHUNK", "WIDE_HEAD_DIM", "install", "needs_dense_kv", "sdpa_attention_forward"]
+__all__ = [
+    "QUERY_CHUNK",
+    "WIDE_HEAD_DIM",
+    "install",
+    "needs_dense_kv",
+    "packs_query",
+    "sdpa_attention_forward",
+]
 
 #: Head dims above this are affected; 64 and 128 are computed correctly.
 WIDE_HEAD_DIM = 128
@@ -60,6 +74,22 @@ def needs_dense_kv(module: torch.nn.Module, query: torch.Tensor, key: torch.Tens
     )
 
 
+def packs_query(
+    module: torch.nn.Module, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, attention_mask: Any
+) -> bool:
+    """Whether ``transformers`` >= 5.23 would fold the query heads of this call into its query axis: a single query
+    of grouped heads that ``sdpa`` cannot attend with ``enable_gqa`` (see the module docstring)."""
+    from transformers.integrations.sdpa_attention import use_gqa_in_sdpa
+
+    groups = getattr(module, "num_key_value_groups", 1)
+    return (
+        isinstance(groups, int)
+        and groups > 1
+        and query.shape[2] == 1
+        and not use_gqa_in_sdpa(attention_mask, key, value)
+    )
+
+
 class _Ungrouped:
     """``module`` as ``sdpa_attention_forward`` sees it once K/V hold one head per query head."""
 
@@ -83,8 +113,8 @@ def sdpa_attention_forward(
     **kwargs: Any,
 ) -> tuple[torch.Tensor, Any]:
     """``transformers``' ``sdpa_attention_forward`` with contiguous K/V when :func:`needs_dense_kv` (or
-    ``dense_kv``) says so; same signature and result. A :class:`~.banded.StructuredMask` attends through this
-    function."""
+    ``dense_kv``) or :func:`packs_query` says so; same signature and result. A :class:`~.banded.StructuredMask`
+    attends through this function."""
     if isinstance(attention_mask, StructuredMask):
         kwargs.update(zip(("dropout", "scaling", "is_causal"), args))
         return attention_mask.attend(partial(sdpa_attention_forward, dense_kv=dense_kv), module, query, key, value,
@@ -92,7 +122,8 @@ def sdpa_attention_forward(
     from transformers.integrations.sdpa_attention import sdpa_attention_forward as forward
 
     chunked = _chunked(query, attention_mask, kwargs)
-    if chunked or (dense_kv if dense_kv is not None else needs_dense_kv(module, query, key)):
+    dense = dense_kv if dense_kv is not None else needs_dense_kv(module, query, key)
+    if chunked or dense or packs_query(module, query, key, value, attention_mask):
         key, value = _ungrouped(key, query.shape[1]), _ungrouped(value, query.shape[1])
         module = _Ungrouped(module)  # type: ignore[assignment]
     if not chunked:

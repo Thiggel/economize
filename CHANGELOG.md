@@ -102,6 +102,9 @@
 - The Gemma-4 assistant drafter loads on transformers 5.23, which cannot build an assistant whose layers all reuse
   cache entries (huggingface/transformers#50316), and Gemma-4 finds its context layers and KV-sharing sources from
   `is_kv_shared_layer`, since 5.23 sets `store_full_length_kv` only on the last producer of each layer type.
+- Attention taps and the SDPA guard see one query head per head on transformers 5.23, which folds the query heads of
+  a single-token grouped-query call onto the K/V heads (`pack_gqa`): the guard repeats K/V for such calls, so
+  KV eviction scores, the sparse-KV draft and watched and unwatched decoding agree bit for bit again.
 
 ## 0.4.0 (2026-11-04)
 
