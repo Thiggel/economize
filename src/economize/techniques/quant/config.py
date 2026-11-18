@@ -109,8 +109,8 @@ class QuantConfig(TechniqueConfig):
         true_sequential: GPTQ: quantize the maps that share an input together, in call order.
         blocksize: GPTQ lazy-update block.
         percdamp: GPTQ relative Hessian damping.
-        keep_zeros: GPTQ: keep exactly-zero (pruned) weights at zero (``None``: when at least 5% of a weight is
-            exactly zero; see :mod:`.gptq`).
+        keep_zeros: GPTQ and HQQ: keep exactly-zero (pruned) weights at zero (``None``: when at least 5% of a
+            weight is exactly zero; see :mod:`.gptq` and :mod:`.hqq`).
         awq_grid: AWQ: number of scale exponents and clipping ratios searched (20 in the paper).
         awq_clip: AWQ: search per-group clipping thresholds.
         hqq_iters: HQQ: maximal number of proximal steps (20 in the reference).

@@ -304,15 +304,23 @@ def test_calibrated_methods_reduce_error_on_calibration_data(tiny_factory, adapt
         assert errors["awq"][level] < errors["rtn"][level]
 
 
-@pytest.mark.parametrize("method", ["rtn", "gptq", "awq"])
-def test_quantization_keeps_the_pruning_mask(tiny2, adapter_of, calib, method: str) -> None:
+@pytest.mark.parametrize(
+    "config",
+    [
+        *(QuantConfig(format="int4", method=m, group_size=32, backend="fake") for m in ("rtn", "gptq", "awq", "hqq")),
+        QuantConfig(format="int8", method="smoothquant", group_size=None, symmetric=True, activations="int8",
+                    backend="fake"),
+    ],
+    ids=lambda config: config.method,
+)
+def test_quantization_keeps_the_pruning_mask(tiny2, adapter_of, calib, config: QuantConfig) -> None:
+    """Every method keeps pruned weights at exactly zero (HQQ's float zero points needed ``keep_zeros``)."""
     from economize.techniques.prune import PruneConfig, prune_model
 
     adapter = adapter_of(tiny2)
     prune_model(adapter, PruneConfig(method="wanda", sparsity=0.5, semi_structured=False), token_batches(calib))
     zeros = {name: p == 0 for name, p in tiny2.named_parameters() if p.dim() == 2 and "layers" in name}
-    quantize_model(adapter, QuantConfig(format="int4", method=method, group_size=32, backend="fake"),
-                   token_batches(calib))
+    quantize_model(adapter, config, token_batches(calib))
     for name, p in tiny2.named_parameters():
         if name in zeros:
             assert (p[zeros[name]] == 0).all(), name
