@@ -179,7 +179,8 @@ def awq_scale_groups(adapter: ArchAdapter) -> tuple[ScaleGroup, ...] | None:
 class AWQMethod(QuantMethod):
     """AWQ (Lin et al., MLSys 2024): activation-aware scales and clipping, then round to nearest.
 
-    Calibrated on the original model's activations, as in the reference.
+    Calibrated on the original model's activations, as in the reference. Integer grids fit fp16 weights in fp16
+    arithmetic (:meth:`.QuantGrid.in_dtype`) during the search and the final rounding, as the reference does.
     """
 
     propagate = "original"
@@ -205,4 +206,5 @@ class AWQMethod(QuantMethod):
             clip=config.awq_clip,
             offload=config.offload,
         )
+        grid = grid.in_dtype(next(iter(modules.values())).weight.dtype)  # as in awq_scale_layer
         return RTNMethod().quantize_layer(modules, None, grid, config, adapter)

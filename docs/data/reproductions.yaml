@@ -9,7 +9,7 @@ studies:
     title: 4-bit weight quantization of Llama-2-7B
     technique: quant
     model: meta-llama/Llama-2-7b-hf (fp16)
-    hardware: NVIDIA A100-SXM4-40GB
+    hardware: NVIDIA A100-SXM4-40GB (AWQ row NVIDIA RTX A6000)
     metric: WikiText-2 test perplexity, 2048-token windows
     better: lower
     paper:
@@ -17,8 +17,8 @@ studies:
       arxiv: "2306.00978"
       baseline: 5.47
     economize:
-      version: 0.2.0 (calibration seed 0), 0.3.1 (calibration seeds 1 and 2)
-      date: 2026-10-09 (seed 0), 2026-10-12 (seeds 1 and 2)
+      version: 0.2.0 (calibration seed 0), 0.3.1 (calibration seeds 1 and 2), 0.5.0 (AWQ row, seeds 0 to 2)
+      date: 2026-10-09 (seed 0), 2026-10-12 (seeds 1 and 2), 2026-11-18 (AWQ row)
       baseline: 5.472
     command: effeval repro run B1
     result: data/results/B1.json
@@ -42,13 +42,13 @@ studies:
           QuantConfig(format="int4", method="awq", group_size=128, symmetric=False, awq_grid=20, awq_clip=True,
           backend="fake")
         paper: 5.60
-        economize: {mean: 5.609, std: 0.003, seeds: 3}
+        economize: {mean: 5.606, std: 0.005, seeds: 3}
 
   - id: awq-int3-llama-2-7b
     title: 3-bit weight quantization of Llama-2-7B
     technique: quant
     model: meta-llama/Llama-2-7b-hf (fp16)
-    hardware: NVIDIA A100-SXM4-40GB
+    hardware: NVIDIA A100-SXM4-40GB (AWQ row NVIDIA RTX A6000)
     metric: WikiText-2 test perplexity, 2048-token windows
     better: lower
     paper:
@@ -56,14 +56,15 @@ studies:
       arxiv: "2306.00978"
       baseline: 5.47
     economize:
-      version: 0.2.0 (calibration seed 0), 0.3.1 (calibration seeds 1 and 2)
-      date: 2026-10-09 (seed 0), 2026-10-12 (seeds 1 and 2)
+      version: 0.2.0 (calibration seed 0), 0.3.1 (calibration seeds 1 and 2), 0.5.0 (AWQ row, seeds 0 to 2)
+      date: 2026-10-09 (seed 0), 2026-10-12 (seeds 1 and 2), 2026-11-18 (AWQ row)
       baseline: 5.472
     command: effeval repro run B2
     result: data/results/B2.json
     note: >-
-      Same setup as the 4-bit study. The authors' code (llm-awq) gives 6.25 for AWQ INT3 on the same weights, so the
-      remaining gap of AWQ lies in economize's scale search or calibration sample.
+      Same setup as the 4-bit study. The authors' code (llm-awq) gives 6.25 for AWQ INT3 on the same weights. AWQ
+      rounds in the precision of the weights as llm-awq does (fp16 for this model); with float32 rounding economize 0.4
+      measured 6.31.
     rows:
       - setting: RTN, INT3, group size 128
         config: QuantConfig(format="int3", method="rtn", group_size=128, symmetric=False, backend="fake")
@@ -80,7 +81,7 @@ studies:
           QuantConfig(format="int3", method="awq", group_size=128, symmetric=False, awq_grid=20, awq_clip=True,
           backend="fake")
         paper: 6.24
-        economize: {mean: 6.309, std: 0.018, seeds: 3}
+        economize: {mean: 6.239, std: 0.011, seeds: 3}
 
   - id: wanda-llama-7b
     title: Unstructured and 2:4 pruning of LLaMA-7B

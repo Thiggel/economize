@@ -30,7 +30,7 @@ from economize.techniques.quant import (
     quantized_copy,
     restore_draft,
 )
-from economize.techniques.quant.awq import ScaleGroup, derive_scale_groups
+from economize.techniques.quant.awq import ScaleGroup, apply_clip, derive_scale_groups
 from economize.techniques.quant.methods import awq_scale_groups
 
 requires_weights_contract = pytest.mark.skipif(
@@ -172,6 +172,63 @@ def test_awq_clip_thresholds_never_increase_the_group_error(correlated_inputs) -
     limit = thresholds.repeat_interleave(size, dim=1)
     clipped = torch.maximum(torch.minimum(weight, limit), -limit)
     assert (group_error(clipped) <= group_error(weight) * (1 + 1e-5)).all()
+
+
+def _llm_awq_pseudo_quantize(w: torch.Tensor, bits: int, group: int) -> torch.Tensor:
+    """llm-awq's ``pseudo_quantize_tensor`` (zero point, groups), in the weight dtype, with the range widened to 0."""
+    g = w.reshape(-1, group)
+    zero_ = torch.zeros((), dtype=w.dtype)
+    max_val = torch.maximum(g.amax(1, keepdim=True), zero_)
+    min_val = torch.minimum(g.amin(1, keepdim=True), zero_)
+    max_int = 2**bits - 1
+    scales = (max_val - min_val).clamp(min=1e-5) / max_int
+    zeros = (-torch.round(min_val / scales)).clamp(0, max_int)
+    return ((torch.clamp(torch.round(g / scales) + zeros, 0, max_int) - zeros) * scales).reshape(w.shape)
+
+
+def test_fp16_arithmetic_matches_llm_awq_including_clipped_groups() -> None:
+    gen = torch.Generator().manual_seed(0)
+    w = (torch.randn(64, 256, generator=gen) * 0.02).half()
+    t = w.abs().amax(1, keepdim=True) * 0.75
+    w[:32] = torch.maximum(torch.minimum(w[:32], t[:32]), -t[:32])  # clipped rows span [-t, t]: zero point on a tie
+    grid = make_grid("int3", False)
+    assert grid.in_dtype(torch.bfloat16) is grid and grid.in_dtype(torch.float32) is grid
+    fp16 = grid.in_dtype(torch.float16)
+    reference = _llm_awq_pseudo_quantize(w, 3, 128)
+    torch.testing.assert_close(quantize_rtn(w, fp16, 128).dequantize(torch.float16), reference, atol=0, rtol=0)
+    # float32 arithmetic decides some of the ties the other way
+    assert not torch.equal(quantize_rtn(w, grid, 128).dequantize(torch.float16), reference)
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+def test_awq_clip_search_scores_the_weight_that_apply_clip_writes(correlated_inputs, dtype: torch.dtype) -> None:
+    """In a 16-bit model the chosen threshold is the best candidate for the clipped weight as stored.
+
+    A clipped group spans ``[-t, t]``, so its zero point ``t / ((2 t) / 7)`` lies on the rounding tie 3.5. A threshold
+    scored in float32 and stored in 16 bits lands on the other side of that tie in about half of the groups, and the
+    stored grid is then the mirror image of the scored one.
+    """
+    out_features, size, n_grid = 64, 128, 20
+    weight = (torch.randn(out_features, 2 * size, generator=torch.Generator().manual_seed(0)) * 0.02).to(dtype)
+    inputs = correlated_inputs(2 * size, count=512)
+    grid = make_grid("int3")
+    thresholds = awq_clip_thresholds(weight, inputs, grid, size, n_grid=n_grid)
+    assert torch.equal(thresholds, thresholds.to(dtype).float())
+
+    def stored_error(limit: torch.Tensor) -> torch.Tensor:  # per (row, group), for the weight apply_clip writes
+        linear = nn.Linear(2 * size, out_features, bias=False).to(dtype)
+        linear.weight.data.copy_(weight)
+        apply_clip(linear, limit)
+        q = quantize_rtn(linear.weight.data, grid, size).dequantize()
+        x = inputs.reshape(inputs.shape[0], -1, size)
+        diff = torch.einsum("tgk,ogk->otg", x, (q - weight.float()).reshape(out_features, -1, size))
+        return diff.pow(2).mean(1)
+
+    group_max = weight.float().abs().reshape(out_features, -1, size).amax(-1)
+    chosen = stored_error(thresholds)
+    for i_s in range(n_grid // 2):
+        candidate = (group_max * (1 - i_s / n_grid)).to(dtype).float()
+        assert (chosen <= stored_error(candidate) * (1 + 1e-5)).all(), i_s
 
 
 # ---- whole models --------------------------------------------------------------------------------------------------

@@ -359,7 +359,8 @@ def search_scale(
         scales = x_mean.pow(ratio).clamp(min=1e-4).view(-1)
         scales = scales / (scales.max() * scales.min()).sqrt()
         for fc in linears:
-            scaled = fc.weight.data.float() * scales.view(1, -1)
+            # rounded to the weight dtype as apply_scale stores it, so the search scores the weight it applies
+            scaled = (fc.weight.data.float() * scales.view(1, -1)).to(fc.weight.dtype)
             fc.weight.data.copy_((_fake(scaled, grid, group_size).float() / scales.view(1, -1)).to(fc.weight.dtype))
         error = sum(float((o - ref.to(o.device)).pow(2).sum()) for o, ref in zip(run(), reference)) / numel
         if error < best_error:
@@ -410,6 +411,11 @@ def awq_clip_thresholds(
 ) -> Tensor:
     """Per-group clipping thresholds ``[out, groups]`` (llm-awq ``auto_clip_layer``).
 
+    Each candidate threshold is rounded to the weight dtype before it is scored, because :func:`apply_clip` stores
+    the clipped weight in that dtype. Without the rounding, a clipped group spans ``[-t, t]`` in fp32 but a slightly
+    different range once stored, so the search can pick a threshold whose stored grid differs from the one it scored
+    (at INT3 the zero point lands on a rounding tie, which mirrors the grid).
+
     Args:
         weight: ``[out, in]`` weight (already scaled).
         inputs: ``[tokens, in]`` inputs of the linear map (already divided by the scales).
@@ -430,7 +436,8 @@ def awq_clip_thresholds(
         min_errs = torch.full_like(org_max, math.inf)
         org_out = torch.einsum("tgk,ogk->otg", x, wb)
         for i_s in range(int(max_shrink * n_grid)):
-            max_val = org_max * (1 - i_s / n_grid)
+            # rounded to the weight dtype as apply_clip stores the clipped weight (see the docstring)
+            max_val = (org_max * (1 - i_s / n_grid)).to(weight.dtype).float()
             clipped = torch.maximum(torch.minimum(wb, max_val), -max_val)
             q = grid.fake(clipped.reshape(-1, size)).reshape(clipped.shape)
             err = (torch.einsum("tgk,ogk->otg", x, q) - org_out).pow(2).mean(1).unsqueeze(-1)
@@ -471,6 +478,7 @@ def awq_scale_layer(
     """
     if groups is None:
         groups = derive_scale_groups(step)
+    grid = grid.in_dtype(next(iter(targets.values())).weight.dtype)  # llm-awq quantizes in the weight dtype
     layer = step.layer
     linears = {name: m for name, m in layer.named_modules() if isinstance(m, nn.Linear)}
     caches = {name: InputCache(m, offload) for name, m in linears.items()}
