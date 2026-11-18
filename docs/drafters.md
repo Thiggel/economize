@@ -84,7 +84,7 @@ Deviations and limits:
   the model's dtype). This keeps the draft distribution stable and matches the reference test.
 - Rotary embeddings: by default the draft layer uses the model's rotary table and therefore the model's head
   width. `rope_theta` gives it a plain table of its own, which official checkpoints with a different head width need.
-- `zero_source_first=True` also writes a draft entry for position 0 with a zero source, as the research code does.
+- `zero_source_first=True` also writes a draft entry for position 0 with a zero source.
   EAGLE-3 itself starts at the second token. The default follows EAGLE-3.
 - The dynamic draft tree of EAGLE-2/3 is the draft policy `dynamic_tree` (see [Dynamic draft trees](dynamic_tree.md)),
   which also serves the early exit and FR-Spec drafters.
@@ -117,8 +117,8 @@ trees and works with any drafter, and with a greedy selector it accepts exactly 
 ## Early exit and LayerSkip (`early_exit`)
 
 Draft steps run the first `exit_layer` layers and exit through the model's own head (`head="shared"`, LayerSkip
-[@elhoushi2024layerskip]) or a trained readout adapter (`head="readout"`, as in the research code that preceded
-economize and in Kangaroo's adapter). The draft path can be frozen, carry LoRA updates or own trainable copies of layers `1..r`.
+[@elhoushi2024layerskip]) or a trained readout adapter (`head="readout"`, as in Kangaroo's
+adapter). The draft path can be frozen, carry LoRA updates or own trainable copies of layers `1..r`.
 LayerSkip reuses the draft path's K/V of layers `1..r` in the verification pass. economize instead recomputes every
 drafted position with the full model in the next exact pass, so no cache is shared between draft and exact path;
 this costs `r` layers per drafted token and keeps verification independent of the drafter. The base-model
@@ -285,7 +285,7 @@ Deviations and limits:
 - No training: the inner drafter is trained before wrapping (its parameters are saved under `inner.`).
 - Combined with prompt lookup, put FR-Spec inside the hybrid's fallback (`HybridConfig(fallback=FRSpecConfig(...))`)
   so that lookup drafts keep their full vocabulary. Wrapping a hybrid restricts the copied tokens too.
-- Ties among frequencies are broken by the smaller id, as in the research code that preceded economize.
+- Ties among frequencies are broken by the smaller id.
 - The frequencies are counted on the calibration data passed to `economize.apply` (or given as `token_ids`). The
   paper counts them on SlimPajama-627B; results depend on that corpus.
 

@@ -607,9 +607,3 @@ bytes in memory-bound decoding) at a possibly lower acceptance rate.
 * The functional cores are pure functions of `(adapter, config, batches)`; a new method is one registered class in
   `PRUNE_METHODS`, `DEPTH_CRITERIA`, `FACTORIZERS`, `QUANT_FORMATS`, `QUANT_METHODS`, `QUANT_BACKENDS`,
   `AWQ_SCALE_GROUPS`, `TEAL_BACKENDS` or `MLP_SPARSITY_BACKENDS`; family facts (AWQ's layer layout) are set on the family's `ArchAdapter`.
-
-## Tests
-
-`tests/techniques/test_{prune,lowrank,quant,sparsity,mlp_sparsity}.py` run on a tiny random Qwen2 in fp32 on the CPU (under one
-minute in total). Optional backends skip cleanly: the torchao tests need `torchao`, and the semi-structured and
-int4 tinygemm tests need a CUDA GPU with compute capability 8.0 or newer.

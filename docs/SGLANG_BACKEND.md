@@ -121,37 +121,3 @@ package; `serving/unsupported.py` holds the not-yet-served techniques as data. A
   parallel drafters (PARD, Hidden Transfer) cannot be added without patching SGLang.
 * No Medusa-style proposer for heads on the target's last state (Medusa, Hydra, ReDrafter).
 * No plugin point for custom linear methods (TEAL, factored low-rank maps) or KV layouts (KIVI, eviction).
-
-## Tests
-
-`tests/integrations/test_sglang_serving.py` (CPU, no SGLang needed): the support table, import isolation, every
-refusal, the plan's server arguments and launch arguments, the early-exit export (aux ids, layer copies), the merging of LoRA
-updates into the drafter's layer copies, EAGLE-3, n-gram, standalone, fp8 KV, fake quantization next to a plugin drafter,
-and the open-closed override.
-
-`tests/integrations/test_sglang_serving_gpu.py` (`pytest -m gpu`, SGLang 0.5.21 and a CUDA device) runs every recipe
-of `tests/integrations/sglang_serving_driver.py` in its own process and decodes 8 prompts greedily for 64 tokens with
-CUDA graphs on. SGLang's kernels (RMSNorm, rotary embedding, sampling) take only float16 and bfloat16, so the
-lossless drafters run in bfloat16 against plain SGLang in bfloat16. A verification pass and a one-token step round
-differently, so a prompt may part at a near tie (top log-probabilities within 0.25, two bfloat16 steps of
-Qwen2.5-0.5B's logits) and is compared no further; any other difference fails. The fp8 KV cache must give
-the first token of plain bfloat16 and agree with it on a prefix.
-
-Results on Qwen2.5-0.5B (one L40, `n = 3`): every drafter is lossless up to near ties, and
-every parted prompt parted at a gap of one bfloat16 step (0.125) or an exact tie.
-
-| recipe | parted prompts (of 8) | mean agreement with plain | mean accept length |
-|---|---|---|---|
-| early exit (r=20, untrained adapter) | 3 | 0.79 | 1.58 |
-| EAGLE-3 (perturbed untrained head) | 5 | 0.60 | 1.02 |
-| n-gram | 4 | 0.69 | 1.32 |
-| standalone draft model (the target itself) | 5 | 0.66 | 3.47 |
-| fp8 KV cache | n/a | 0.23 | n/a |
-
-The untrained drafters are accepted about once per hundred drafts, the expected rate; the standalone draft model,
-which is the target, reaches 3.47 of 4 tokens per step, which checks the acceptance path. The plugin draft model's
-decoder layers are SGLang's Qwen2, Qwen3, Llama and Mistral layers; Gemma-4 targets are refused with that reason.
-
-Running the GPU tests needs a `CUDA_HOME` with `lib64/libcudart.so`: SGLang's JIT kernels link `-lcudart`, and the
-`nvidia-cuda-runtime` cu13 wheel installs only `lib/libcudart.so.13`. A directory with `bin`, `include` and
-`lib64/libcudart.so` linked to the wheel's files is enough.

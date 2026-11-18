@@ -325,19 +325,3 @@ is a chain (the paper uses tree attention), only the variant without an attentio
 implemented, and the maps start at the identity. `train_context="teacher"` is the paper's training (each pseudo state
 sees the real states before it); `"draft"` trains on the decode-time layout, where later steps see the earlier pseudo
 states.
-
-## Tests
-
-`tests/techniques/test_depth_policies.py`, `test_depth_objectives.py`, `test_kv_quant.py`, `test_kv_evict.py`,
-`test_duo_attention.py`, `test_quest.py` and `test_minference.py` check, on tiny models in fp32: the trivial setting of every technique equals the base exactly (logits and greedy
-tokens); each mechanism changes the output and saves compute or memory; composition with a drafter (batch
-and single prompt, rollback of rejected drafts), with pruning and low-rank factorization, and of depth with KV
-techniques; and the layer and byte counts of the cost summaries. `test_depth_free_dmtd_ht.py` covers the three
-drafting-cycle methods: greedy equality at FREE's threshold 1, Hidden Transfer's lossless verification, DMTD's PLT, the
-Beta-mixture threshold, the KD layer maps and the training objectives. The objective tests check that only technique
-parameters train and that each objective refuses a model without its technique.
-
-## Deferred
-
-Combining several `DEPTH` techniques, per-token layer counts in the core `CostLog`, and a native compressed-KV kernel path
-are filed as requests in `ARCHITECTURE.md`.

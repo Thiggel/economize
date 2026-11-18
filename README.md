@@ -60,7 +60,8 @@ out = model.generate(ids, max_new_tokens=128)
 print(tokenizer.decode(out[0]))
 ```
 
-Several techniques combine in one call. Techniques that need calibration data receive it through `calibration`:
+Several techniques combine in one call. Techniques that need calibration data receive it through `calibration`.
+The int4 kernels come with `pip install "economize[quant]"`:
 
 ```python
 from economize.techniques.eagle3 import Eagle3Config
@@ -68,6 +69,7 @@ from economize.techniques.kv_quant import FP8KVConfig
 from economize.techniques.prune import DepthPruneConfig
 from economize.techniques.quant import DraftQuantConfig, QuantConfig
 
+calibration_ids = ids.repeat(4, 1)  # a LongTensor [N, S], an iterable of batches or a callable; use real text in practice
 model = economize.apply(
     base,
     DepthPruneConfig(method="shortgpt", num_blocks=4),          # four decoder layers removed
@@ -75,7 +77,7 @@ model = economize.apply(
     FP8KVConfig(),                                              # an fp8 KV cache
     Eagle3Config(),                                             # a drafter, trained with economize.train.fit
     DraftQuantConfig(format="int8"),                            # int8 weights for the drafter
-    calibration=calibration_ids,  # a LongTensor [N, S], an iterable of batches or a callable
+    calibration=calibration_ids,
 )
 ```
 
@@ -86,8 +88,8 @@ serving, a tutorial for every technique and how to extend the library.
 
 | Family | Techniques |
 |---|---|
-| Drafters for speculative decoding | EAGLE-1/2, EAGLE-3, HASS, Medusa, Hydra, ReDrafter, DFlash, early exit and LayerSkip, Kangaroo, layer skipping (SWIFT), KnapSpec, separate draft models (also on another GPU), PARD, the Gemma-4 MTP assistant, prompt lookup, Lookahead, REST, SuffixDecoding, FR-Spec, MTP heads of DeepSeek-V3, GLM-4.5, MiMo and Qwen3.5, MagicDec and TriForce for long contexts |
-| Dynamic depth | CALM, GateSkip, Mixture-of-Depths, FlexiDepth, SkipDecode, LoRA-Drop, FREE, DMTD, Hidden Transfer |
+| Drafters for speculative decoding | EAGLE-1/2, EAGLE-3, HASS, Medusa, Hydra, ReDrafter, DFlash, early exit and LayerSkip, Kangaroo, layer skipping (SWIFT), KnapSpec, FREE, DMTD, Hidden Transfer, separate draft models (also on another GPU), PARD, the Gemma-4 MTP assistant, prompt lookup, Lookahead, REST, SuffixDecoding, FR-Spec, MTP heads of DeepSeek-V3, GLM-4.5, MiMo and Qwen3.5, MagicDec and TriForce for long contexts |
+| Dynamic depth | CALM, GateSkip, Mixture-of-Depths, FlexiDepth, SkipDecode, LoRA-Drop |
 | Weights and activations | ShortGPT and SLEB, magnitude, Wanda and SparseGPT pruning with 2:4 sparsity, SliceGPT, FLAP width pruning, SVD-LLM, LittleBit, RTN, GPTQ and AWQ to int2-int8 or fp8 with Marlin, Machete, torchao or compressed-tensors kernels, rotations, draft-only quantization, TEAL, CATS and DejaVu activation sparsity |
 | KV cache and attention | KIVI, FP8 KV cache, StreamingLLM, H2O and SnapKV eviction, DuoAttention, with fused attention kernels, Quest sparse decoding attention, MInference sparse prefill |
 
@@ -119,7 +121,7 @@ with the published speedups of other checkpoints.
 
 ## Limitations
 
-Version 0.4 does not yet support dynamic draft trees or speculative speculative decoding on models with recurrent
+economize does not yet support dynamic draft trees or speculative speculative decoding on models with recurrent
 layers, trainable hook-based splits on tensor-parallel models (frozen ones are supported), or speculative
 speculative decoding on tensor-parallel models. Some techniques cannot yet be exported to vLLM, in which case the
 export raises an error that states the reason.
@@ -146,7 +148,7 @@ If you use economize in your research, please cite it:
   title   = {economize: Composable Efficiency Techniques for Hugging Face Language Models},
   year    = {2026},
   url     = {https://github.com/Thiggel/economize},
-  version = {0.4.0}
+  version = {0.5.0}
 }
 ```
 
@@ -154,4 +156,4 @@ Please also cite the papers of the techniques you use.
 
 ## License
 
-economize is released under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+economize is released under the Apache License 2.0. See [LICENSE](https://github.com/Thiggel/economize/blob/main/LICENSE) for details.

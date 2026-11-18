@@ -7,7 +7,8 @@ hide:
 
 The drafters below were trained with economize and are published on the Hugging Face Hub. Each repository holds
 only the drafter's weights and the decoding settings that were fastest in the measurement below. The base model is
-loaded from its own repository. The Hub collection [economize drafters](https://huggingface.co/collections/flaitenberger/economize-drafters-6aeb7d0f6cae8de3208fd3e7) gathers all of them.
+loaded from its own repository. The Hub collection [economize drafters](https://huggingface.co/collections/flaitenberger/economize-drafters-6aeb7d0f6cae8de3208fd3e7) gathers all of them. The name of the Llama
+drafter begins with "Llama", as the Llama 3.1 license requires of derived models.
 
 ## Checkpoints
 
@@ -106,7 +107,7 @@ drafter for another model.
 ## Measurement
 
 The speedups are decoding throughput relative to plain greedy decoding of the base model in the same runtime,
-measured with economize 0.3.2 on one NVIDIA H100 (two for Qwen3.5-35B-A3B, with the base model split across both)
+measured with economize 0.3.2 (0.4.0 for Llama-3.1-8B-Instruct, Qwen3.5-35B-A3B and gemma-4-26B-A4B-it) on one NVIDIA H100 (two for Qwen3.5-35B-A3B, with the base model split across both)
 in bf16 with CUDA graphs at batch size 1, from one timing run per checkpoint. The prompts are 8 each from Spec-Bench, MT-Bench, AlpacaEval and Arena-Hard (chat), HumanEval, MBPP and
 LiveCodeBench (code), GSM8K, MATH-500, AIME 2024/2025 and AMC 2023 (math), CNN/DailyMail (summarization) and
 LongBench (long context), with up to 256 new tokens. The last column is the mean number of tokens accepted per

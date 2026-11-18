@@ -24,7 +24,9 @@ installs all of them except the serving engines (vLLM, SGLang, Arctic Inference)
 | `llama-cpp` | llama-cpp-python | loading a GGUF export in llama.cpp |
 | `vllm`, `sglang` | vllm, sglang | serving backends |
 | `docs` | mkdocs-material, mkdocstrings | building this site |
-| `test` | pytest | the test suite |
+| `arctic` | vllm, arctic-inference | Arctic Inference speculators under vLLM |
+| `all` | every extra above except the serving engines and llama-cpp | |
+| `test`, `dev` | pytest; also ruff and mypy | the test suite and the contributor checks |
 
 To install from source:
 
@@ -81,7 +83,7 @@ calibration = ids.repeat(4, 1)
 model = economize.apply(
     base,
     DepthPruneConfig(method="shortgpt", num_blocks=2),  # two decoder layers removed
-    TealConfig(sparsity=0.4),                           # activation sparsity
+    TealConfig(sparsity=0.4),                           # activation sparsity (CUDA only; leave out on a CPU)
     FP8KVConfig(),                                      # an fp8 KV cache
     Eagle3Config(),                                     # a drafter
     calibration=calibration,

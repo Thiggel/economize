@@ -8,7 +8,8 @@ the same runtime. The [model zoo](model_zoo.md) lists the speedups of the drafte
 The model is Qwen2.5-0.5B in bf16 on one NVIDIA A40 with CUDA graphs. The learned
 drafters are trained for 12000 steps on the same 64M tokens of the model's own answers to task prompts, all with a
 draft vocabulary of 32768 tokens and a tuned confidence threshold. Values are the mean and standard deviation over
-three training seeds, measured with the reference implementation that the oracle tests compare economize against.
+three training seeds. They were measured with the research code from which economize was extracted, which is not
+published; the oracle tests check that economize produces the same logits.
 
 | Drafter | Greedy: Spec-Bench | HumanEval | GSM8K | T = 0.7: Spec-Bench | HumanEval | GSM8K |
 |---|---|---|---|---|---|---|
@@ -20,7 +21,9 @@ three training seeds, measured with the reference implementation that the oracle
 ## Published checkpoints decoded by economize
 
 Each checkpoint was timed once on one NVIDIA A100. The published speedups were
-measured on other hardware.
+measured on other hardware. The 2.82x of the EAGLE-3 head of Llama-3.1-8B-Instruct is above the 1.74x of the
+[model zoo](model_zoo.md)'s head for the same model, which was measured on an H100 (where plain decoding is faster) over
+a broader prompt mix and trained on less data.
 
 | Technique | Model and checkpoint | Benchmark | economize | Published |
 |---|---|---|---|---|

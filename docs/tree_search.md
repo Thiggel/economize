@@ -106,12 +106,3 @@ Every draft forward is one `draft` event in the row's `CostLog`. Sequoia records
 the step of depth `d` with the number of depth-`d` nodes that have children. SpecExec records the root step with
 `tokens=1` and every search step with `tokens=width`. The verify pass is one `exact` event of `total_tokens + 1`
 tokens.
-
-## Tests and oracles
-
-`tests/unit/test_tree_policies.py` checks that both policies reproduce HF greedy output exactly in fp32 for every
-tree-capable drafter, any tree shape and any search budget. It also checks the Sequoia dynamic program against a
-brute force over all small trees, against a Monte Carlo estimate of the expected tokens, and against the DP loop of the
-official code (Infini-AI-Lab/Sequoia `tree_search.py`) on the acceptance vector shipped with that repository, for all
-sizes up to 33 nodes and depths up to 7 levels (equal to `1e-12`). SpecExec is checked against a pure-Python
-best-first search on a table drafter.

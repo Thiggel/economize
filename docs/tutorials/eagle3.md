@@ -111,7 +111,7 @@ sampled = model.generate(ids, max_new_tokens=64, do_sample=True, temperature=0.7
 
 ## Combining with other techniques
 
-EAGLE-3 composes with every technique that is not itself a drafter. Weight transforms run first, so a quantized
+EAGLE-3 composes with most techniques that are not themselves drafters (`economize.compatible` tells which). Weight transforms run first, so a quantized
 model is drafted for as it is served:
 
 ```python

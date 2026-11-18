@@ -108,7 +108,7 @@ nav:
       - Serving with vLLM: VLLM_BACKEND.md
       - Serving with SGLang: SGLANG_BACKEND.md
       - Exports to other runtimes: exports.md
-      - Examples: examples.md
+      - Recipes: examples.md
       - Scripts: scripts.md
   - Tutorials:
       - Overview: tutorials/index.md
