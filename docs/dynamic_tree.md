@@ -11,7 +11,7 @@ from economize.techniques.eagle3 import Eagle3Config
 
 model = economize.apply(base, Eagle3Config())
 decoding = DecodeConfig(cycle_length=7, draft_policy="dynamic_tree",
-                        draft_policy_options={"depth": 6, "topk": 8, "total_tokens": 60}, cuda_graphs=True)
+                        draft_policy_options={"depth": 6, "topk": 10, "total_tokens": 60}, cuda_graphs=True)
 out = model.decode(prompt_ids, 256, decoding=decoding)
 ```
 
@@ -39,8 +39,12 @@ chain drafter does (`tests/unit/test_dynamic_tree.py::test_a_tree_of_width_one_d
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `depth` | `cycle_length - 1` | Draft steps per cycle, and so the longest path the tree can accept. |
-| `topk` | 8 | Width of every draft step, and children per expanded node. |
-| `total_tokens` | 60 | Nodes of the verified tree. At most `k + (D-1) k^2`. |
+| `topk` | 10 | Width of every draft step, and children per expanded node. |
+| `total_tokens` | 60, or `k + (D-1) k^2` when smaller | Nodes of the verified tree. At most `k + (D-1) k^2`. |
+
+The defaults of `topk` and `total_tokens` are those of the EAGLE-2 reference code (`top_k=10`, `total_token=60`).
+Releases up to 0.5.0 defaulted to `topk=8`; pass `{"topk": 8}` to reproduce them. With `cycle_length=2` the tree has
+one level of `topk` candidates and all of them are verified.
 
 Unknown options, non-positive values and a `total_tokens` above the number of candidates raise `ConfigError`. The
 options enter the hash of `DecodeConfig`, so two trees of different shape never share a decoder or its CUDA graphs.
