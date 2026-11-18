@@ -123,3 +123,25 @@ def test_torchao_install_hint_names_an_extra_that_installs_torchao(monkeypatch) 
     pyproject = read_pyproject()
     requirements = pyproject["project"]["optional-dependencies"][extra]
     assert any(r.startswith("torchao") for r in requirements)
+
+
+def test_damped_inverse_cholesky_escalates_damping_on_a_singular_hessian() -> None:
+    """A rank-deficient Hessian with ``percdamp=0`` is not positive definite: the factorization retries with more
+    damping and warns, and the reference path (positive definite at the requested damping) stays bit-identical."""
+    from economize.techniques._weights.hessian import damped_inverse_cholesky
+
+    gen = torch.Generator().manual_seed(0)
+    x = torch.randn(16, 3, generator=gen)
+    singular = x @ x.T  # rank 3 of 16
+    with pytest.warns(RuntimeWarning, match="percdamp=0.1"):
+        upper = damped_inverse_cholesky(singular.clone(), 0.0)
+    assert torch.isfinite(upper).all() and torch.equal(upper, upper.triu())
+
+    full = singular + torch.eye(16)
+    reference = full.clone()
+    reference[range(16), range(16)] += 0.01 * torch.mean(torch.diag(reference))
+    expected = torch.linalg.cholesky(torch.cholesky_inverse(torch.linalg.cholesky(reference)), upper=True)
+    assert torch.equal(damped_inverse_cholesky(full.clone(), 0.01), expected)
+
+    with pytest.raises(torch.linalg.LinAlgError, match="not positive definite"):
+        damped_inverse_cholesky(-torch.eye(4), 0.01)

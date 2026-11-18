@@ -355,3 +355,15 @@ def test_lowrank_technique(tiny2, tiny_factory, adapter_of, calib, attach_contex
     data_free = LowRankTechnique(LowRankConfig(method="svd", compression=0.2), other)
     data_free.attach(model, other, None)
     assert data_free.summary["method"] == "svd"
+
+
+def test_pruning_before_the_factorization_warns(calib) -> None:
+    import economize
+    from economize.techniques.prune import PruneConfig
+    from helpers import make_tiny_model
+
+    with pytest.warns(UserWarning, match="the factors are dense"):
+        economize.apply(
+            make_tiny_model(), PruneConfig(method="magnitude", sparsity=0.5, semi_structured=False),
+            LowRankConfig(method="svd", compression=0.3), calibration=calib,
+        )

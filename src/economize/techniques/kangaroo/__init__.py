@@ -2,14 +2,13 @@
 one-layer attention adapter and the model's LM head, with a double early exit.
 
     import economize
-    from economize import DecodeConfig
     from economize.techniques.kangaroo import KangarooConfig
 
-    model = economize.apply(hf_model, KangarooConfig(exit_layer=2),
-                            decoding=DecodeConfig(cycle_length=7, min_confidence=0.6))
+    model = economize.apply(hf_model, KangarooConfig(exit_layer=2))  # DecodeConfig(cycle_length=7, min_confidence=0.6)
     economize.train.fit(model, data, "step_distill", steps=...)  # trains the adapter only
 
-The second exit (stop drafting once the top-1 probability falls below 0.6) is the decoder's dynamic draft length.
+The second exit (stop drafting once the top-1 probability falls below ``KangarooConfig.stop_threshold``, 0.6) is the
+decoder's dynamic draft length, and the default decoding of a model with Kangaroo.
 """
 
 from __future__ import annotations

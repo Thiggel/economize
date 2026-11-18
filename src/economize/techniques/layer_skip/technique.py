@@ -35,6 +35,10 @@ class LayerSkipTechnique(Technique):
     norm and head. Skipped layers write no K/V; the next exact pass recomputes every drafted position with all layers.
     The technique adds no parameters. Its buffer ``skip_mask`` (``[L + 1]``, index 0 unused) holds the skip set, so a
     searched set is saved and restored with the technique.
+
+    It is a static stand-in: SWIFT's online search, CLaSp's per-cycle dynamic programme and Draft & Verify's
+    Bayesian optimization are not implemented, so its results are not reproductions of those papers. Meta's
+    LayerSkip (early exit with a layer-dropout training recipe) is the ``early_exit`` technique, not this one.
     """
 
     name = LayerSkipConfig.technique

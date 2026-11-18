@@ -331,7 +331,9 @@ def apply(
         model: The base model (a ``transformers`` causal LM, or a PEFT model wrapping one). Only weight-transforming
             techniques modify its weights, in place.
         configs: One configuration per technique.
-        decoding: Default decoding options (default: cycles of 4 tokens with a drafter, plain decoding without).
+        decoding: Default decoding options (default: the drafting technique's own
+            :meth:`~economize.Technique.default_decoding`, else cycles of 4 tokens with a drafter and plain decoding
+            without).
         calibration: Calibration token batches for techniques that need data (a ``LongTensor [N, S]``, an iterable
             of ``[B, S]`` tensors, or a callable returning either).
 
@@ -359,6 +361,8 @@ def build_model(
     techniques = attach_techniques(adapter.model, adapter, configs, states=states, calibration=calibration)
     issues = [f"{t.name}: {issue}" for t in techniques if (issue := t.plain_save_issue()) is not None]
     guard_plain_save(list({id(m): m for m in (model, adapter.model)}.values()), issues)
+    if decoding is None:
+        decoding = next((d for t in techniques if (d := t.default_decoding()) is not None), None)
     if decoding is None:
         drafts = any(Capability.DRAFTER in t.capabilities for t in techniques)
         decoding = DecodeConfig(cycle_length=4 if drafts else 1)

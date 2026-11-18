@@ -2,7 +2,8 @@
 
 `draft_policy="dynamic_tree"` grows an EAGLE-2 style draft tree [@li2024eagle2] in every cycle
 and verifies it in one pass of the model. It is a draft policy, so it works with every drafter that can run one draft
-step over a set of tree nodes: EAGLE-3, the early exit / LayerSkip drafter and FR-Spec around either of them.
+step over a set of tree nodes: EAGLE-3, the early exit / LayerSkip drafter, a separate draft LM (`draft_model`) and
+FR-Spec around either of the self-drafters.
 
 ```python
 import economize
@@ -11,7 +12,7 @@ from economize.techniques.eagle3 import Eagle3Config
 
 model = economize.apply(base, Eagle3Config())
 decoding = DecodeConfig(cycle_length=7, draft_policy="dynamic_tree",
-                        draft_policy_options={"depth": 6, "topk": 8, "total_tokens": 60}, cuda_graphs=True)
+                        draft_policy_options={"depth": 6, "topk": 10, "total_tokens": 60}, cuda_graphs=True)
 out = model.decode(prompt_ids, 256, decoding=decoding)
 ```
 
@@ -39,8 +40,12 @@ chain drafter does (`tests/unit/test_dynamic_tree.py::test_a_tree_of_width_one_d
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `depth` | `cycle_length - 1` | Draft steps per cycle, and so the longest path the tree can accept. |
-| `topk` | 8 | Width of every draft step, and children per expanded node. |
-| `total_tokens` | 60 | Nodes of the verified tree. At most `k + (D-1) k^2`. |
+| `topk` | 10 | Width of every draft step, and children per expanded node. |
+| `total_tokens` | 60, or `k + (D-1) k^2` when smaller | Nodes of the verified tree. At most `k + (D-1) k^2`. |
+
+The defaults of `topk` and `total_tokens` are those of the EAGLE-2 reference code (`top_k=10`, `total_token=60`).
+Releases up to 0.5.0 defaulted to `topk=8`; pass `{"topk": 8}` to reproduce them. With `cycle_length=2` the tree has
+one level of `topk` candidates and all of them are verified.
 
 Unknown options, non-positive values and a `total_tokens` above the number of candidates raise `ConfigError` as soon as
 the options reach the model (`economize.apply(..., decoding=...)` or `model.decoding = ...`), before any decoding. The
@@ -58,13 +63,17 @@ The economize attention kernel (`attn_implementation="economize"`) takes boolean
   commits drafts without checking them.
 - The drafter implements `economize.decoding.TreeStepDrafter` (`supports_tree_steps`, `tree_begin`, `tree_state`,
   `tree_step`). Drafters that do not are rejected with `ConfigError` when the decoding options reach the model: vendor MTP heads,
-  two-model drafting and PARD, DFlash block drafting, prompt lookup, KnapSpec, and drafters that already draft static trees (Medusa, Hydra, ReDrafter). Models
+  PARD and a draft LM on a second device (`placed_draft_model`), DFlash block drafting, prompt lookup, KnapSpec, and drafters that already draft static trees (Medusa, Hydra, ReDrafter). Models
   with recurrent layers are rejected too: their recurrent layers run a tree only as whole root-to-node paths
   (static trees are verified that way), while a dynamic tree's draft steps cover one level at a time.
 - Batches: every row grows its own tree of the same shape, and rows of different lengths are supported.
 - CUDA graphs (`cuda_graphs=True`): each draft depth is captured as its own graph, since the number of ancestors
   differs per depth. The shapes are fixed per (`depth`, `topk`, `total_tokens`) and batch size. Root step and verify
   pass use the graphs they use for chains.
+
+A separate draft LM (`draft_model`) steps over the tree in its own KV cache. Its catch-up before the root step
+processes the committed tokens it has not read yet, and since a tree leaves that cache valid only up to the root,
+the accepted tokens of a cycle are read again by the next catch-up (logged as `draft_catchup`).
 
 ## Overhead
 

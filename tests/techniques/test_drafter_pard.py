@@ -75,6 +75,12 @@ def test_mask_token_comes_from_the_config_or_the_draft_lm(draft_dirs: dict[str, 
         technique.drafter(None)
 
 
+def test_a_tree_policy_refuses_the_parallel_draft(draft_dirs: dict[str, str]) -> None:
+    """The tree policies step one token at a time, so they would drop PARD's parallel draft without a word."""
+    model = economize.apply(make_family_model("gemma4_text"), PardConfig(model=draft_dirs["same"]))
+    assert not model.techniques["pard"].drafter(None).supports_tree_steps()
+
+
 # ---- the parallel draft --------------------------------------------------------------------------------------------
 def _request(seq: torch.Tensor, ends: list[int], budgets: list[int], drafter: PardDrafter) -> DraftRequest:
     config = DecodeConfig()

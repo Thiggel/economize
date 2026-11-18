@@ -163,7 +163,11 @@ def test_the_cost_log_records_every_draft_forward_and_the_tree_verify() -> None:
 def test_options_and_defaults() -> None:
     assert "dynamic_tree" in POLICIES.names()
     default = TreeOptions.from_config(DecodeConfig(cycle_length=7, draft_policy="dynamic_tree"))
-    assert (default.depth, default.topk, default.total_tokens) == (6, 8, 60)
+    assert (default.depth, default.topk, default.total_tokens) == (6, 10, 60)  # EAGLE-2's top_k and total_token
+    shallow = TreeOptions.from_config(DecodeConfig(cycle_length=2, draft_policy="dynamic_tree"))
+    assert (shallow.depth, shallow.topk, shallow.total_tokens) == (1, 10, 10)  # every candidate of one level
+    two = TreeOptions.from_config(DecodeConfig(cycle_length=3, draft_policy="dynamic_tree"))
+    assert two.total_tokens == 60
     options = TreeOptions.from_config(_tree())
     assert (options.forwarded, options.candidates) == (9, 3 + 3 * 9)
     for bad in ({"depth": 0}, {"topk": -1}, {"total_tokens": 1000}, {"width": 4}, {"depth": 2.5}):

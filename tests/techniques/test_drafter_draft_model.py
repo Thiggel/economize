@@ -132,6 +132,50 @@ def test_greedy_two_model_equals_plain_greedy(draft_dir: str, cycle_length: int)
         assert accepted / drafted > 0.15  # the truncated model agrees with the model far more often than chance
 
 
+TREE_OPTIONS = {
+    "dynamic_tree": {"depth": 4, "topk": 3, "total_tokens": 16},
+    "sequoia": {"acceptance": (0.5, 0.2, 0.1, 0.05), "total_tokens": 16, "depth": 4},
+    "specexec": {"depth": 4, "width": 4, "topk": 4, "total_tokens": 16},
+}
+
+
+def _accepted_per_cycle(results: list[economize.DecodeResult]) -> float:
+    cycles = [a for r in results for _, a in r.acceptance]
+    return sum(cycles) / len(cycles)
+
+
+@pytest.mark.parametrize("policy", sorted(TREE_OPTIONS))
+def test_a_draft_lm_drafts_trees_losslessly(draft_dir: str, policy: str) -> None:
+    """Every tree policy steps the draft LM over its frontier: greedy output, and the tree (16 nodes) accepts
+    at least as much per cycle as the chain of the same depth."""
+    base = make_tiny_model()
+    model = _model(draft_dir, base)
+    prompts, new = _prompts(), [30, 21, 26]
+    chain = model.decode_batch(prompts, new, decoding=DecodeConfig(cycle_length=5))
+    tree = model.decode_batch(prompts, new, decoding=DecodeConfig(
+        cycle_length=5, draft_policy=policy, draft_policy_options=TREE_OPTIONS[policy]))
+    for prompt, result, n in zip(prompts, tree, new):
+        assert torch.equal(result.tokens, reference_greedy(base, prompt, n))
+    assert _accepted_per_cycle(tree) >= _accepted_per_cycle(chain) > 0.5
+
+
+def test_a_tree_proposal_reads_each_committed_token_once(draft_dir: str) -> None:
+    """Over a generation, the catch-ups and the root steps of the tree proposals read the committed positions
+    ``0, 1, ...`` once each and in order; the frontier steps log one node per tree node they run."""
+    model = _model(draft_dir)
+    result = model.decode(_prompts()[0], 20, decoding=DecodeConfig(
+        cycle_length=5, draft_policy="dynamic_tree", draft_policy_options=TREE_OPTIONS["dynamic_tree"]))
+    events = [e for e in result.cost.events if e.module == "draft_model"]
+    assert all((e.first_layer, e.last_layer) == (1, DRAFT_LAYERS) for e in events)
+    read = [(e.position, e.tokens) for e in events if e.kind == CATCHUP or (e.kind == "draft" and e.step == 0)]
+    assert read[0] == (0, PROMPT_LEN)  # the prompt and the first exact token, less the root
+    position = 0
+    for start, tokens in read:
+        assert start == position
+        position += tokens
+    assert all(e.tokens == 3 for e in events if e.kind == "draft" and e.step)
+
+
 def test_the_prompt_catch_up_computes_one_row_of_logits(draft_dir: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """The catch-up over a prompt keeps one column per row before the LM head (a 4k-token prompt of a 262k
     vocabulary would otherwise allocate gigabytes of logits), and decoding stays greedy."""

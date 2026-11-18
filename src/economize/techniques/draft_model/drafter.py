@@ -11,7 +11,7 @@ from ...decoding.cost import CostKind, LayerFootprint
 from ...decoding.graphs import static_cache_class
 from ...decoding.protocols import Draft, Drafter, draft_footprint
 from ...runtime import CacheSpec
-from .._drafting import GraphedStep
+from .._drafting import GraphedStep, tree_step_context
 
 if TYPE_CHECKING:
     from ...decoding.request import DraftRequest
@@ -41,6 +41,12 @@ class DraftModelDrafter(Drafter):
     Cost log: every call records a ``"draft"`` event of one token over layers ``1..L_draft`` of the network
     ``"draft_model"`` (:attr:`footprint`; :attr:`layer_span` is ``(1, 0)``, no layer of the model); the owed
     tokens beyond the first are recorded as a ``"draft_catchup"`` event of the same network before it.
+
+    Draft trees (:class:`~economize.decoding.TreeStepDrafter`, used by the ``dynamic_tree``, ``sequoia`` and
+    ``specexec`` draft policies): :meth:`tree_begin` processes the owed tokens before the last one, the policy's root
+    step reads the last one, and every :meth:`tree_step` runs the draft LM over a frontier of the tree, whose keys and
+    values go to the nodes' slots of the draft LM's own cache. A tree proposal leaves the draft LM's cache valid up to
+    the root only, so the next proposal processes the accepted tokens again.
 
     CUDA graphs (:meth:`enable_graphs`): the one-token draft steps are replayed from graphs, the catch-up of a cycle
     (its width varies) runs eagerly. The draft LM's cache is then the static variant of its cache kind, kept across
@@ -148,6 +154,50 @@ class DraftModelDrafter(Drafter):
     def _step(self, tokens: torch.Tensor, positions: torch.Tensor, valid: torch.Tensor | None) -> torch.Tensor:
         return self._run(tokens[:, None], positions[:, None], None if valid is None else valid[:, None])[:, 0]
 
+    # ---- dynamic trees (economize.decoding.tree_search) -------------------------------------------------------
+    def supports_tree_steps(self) -> bool:
+        """True unless the draft LM has recurrent layers (a tree step covers part of a tree at a time) or a subclass
+        changes how a proposal or its catch-up runs (PARD's parallel drafts, a draft LM on another device)."""
+        cls = type(self)
+        return (not self.draft_runner.has_recurrent_layers and cls.propose is DraftModelDrafter.propose
+                and cls._catch_up is DraftModelDrafter._catch_up)
+
+    def tree_begin(self, request: DraftRequest) -> None:
+        """Process every row's owed tokens except its last one, which the policy's root step reads next."""
+        if self._cache is None:
+            raise RuntimeError("DraftModelDrafter needs begin() before drafting a tree")
+        active = request.active
+        starts = [min(verified, end - 1) for verified, end in zip(self._verified(request), request.ends)]
+        owed = [end - 1 - start if on else 0 for start, end, on in zip(starts, request.ends, active)]
+        width = max(owed, default=0)
+        if width > 0:
+            device = request.device
+            offsets = torch.arange(width, device=device)
+            positions = torch.tensor(starts, device=device)[:, None] + offsets
+            valid = offsets < torch.tensor(owed, device=device)[:, None]
+            tokens = request.seq.gather(1, positions.clamp(max=request.scratch))
+            self._run(tokens, positions.masked_fill(~valid, 0), valid,
+                      keep=torch.zeros((len(owed), 1), dtype=torch.long, device=device))
+        for b, on in enumerate(active):
+            if on:
+                if owed[b] > 0:
+                    request.costs[b].record_footprint(CATCHUP, owed[b], starts[b], draft_footprint(self))
+                self._done[b] = self._anchor[b] = request.ends[b]  # the root step reads position end - 1
+
+    def tree_state(self) -> tuple[torch.Tensor, ...]:
+        return ()
+
+    def tree_step(self, tokens: torch.Tensor, parents: torch.Tensor, base: torch.Tensor,
+                  *states: torch.Tensor) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]]:
+        """The draft LM over the frontier of a tree (see :class:`~economize.decoding.TreeStepDrafter`)."""
+        assert self._cache is not None
+        runner = self.draft_runner
+        device = runner.adapter.device
+        ctx = tree_step_context(runner, self._cache, parents.to(device), base.to(device), tokens.shape[1])
+        hidden, _ = runner.run(runner.embed(tokens.to(device).clamp(max=self.draft_vocab - 1), ctx), ctx, 1,
+                               runner.adapter.num_layers)
+        return self._logits(hidden), ()
+
     def _verified(self, request: DraftRequest) -> list[int]:
         """Per row, how many leading positions of the draft LM's cache hold the committed tokens.
 
@@ -211,7 +261,11 @@ class DraftModelDrafter(Drafter):
                                runner.adapter.num_layers)
         if keep is not None:
             hidden = hidden.gather(1, keep.to(hidden.device)[..., None].expand(-1, -1, hidden.shape[-1]))
-        logits = runner.logits(hidden).float()
+        return self._logits(hidden)
+
+    def _logits(self, hidden: torch.Tensor) -> torch.Tensor:
+        """Float draft-LM logits of ``hidden``, cut or padded with ``-inf`` to the model's vocabulary."""
+        logits = self.draft_runner.logits(hidden).float()
         if self.draft_vocab > self.vocab_size:
             return logits[..., : self.vocab_size]
         if self.draft_vocab < self.vocab_size:

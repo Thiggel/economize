@@ -26,7 +26,7 @@ from .metadata import (
 
 if TYPE_CHECKING:
     from ..arch import ArchAdapter
-    from ..decoding import Drafter
+    from ..decoding import DecodeConfig, Drafter
     from ..runtime import KVCache, LayerPolicy, LayerRunner
 
 __all__ = [
@@ -281,6 +281,12 @@ class Technique(nn.Module):
         :meth:`~economize.decoding.Drafter.begin` must reset everything that belongs to one generation.
         """
         raise NotImplementedError(f"technique {self.name!r} does not draft tokens")
+
+    def default_decoding(self) -> DecodeConfig | None:
+        """The decoding options :func:`economize.apply` uses when it is given none (``None``: the generic default,
+        cycles of 4 tokens with a drafter). A drafting technique whose paper fixes its own draft length or stopping
+        rule returns them here; the first technique (in attach order) that returns options wins."""
+        return None
 
     def layer_policy(self) -> LayerPolicy | None:
         """The per-token layer policy of the exact path (techniques with :attr:`Capability.DEPTH`)."""

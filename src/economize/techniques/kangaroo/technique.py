@@ -11,6 +11,7 @@ from torch import nn
 
 from ...core.metadata import Family, Saving, TechniqueInfo
 from ...core.technique import Capability, Technique, register_technique
+from ...decoding.config import DecodeConfig
 from ...errors import UnsupportedModelError
 from ...modules.dtype import copy_dtype_of
 from .._drafting import StepDrafterDefaults
@@ -127,6 +128,16 @@ class KangarooTechnique(StepDrafterDefaults, Technique):
         return adapter.transform_logits(adapter.lm_head(out.to(adapter.head_device, adapter.dtype))).float()
 
     # ---- technique interface ----------------------------------------------------------------------------------
+    def decode_config(self) -> DecodeConfig:
+        """Kangaroo's decoding: cycles of up to :attr:`KangarooConfig.max_draft` drafts that stop at the first draft
+        whose top-1 probability is below :attr:`KangarooConfig.stop_threshold` (the paper's double early exit).
+        Change further fields with :func:`dataclasses.replace`."""
+        return DecodeConfig(cycle_length=self.config.max_draft + 1, min_confidence=self.config.stop_threshold)
+
+    def default_decoding(self) -> DecodeConfig:
+        """:meth:`decode_config` with its defaults."""
+        return self.decode_config()
+
     def drafter(self, runner: LayerRunner) -> KangarooDrafter:
         from .drafter import KangarooDrafter
 

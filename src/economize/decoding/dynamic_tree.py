@@ -1,6 +1,6 @@
 """Dynamic draft trees (EAGLE-2) for any drafter that can step over the frontier of a tree.
 
-``DecodeConfig(draft_policy="dynamic_tree", draft_policy_options={"depth": 6, "topk": 8, "total_tokens": 60})``
+``DecodeConfig(draft_policy="dynamic_tree", draft_policy_options={"depth": 6, "topk": 10, "total_tokens": 60})``
 turns a chain drafter into a tree drafter. Every cycle the drafter grows a tree of candidates level by level:
 
 1. The first draft step processes the root (the last committed token) as in chain drafting. Its ``topk`` most likely
@@ -39,7 +39,13 @@ if TYPE_CHECKING:
     from .config import DecodeConfig
     from .request import DraftRequest
 
-__all__ = ["DynamicTreeDrafter", "DynamicTreePolicy", "TreeOptions", "TreeStepDrafter"]
+__all__ = ["DEFAULT_TOPK", "DEFAULT_TOTAL_TOKENS", "DynamicTreeDrafter", "DynamicTreePolicy", "TreeOptions",
+           "TreeStepDrafter"]
+
+#: Default frontier width and children per node (``top_k=10`` in the EAGLE-2 reference code).
+DEFAULT_TOPK = 10
+#: Default number of verified tree nodes (``total_token=60`` in the EAGLE-2 reference code).
+DEFAULT_TOTAL_TOKENS = 60
 
 @dataclass(frozen=True)
 class TreeOptions:
@@ -68,13 +74,24 @@ class TreeOptions:
 
     @classmethod
     def from_config(cls, config: DecodeConfig) -> TreeOptions:
-        """The options in ``config.draft_policy_options`` (``depth`` defaults to ``cycle_length - 1``)."""
+        """The options in ``config.draft_policy_options``.
+
+        Defaults follow the EAGLE-2 reference code: ``topk=10`` and ``total_tokens=60``, with ``depth`` set to
+        ``cycle_length - 1``. A shallow tree with fewer than 60 candidates (``cycle_length=2``: ``topk`` of them)
+        verifies all of them by default, so every cycle length works without options.
+        """
         options: Mapping[str, Any] = config.draft_policy_options
         unknown = sorted(set(options) - {"depth", "topk", "total_tokens"})
         if unknown:
             raise ConfigError(f"draft_policy 'dynamic_tree' has no options {unknown}; it takes depth, topk and "
                               "total_tokens")
-        values = {"depth": max(config.cycle_length - 1, 1), "topk": 8, "total_tokens": 60, **options}
+        values = {"depth": max(config.cycle_length - 1, 1), "topk": DEFAULT_TOPK, **options}
+        if "total_tokens" not in values:
+            depth, topk = values["depth"], values["topk"]
+            shape_ok = all(isinstance(v, int) and not isinstance(v, bool) and v >= 1 for v in (depth, topk))
+            values["total_tokens"] = (
+                min(DEFAULT_TOTAL_TOKENS, cls(depth, topk, 1).candidates) if shape_ok else DEFAULT_TOTAL_TOKENS
+            )
         for name, value in values.items():
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ConfigError(f"draft_policy 'dynamic_tree' needs a positive integer {name}, got {value!r}")
@@ -89,8 +106,9 @@ class TreeOptions:
 class DynamicTreePolicy(TreePolicy):
     """Drafts an EAGLE-2 dynamic tree with any :class:`TreeStepDrafter` (see the module docstring).
 
-    Options (``DecodeConfig.draft_policy_options``): ``depth`` (default ``cycle_length - 1``), ``topk`` (default 8)
-    and ``total_tokens`` (default 60). The tree replaces the chain, so no row stops early.
+    Options (``DecodeConfig.draft_policy_options``): ``depth`` (default ``cycle_length - 1``), ``topk`` (default 10,
+    as in EAGLE-2) and ``total_tokens`` (default 60, or every candidate of a smaller tree). The tree replaces the
+    chain, so no row stops early.
     """
 
     policy_name = "dynamic_tree"
