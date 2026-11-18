@@ -142,7 +142,7 @@ def test_a_quantized_base_is_refused(tiny_dir: Path) -> None:
 
 
 def test_fake_quantization_is_served_with_teal(tiny_dir: Path, tmp_path: Path) -> None:
-    model = _teal(tiny_dir, QuantConfig(format="int4", group_size=32))
+    model = _teal(tiny_dir, QuantConfig(format="int4", group_size=32, backend="fake"))
     plan = to_vllm(model, tmp_path / "out")
     assert plan.techniques == {"quant": "densified", "teal": "plugin"}
     assert _quantization(plan)["quant_method"] == QUANT_METHOD

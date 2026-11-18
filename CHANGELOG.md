@@ -99,6 +99,8 @@
 - The attention kernels run in Triton's CPU interpreter (`TRITON_INTERPRET=1`): the interpreter cannot call
   libdevice, so the round-to-nearest helpers of the decode, MInference and KIVI kernels are plain operators there,
   and the Quest kernel no longer masks a block with a scalar bool.
+- The vLLM linear methods of `teal` and `lowrank` also run on CPU tensors on a GPU host: vLLM registers a custom op
+  for the platform's dispatch key only, so the ops are registered for CPU as well.
 
 ## 0.4.0 (2026-11-04)
 
