@@ -209,3 +209,21 @@ def test_unsupported_operations_raise() -> None:
     stored = marlin_weight(quantize_rtn(torch.randn(128, 128, device="cuda"), make_grid("int8", True)), torch.bfloat16)
     with pytest.raises(NotImplementedError, match="dequantize"):
         stored + 1
+
+
+@pytest.mark.parametrize("backend", ["marlin", "machete", "cutlass"])
+def test_availability_reads_the_installation_without_loading_vllm(backend: str, monkeypatch) -> None:
+    """``backend_support`` asks :meth:`unavailable`, which must not import vLLM's ops (that pulls in ``vllm`` and
+    ``triton``); the ops are loaded by :meth:`check` when a model is quantized."""
+    from economize.techniques.quant import QUANT_BACKENDS, marlin
+
+    def load_ops() -> str | None:
+        raise AssertionError("unavailable() loaded vLLM's ops")
+
+    monkeypatch.setattr(marlin.importlib.util, "find_spec", lambda name: object() if name == "vllm" else None)
+    for target in ("marlin._load_ops", "machete._load_ops", "machete._machete_reason", "cutlass._load_ops",
+                   "cutlass._cutlass_reason"):
+        monkeypatch.setattr(f"economize.techniques.quant.{target}", load_ops)
+    assert QUANT_BACKENDS.get(backend)().unavailable(QuantConfig(format="int8")) is None
+    monkeypatch.setattr(marlin.importlib.util, "find_spec", lambda name: None)
+    assert "needs the vllm package" in QUANT_BACKENDS.get(backend)().unavailable(QuantConfig(format="int8"))

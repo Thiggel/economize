@@ -127,11 +127,21 @@ _FP8_MAX_EXPONENT = 4  # e4m3
 # ---- the vLLM ops -----------------------------------------------------------------------------------------------
 
 
+def _vllm_missing(backend: str = "marlin", kernels: str = "Marlin") -> str | None:
+    """Why ``backend`` cannot run because vllm is not installed, or ``None``. It reads the installation only, so
+    :func:`~economize.backend_support` stays free of ``vllm`` and ``triton`` imports; :func:`_load_ops` loads the ops
+    when a model is quantized."""
+    if importlib.util.find_spec("vllm") is None:
+        return f"backend '{backend}' needs the vllm package (pip install vllm), which ships the {kernels} kernels"
+    return None
+
+
 @functools.cache
 def _load_ops() -> str | None:
     """Import vLLM's custom ops once; return why they are unavailable, or ``None``."""
-    if importlib.util.find_spec("vllm") is None:
-        return "backend 'marlin' needs the vllm package (pip install vllm), which ships the Marlin kernels"
+    missing = _vllm_missing()
+    if missing is not None:
+        return missing
     try:
         import vllm._custom_ops  # noqa: F401  (loading it registers the Marlin ops under torch.ops._C)
     except Exception as error:  # pragma: no cover - depends on the installed wheel and driver
@@ -473,7 +483,7 @@ class MarlinBackend(QuantBackend):
             raise ConfigError(reason)
 
     def unavailable(self, config: QuantSpec) -> str | None:
-        return _load_ops()
+        return _vllm_missing()
 
     def check(self, modules: Mapping[str, nn.Linear], config: QuantSpec) -> None:
         reason = _load_ops()

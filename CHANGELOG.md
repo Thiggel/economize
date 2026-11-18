@@ -99,6 +99,9 @@
 - The attention kernels run in Triton's CPU interpreter (`TRITON_INTERPRET=1`): the interpreter cannot call
   libdevice, so the round-to-nearest helpers of the decode, MInference and KIVI kernels are plain operators there,
   and the Quest kernel no longer masks a block with a scalar bool.
+- `economize.backend_support` no longer imports `vllm` (and through it `triton`) on a host where vLLM is installed:
+  the Marlin, Machete and CUTLASS backends report availability from the installation, and their ops load when a
+  model is quantized.
 
 ## 0.4.0 (2026-11-04)
 

@@ -41,7 +41,7 @@ from .backends import QUANT_BACKENDS, QuantBackend
 from .config import QuantConfig, QuantSpec
 from .constraints import KernelConstraints, format_listing
 from .grid import QuantizedWeight
-from .marlin import MarlinLayout, MarlinWeight, _gptq_pack, _load_ops, _round_up, _type_id
+from .marlin import MarlinLayout, MarlinWeight, _gptq_pack, _load_ops, _round_up, _type_id, _vllm_missing
 
 __all__ = [
     "MACHETE_CONSTRAINTS",
@@ -205,7 +205,7 @@ class MacheteBackend(QuantBackend):
             raise ConfigError(reason)
 
     def unavailable(self, config: QuantSpec) -> str | None:
-        return _machete_reason()
+        return _vllm_missing("machete", "Machete")
 
     def check(self, modules: Mapping[str, nn.Linear], config: QuantSpec) -> None:
         reason = _machete_reason()

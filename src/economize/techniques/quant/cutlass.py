@@ -34,7 +34,7 @@ from .backends import QUANT_BACKENDS, QuantBackend
 from .config import QuantSpec
 from .constraints import KernelConstraints
 from .grid import QuantizedWeight
-from .marlin import MarlinLayout, MarlinWeight, _load_ops, _round_up
+from .marlin import MarlinLayout, MarlinWeight, _load_ops, _round_up, _vllm_missing
 
 __all__ = ["CUTLASS_INT8", "CutlassBackend", "CutlassInt8Weight", "cutlass_available", "cutlass_int8_weight"]
 
@@ -151,7 +151,7 @@ class CutlassBackend(QuantBackend):
             raise ConfigError(reason)
 
     def unavailable(self, config: QuantSpec) -> str | None:
-        return _cutlass_reason()
+        return _vllm_missing("cutlass", "CUTLASS int8")
 
     def check(self, modules: Mapping[str, nn.Linear], config: QuantSpec) -> None:
         reason = _cutlass_reason()
