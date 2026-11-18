@@ -111,7 +111,9 @@ def _ungrouped(states: torch.Tensor, heads: int) -> torch.Tensor:
     batch, kv_heads, length, dim = states.shape
     if kv_heads == heads:
         return states.contiguous()
-    return states[:, :, None].expand(batch, kv_heads, heads // kv_heads, length, dim).reshape(batch, heads, length, dim)
+    repeated = states[:, :, None].expand(batch, kv_heads, heads // kv_heads, length, dim)
+    # reshape returns a stride-0 view when there is one K/V head, which the kernels of needs_dense_kv mishandle
+    return repeated.reshape(batch, heads, length, dim).contiguous()
 
 
 def _chunked(query: torch.Tensor, attention_mask: Any, kwargs: dict[str, Any]) -> bool:

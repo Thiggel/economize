@@ -99,6 +99,8 @@
 - The attention kernels run in Triton's CPU interpreter (`TRITON_INTERPRET=1`): the interpreter cannot call
   libdevice, so the round-to-nearest helpers of the decode, MInference and KIVI kernels are plain operators there,
   and the Quest kernel no longer masks a block with a scalar bool.
+- The SDPA guard copies the K/V heads it repeats: with one K/V head the repeat was a stride-0 view, and PyTorch
+  2.13's memory-efficient CUDA kernel returns wrong masked outputs for such K/V at head dim > 128.
 
 ## 0.4.0 (2026-11-04)
 
