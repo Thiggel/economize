@@ -120,6 +120,41 @@ def test_left_padded_batch_equals_hf(base: torch.nn.Module) -> None:
     assert torch.equal(got, expected)
 
 
+@pytest.mark.parametrize("chunk", [1, 3])
+def test_batch_index_reaches_prefix_allowed_tokens_fn(base: torch.nn.Module, chunk: int) -> None:
+    """Every row's constraint sees its own batch index, as in ``generate`` (row 1 used to see index 0)."""
+    prompt = _prompt(9, batch=3)
+    allowed = {b: list(range(b * 10, b * 10 + 10)) for b in range(3)}
+
+    def allowed_tokens(batch_id: int, ids: torch.Tensor) -> list[int]:
+        return allowed[batch_id]
+
+    kwargs = dict(max_new_tokens=6, prefix_allowed_tokens_fn=allowed_tokens)
+    expected = base.generate(prompt, **kwargs)
+    got = generate(FakeEfficientModel(base, chunk=chunk), prompt, **kwargs)
+    assert torch.equal(got, expected)
+    for b in range(3):
+        assert set(got[b, PROMPT_LEN:].tolist()) <= set(allowed[b])
+
+
+class _RowBias(LogitsProcessor):
+    """A user processor that biases each batch row towards its own token (reads the batch index)."""
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
+        scores = scores.clone()
+        scores[torch.arange(scores.shape[0]), torch.arange(scores.shape[0]) + 5] += 1e4
+        return scores
+
+
+def test_batch_index_reaches_a_custom_processor(base: torch.nn.Module) -> None:
+    prompt = _prompt(10, batch=3)
+    processors = LogitsProcessorList([_RowBias()])
+    expected = base.generate(prompt, max_new_tokens=4, logits_processor=processors)
+    got = generate(FakeEfficientModel(base, chunk=2), prompt, max_new_tokens=4, logits_processor=processors)
+    assert torch.equal(got, expected)
+    assert [set(row) for row in got[:, PROMPT_LEN:].tolist()] == [{5}, {6}, {7}]
+
+
 def test_sampling_without_drafter_reproduces_hf_samples(base: torch.nn.Module) -> None:
     prompt = _prompt(8)
     kwargs = dict(max_new_tokens=12, do_sample=True, temperature=0.8, top_k=20, top_p=0.9, min_p=0.01)

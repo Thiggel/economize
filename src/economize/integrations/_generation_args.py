@@ -8,8 +8,9 @@ objects the decoding loop takes: a token selector (processors, then argmax or sa
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, cast
 
 import torch
 
@@ -21,6 +22,7 @@ __all__ = [
     "StopAndStream",
     "check_generation_config",
     "check_model_kwargs",
+    "for_row",
     "left_padding",
     "make_selector",
 ]
@@ -111,6 +113,9 @@ class ProcessedSelector:
         prefix: Tokens that ``transformers`` sees before the prompt (the row's left padding). Prepending them
             makes length-dependent processors (min new tokens, max length) count exactly as in ``generate``.
         generator: Optional private generator for sampling, used on its own device.
+        row: The row of the ``generate`` batch this selector decodes. The processors see one row at a time, so
+            those that read the batch index (``prefix_allowed_tokens_fn``) are adapted to see ``row`` instead of
+            ``0`` (see :func:`for_row`).
 
     The selector is a :class:`~economize.decoding.capabilities.SeededSelector`: :meth:`generator_for` hands the
     verifiers the stream the selector samples from, so a sampled run draws every random number from one stream
@@ -123,8 +128,9 @@ class ProcessedSelector:
         do_sample: bool,
         prefix: torch.Tensor | None = None,
         generator: torch.Generator | None = None,
+        row: int = 0,
     ) -> None:
-        self.processors = processors if processors is not None and len(_as_list(processors)) else None
+        self.processors = for_row(processors, row) if processors is not None and len(_as_list(processors)) else None
         self.greedy = not do_sample
         self.prefix = prefix if prefix is not None and prefix.numel() else None
         self.generator = generator
@@ -205,12 +211,53 @@ def make_selector(
     do_sample: bool,
     prefix: torch.Tensor | None = None,
     generator: torch.Generator | None = None,
+    row: int = 0,
 ) -> ProcessedSelector:
-    """The selector for ``generate``: a :class:`HistoryFreeSelector` when every processor reads the scores alone
-    (then draft trees work), else a :class:`ProcessedSelector` that applies the processors row by row."""
+    """The selector for row ``row`` of ``generate``'s batch: a :class:`HistoryFreeSelector` when every processor
+    reads the scores alone (then draft trees work), else a :class:`ProcessedSelector` that applies the processors
+    row by row."""
     if processors is None or all(type(p).__name__ in _HISTORY_FREE_PROCESSORS for p in _as_list(processors)):
-        return HistoryFreeSelector(processors, do_sample, prefix, generator)
-    return ProcessedSelector(processors, do_sample, prefix, generator)
+        return HistoryFreeSelector(processors, do_sample, prefix, generator, row)
+    return ProcessedSelector(processors, do_sample, prefix, generator, row)
+
+
+Processor = Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
+
+
+def for_row(processors: Processor, row: int) -> Processor:
+    """``processors`` adapted to score a batch of one row that stands for row ``row`` of the ``generate`` batch.
+
+    ``PrefixConstrainedLogitsProcessor`` passes the batch index to ``prefix_allowed_tokens_fn``; its copy offsets
+    the index by ``row``. The other ``transformers`` processors treat every row alike and are kept. A processor
+    from elsewhere may index the batch, so it sees ``row + 1`` copies of the row and row ``row`` of its output is
+    used. A ``LogitsProcessorList`` stays a list of the same type.
+    """
+    if row == 0:
+        return processors
+    if isinstance(processors, list):
+        return cast(Processor, type(processors)(for_row(p, row) for p in processors))
+    if type(processors).__name__ == "PrefixConstrainedLogitsProcessor" and hasattr(
+        processors, "_prefix_allowed_tokens_fn"
+    ):
+        adapted = copy.copy(processors)
+        allowed = cast(Callable[[int, torch.Tensor], list[int]], processors._prefix_allowed_tokens_fn)
+        adapted._prefix_allowed_tokens_fn = lambda batch_id, ids: allowed(batch_id + row, ids)
+        return adapted
+    if type(processors).__module__.split(".")[0] == "transformers":
+        return processors
+    return _AtRow(processors, row)
+
+
+class _AtRow:
+    """A processor of unknown batch semantics run on ``row + 1`` copies of a one-row batch, output row ``row``."""
+
+    def __init__(self, processor: Processor, row: int) -> None:
+        self.processor, self.row = processor, row
+
+    def __call__(self, input_ids: torch.Tensor, scores: torch.Tensor) -> torch.Tensor:
+        n = self.row + 1
+        out = self.processor(input_ids.expand(n, -1).clone(), scores.expand(n, -1).clone())
+        return out[self.row : self.row + 1]
 
 
 def _as_list(processors: Any) -> list[Any]:

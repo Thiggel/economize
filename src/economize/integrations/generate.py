@@ -121,7 +121,7 @@ class EconomizeGenerate:
             pad = left_padding(mask, b, width)
             prefix, prompt = input_ids[b, :pad], input_ids[b, pad:]
             prompts.append(prompt)
-            selectors.append(make_selector(logits_processor, do_sample, prefix))
+            selectors.append(make_selector(logits_processor, do_sample, prefix, row=b))
             stops.append(StopAndStream(criteria[b], self.streamer, prompt.shape[0], prefix))
         self.results = self._decode(prompts, max_new, decoding, selectors, stops) if max_new > 0 else []
         tokens = [result.tokens.view(-1) for result in self.results] or [prompt[:0] for prompt in prompts]
