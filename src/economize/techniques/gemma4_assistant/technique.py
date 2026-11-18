@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from ...arch import ArchAdapter
     from ...runtime import LayerRunner
 
-__all__ = ["Gemma4AssistantTechnique", "context_layers", "load_assistant"]
+__all__ = ["Gemma4AssistantTechnique", "buildable_assistant_config", "context_layers", "load_assistant"]
 
 
 def _geometry(attention: Any) -> tuple[Any, ...]:
@@ -27,13 +27,54 @@ def _geometry(attention: Any) -> tuple[Any, ...]:
             bool(getattr(attention, "use_alternative_attention", False)))
 
 
+_REUSING: dict[type, type] = {}
+
+
+def _reusing_every_layer(text_class: type) -> type:
+    """A subclass of the Gemma-4 text config class ``text_class`` whose layers all reuse cache entries (one per
+    class, so configs built from the same class share it)."""
+
+    def kv_sharing_modes(self: Any) -> list[str | None]:
+        return ["reuse"] * int(self.num_hidden_layers)
+
+    if text_class not in _REUSING:
+        _REUSING[text_class] = type(text_class.__name__, (text_class,), {
+            "kv_sharing_modes": property(kv_sharing_modes), "__module__": text_class.__module__})
+    return _REUSING[text_class]
+
+
+def buildable_assistant_config(config: Any) -> Any:
+    """``config`` (a ``Gemma4AssistantConfig``), changed in place where needed so that ``transformers`` can build the
+    assistant from it.
+
+    ``transformers`` 5.23 derives each Gemma-4 layer's cache role from ``kv_sharing_modes``, which raises when no
+    layer produces entries of its own, as in every assistant (huggingface/transformers#50316). The text config then
+    becomes an instance of a subclass in which every layer reuses entries, which is what the assistant does. Configs
+    that build already are returned unchanged.
+    """
+    text = config.get_text_config()
+    try:
+        text.kv_sharing_modes  # noqa: B018 (raises on the transformers versions that cannot build the assistant)
+    except ValueError:
+        if text.num_kv_shared_layers != text.num_hidden_layers:
+            raise
+        text.__class__ = _reusing_every_layer(type(text))
+    except AttributeError:  # transformers < 5.23 has no kv_sharing_modes and builds every assistant
+        pass
+    return config
+
+
 def load_assistant(config: Gemma4AssistantDraftConfig, device: torch.device, dtype: torch.dtype) -> nn.Module:
     """Load the assistant of ``config`` (eval mode, frozen) on ``device``."""
-    from transformers import AutoModelForCausalLM
+    from transformers import AutoConfig, AutoModelForCausalLM
 
     resolved = dtype if config.dtype == "auto" else getattr(torch, config.dtype)
+    assistant_config = AutoConfig.from_pretrained(config.model, revision=config.revision)
+    if getattr(assistant_config, "model_type", None) == "gemma4_assistant":
+        assistant_config = buildable_assistant_config(assistant_config)
     model = AutoModelForCausalLM.from_pretrained(
-        config.model, revision=config.revision, dtype=resolved, attn_implementation=config.attn_implementation
+        config.model, revision=config.revision, config=assistant_config, dtype=resolved,
+        attn_implementation=config.attn_implementation,
     )
     if getattr(model.config, "model_type", None) != "gemma4_assistant":
         raise ConfigError(f"{config.model!r} is a {model.config.model_type!r} model, not a Gemma-4 assistant")
@@ -45,9 +86,9 @@ def load_assistant(config: Gemma4AssistantDraftConfig, device: torch.device, dty
 def context_layers(adapter: ArchAdapter) -> dict[str, int]:
     """The base layer (1-indexed) whose cache entries the assistant reads, per attention type.
 
-    That is the last layer of each type that stores its keys and values (``store_full_length_kv``, which
-    ``transformers`` sets on the layers whose entries later layers share); the entries are what the base model's
-    ``return_shared_kv_states=True`` returns.
+    That is the last layer of each type that computes its own keys and values (the layers that ``transformers``
+    marks ``store_full_length_kv`` when the model shares entries between its layers). It is read from
+    ``is_kv_shared_layer``: ``transformers`` 5.23 marks no such layer in models without shared layers.
 
     Raises:
         UnsupportedModelError: The model is no Gemma-4 decoder.
@@ -60,7 +101,7 @@ def context_layers(adapter: ArchAdapter) -> dict[str, int]:
                 f"the Gemma-4 assistant drafts for Gemma-4 decoders only; layer {index} of this "
                 f"{adapter.model_type!r} model has no Gemma-4 attention"
             )
-        if attention.store_full_length_kv:
+        if not attention.is_kv_shared_layer:
             layers[attention.layer_type] = index
     return layers
 

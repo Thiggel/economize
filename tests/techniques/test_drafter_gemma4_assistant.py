@@ -17,6 +17,7 @@ from economize.techniques.gemma4_assistant import (
     Gemma4AssistantDrafter,
     Gemma4AssistantTechnique,
 )
+from economize.techniques.gemma4_assistant.technique import buildable_assistant_config, context_layers
 from helpers import FAMILY_MODELS, PROMPT_LEN, VOCAB, WINDOW, make_family_model, make_tiny_model, reference_greedy
 
 ASSISTANT_LAYERS = 4
@@ -42,7 +43,7 @@ def make_assistant(base: torch.nn.Module, seed: int = 3, **changes: Any) -> torc
     text_config.update(changes.pop("text", {}))
     settings: dict[str, Any] = dict(backbone_hidden_size=text.hidden_size, use_ordered_embeddings=False)
     settings.update(changes)
-    config = Gemma4AssistantConfig(text_config=text_config, **settings)
+    config = buildable_assistant_config(Gemma4AssistantConfig(text_config=text_config, **settings))
     torch.manual_seed(seed)
     assistant = Gemma4AssistantForCausalLM._from_config(config, attn_implementation="sdpa").float().eval()
     with torch.no_grad():  # larger weights than the default init, so the drafts depend on the inputs
@@ -110,6 +111,30 @@ def test_attach_checks_that_the_assistant_belongs_to_the_model(base: torch.nn.Mo
         _model(str(tmp_path / "wide"), make_tiny_model())
 
 
+def test_context_layers_of_a_model_without_shared_layers() -> None:
+    """Without shared layers the context is still the last layer of each type (``transformers`` 5.23 then marks no
+    layer ``store_full_length_kv``)."""
+    from economize.arch import adapter_for
+
+    adapter = adapter_for(make_family_model("gemma4_text_moe"))
+    kinds = adapter.model.config.get_text_config().layer_types
+    expected = {kind: max(i for i, k in enumerate(kinds, 1) if k == kind) for kind in set(kinds)}
+    assert context_layers(adapter) == expected
+
+
+def test_the_assistant_config_builds() -> None:
+    """Every assistant layer reuses the model's entries, also where ``transformers`` refuses such a config."""
+    from transformers import Gemma4AssistantConfig, Gemma4AssistantForCausalLM
+
+    config = buildable_assistant_config(Gemma4AssistantConfig(text_config=dict(
+        model_type="gemma4_text", vocab_size=VOCAB, hidden_size=16, intermediate_size=16, num_hidden_layers=2,
+        num_attention_heads=2, num_key_value_heads=1, head_dim=8, layer_types=["sliding_attention", "full_attention"],
+        hidden_size_per_layer_input=0, vocab_size_per_layer_input=0)))
+    assistant = Gemma4AssistantForCausalLM(config)
+    assert all(layer.self_attn.is_kv_shared_layer for layer in assistant.model.layers)
+    assert buildable_assistant_config(config) is config
+
+
 # ---- the drafts are those of transformers --------------------------------------------------------------------------
 @torch.no_grad()
 def test_a_cycle_drafts_what_transformers_drafts(base: torch.nn.Module, assistant_dir: str,
@@ -117,10 +142,11 @@ def test_a_cycle_drafts_what_transformers_drafts(base: torch.nn.Module, assistan
     """The first cycle after the prompt, against ``SinglePositionMultiTokenCandidateGenerator``'s loop: the base's
     final normalized state and the bonus token, every step at the bonus position, argmax tokens and projected states
     fed back (after the prompt the shared entries are exactly the committed ones, as in ``transformers``)."""
-    from transformers import AutoModelForCausalLM
+    from transformers import AutoConfig, AutoModelForCausalLM
 
     steps = 5
-    assistant = AutoModelForCausalLM.from_pretrained(assistant_dir, dtype=torch.float32).eval()
+    config = buildable_assistant_config(AutoConfig.from_pretrained(assistant_dir))
+    assistant = AutoModelForCausalLM.from_pretrained(assistant_dir, config=config, dtype=torch.float32).eval()
     seen: list[torch.Tensor] = []
     step = Gemma4AssistantDrafter.step
 

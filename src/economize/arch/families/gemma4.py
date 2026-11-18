@@ -110,7 +110,7 @@ class Gemma4Adapter(SoftcappedLogitsMixin, StandardDecoderAdapter):
         """The source layer of every KV-sharing layer, found once: :meth:`kv_source` runs on every layer call, and
         :meth:`remove_layers` refuses models with KV sharing, so the map never goes stale."""
         sources: dict[int, int] = {}
-        stores: dict[str, int] = {}  # layer type -> last layer so far that stores its full-length K/V
+        stores: dict[str, int] = {}  # layer type -> last non-sharing layer so far (it produces the shared K/V)
         for index in range(1, self.num_layers + 1):
             attention: Any = self.layer(index).self_attn  # HF Gemma4TextAttention
             if attention.is_kv_shared_layer:
@@ -119,7 +119,7 @@ class Gemma4Adapter(SoftcappedLogitsMixin, StandardDecoderAdapter):
                         f"layer {index} shares K/V, but no earlier {attention.layer_type} layer stores it"
                     )
                 sources[index] = stores[attention.layer_type]
-            elif attention.store_full_length_kv:
+            else:  # transformers >= 5.23 sets ``store_full_length_kv`` only on the last producer per type
                 stores[attention.layer_type] = index
         return sources
 
