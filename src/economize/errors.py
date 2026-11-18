@@ -14,7 +14,9 @@ __all__ = [
     "UnknownFieldWarning",
     "UnknownNameError",
     "UnregisteredNameError",
+    "UnsupportedEngineVersionError",
     "UnsupportedModelError",
+    "UntestedEngineWarning",
 ]
 
 
@@ -56,6 +58,15 @@ class CheckpointFormatError(EconomizeError, ValueError):
 
 class NonFiniteLossError(EconomizeError, FloatingPointError):
     """A training step's loss is ``NaN`` or infinite (see ``TrainConfig.nonfinite``)."""
+
+
+class UnsupportedEngineVersionError(EconomizeError, ImportError):
+    """An engine whose private classes economize patches (vLLM, SGLang, TRL) is missing or installed in a release
+    outside the tested range (see ``economize._compat.ENGINES``)."""
+
+
+class UntestedEngineWarning(UserWarning):
+    """An engine release outside the tested range runs because ``economize._compat.ALLOW_UNTESTED_ENV`` allows it."""
 
 
 class SimulatedPathWarning(UserWarning):

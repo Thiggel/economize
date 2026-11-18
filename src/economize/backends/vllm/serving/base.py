@@ -53,6 +53,7 @@ from typing import Any, ClassVar, TypeVar
 import torch
 from torch import nn
 
+from ...._compat import require_engine
 from ....core.metadata import Simulation
 from ....core.technique import CAPABILITY_ORDER, Capability
 from ....errors import ConfigError, IncompatibleTechniquesError
@@ -507,7 +508,12 @@ class VllmPlan:
         in the calling process (it has, after an economize export), a forked engine core can deadlock at start-up.
         A spawned engine core imports the caller's main module again, so a script that calls this method must
         guard its top level with ``if __name__ == "__main__":``.
+
+        Raises:
+            UnsupportedEngineVersionError: vLLM is missing or outside the supported releases
+                (``economize._compat.ENGINES``).
         """
+        require_engine("vllm")
         os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
         self.apply_env()
         if Support.PLUGIN.value in self.techniques.values():

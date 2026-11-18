@@ -53,6 +53,7 @@ from typing import Any
 import torch
 from transformers import TrainerCallback
 
+from .._compat import installed_version, require_engine
 from ..backends.vllm.export import drafter_weights
 from ..backends.vllm.spec import speculative_config
 from ..errors import ConfigError
@@ -212,11 +213,17 @@ def sync_drafter(trainer: Any, model: Any) -> Callable[[], None]:
 
     Raises:
         ConfigError: The trainer does not generate with vLLM, or TRL is older than 1.12.
+        UnsupportedEngineVersionError: The installed TRL is outside the tested releases
+            (``economize._compat.ENGINES["trl"]``; listing ``trl`` in ``economize._compat.ALLOW_UNTESTED_ENV``
+            allows it).
     """
     generation = _generation(trainer)
-    # Third-party private hook: trl.generation.vllm_generation.VLLMGeneration._iter_named_params (TRL 1.12 to at
-    # least 1.14) yields the tensors of every policy sync; TRL has no public hook for extra tensors. The feature check
-    # below is the version guard: a TRL release without the method gets a ConfigError, never a silent no-op.
+    # Third-party private hook: trl.generation.vllm_generation.VLLMGeneration._iter_named_params yields the tensors
+    # of every policy sync; TRL has no public hook for extra tensors. The installed TRL must lie in the tested range
+    # economize._compat.ENGINES["trl"] (a release whose method changed meaning would otherwise drop the drafter
+    # silently), and the feature check below refuses a trainer without the method.
+    if installed_version("trl") is not None:
+        require_engine("trl")
     original = getattr(generation, "_iter_named_params", None)
     if original is None or not callable(original):
         raise ConfigError("sync_drafter needs trl>=1.12 (VLLMGeneration._iter_named_params); "

@@ -14,14 +14,18 @@ Importing this package imports neither SGLang nor vLLM.
 
 from __future__ import annotations
 
+import logging
 from typing import Protocol, runtime_checkable
 
 import torch
 from torch import nn
 
+from ..._compat import check_engine, private_module
 from .export import DRAFTER_ARCHITECTURE, JumpSglangExporter  # registers the "sglang/*" exporters
 
 __all__ = ["DRAFTER_ARCHITECTURE", "JumpDraftBackend", "JumpSglangExporter", "register"]
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -42,9 +46,19 @@ class JumpDraftBackend(Protocol):
 
 
 def register() -> None:
-    """Register economize's draft model in SGLang's ``ModelRegistry`` (the ``sglang.srt.plugins`` entry point)."""
-    from sglang.srt.models.registry import ModelRegistry
+    """Register economize's draft model in SGLang's ``ModelRegistry`` (the ``sglang.srt.plugins`` entry point).
+
+    The draft model subclasses private SGLang layers, so on an SGLang release outside
+    ``economize._compat.ENGINES["sglang"]`` this registers nothing and logs an error naming the release to install
+    (listing ``sglang`` in ``economize._compat.ALLOW_UNTESTED_ENV`` registers anyway). Never raises for that reason,
+    since SGLang calls it in every process.
+    """
+    problem = check_engine("sglang")
+    if problem is not None:
+        logger.error("economize: the SGLang draft model is not registered: %s", problem)
+        return
+    registry = private_module("sglang", "sglang.srt.models.registry").ModelRegistry
 
     from .model import EconomizeJumpForCausalLM
 
-    ModelRegistry.models[DRAFTER_ARCHITECTURE] = EconomizeJumpForCausalLM
+    registry.models[DRAFTER_ARCHITECTURE] = EconomizeJumpForCausalLM

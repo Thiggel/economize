@@ -85,7 +85,9 @@ from .errors import (
     UnknownFieldWarning,
     UnknownNameError,
     UnregisteredNameError,
+    UnsupportedEngineVersionError,
     UnsupportedModelError,
+    UntestedEngineWarning,
 )
 from .runtime import current_phase, phase
 from .techniques.jump import JumpConfig  # noqa: F401  (importable for earlier releases, see the module docstring)
@@ -133,7 +135,9 @@ __all__ = [
     "UnknownFieldWarning",
     "UnknownNameError",
     "UnregisteredNameError",
+    "UnsupportedEngineVersionError",
     "UnsupportedModelError",
+    "UntestedEngineWarning",
     "Verifier",
     "VerifyEvent",
     "WeightAccess",

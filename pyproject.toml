@@ -55,15 +55,16 @@ quant = ["torchao>=0.18", "compressed-tensors>=0.17"]
 kernels = ["kernels>=0.17"]
 train = ["accelerate>=1.14", "datasets>=5.0", "trl>=1.14"]
 eval = ["lm-eval[hf]>=0.4.13"]
-# The vLLM plugin patches private vLLM classes, so the extra is capped at the series in
-# economize.backends.vllm.plugin.TESTED_VLLM (tests/unit/test_packaging.py keeps the two in step). A vLLM installed
-# outside the extra still loads the plugin, which logs a warning.
+# The vLLM plugin and the SGLang draft model patch or subclass private engine classes, so both extras admit exactly
+# the releases of economize._compat.ENGINES (tests/unit/test_packaging.py keeps them in step). On a release outside
+# them the plugins install nothing and log an error, and economize's own entry points raise
+# UnsupportedEngineVersionError; ECONOMIZE_ALLOW_UNTESTED_ENGINES=vllm,sglang relaxes both to a warning.
 vllm = ["vllm>=0.30,<0.31"]
 # Suffix decoding on vLLM (method="suffix" imports arctic_inference.suffix_decoding). Its vLLM patches stay off unless
 # ARCTIC_INFERENCE_ENABLED=1 (they target vLLM 0.26 and refuse 0.30); economize uses only the suffix trees.
 arctic = ["economize[vllm]", "arctic-inference>=0.3"]
 bench = ["datasets>=5.0"]
-sglang = ["sglang>=0.5.21"]
+sglang = ["sglang>=0.5.21,<0.6"]
 # Export runtimes (economize.backends.gguf / .onnx / .mlx / .trtllm). llama-cpp-python only loads a GGUF
 # export (economize.backends.gguf.load_llama); the MLX and TensorRT-LLM exports are written without their runtime
 # (TensorRT-LLM installs from NVIDIA's index on GPU machines, so it has no extra here).

@@ -31,6 +31,11 @@
 - `economize_training_args` sets the objective's schedule with its `min_lr_ratio` floor as `economize_schedule`,
   so `EffTrainer` follows the learning rates of `fit` (it used to pick the `transformers` cosine, which decays to
   zero). Pass `lr_scheduler_type=` for a `transformers` schedule.
+- The vLLM plugin, the SGLang draft model and `sync_drafter` check the installed vLLM, SGLang and TRL release against
+  `economize._compat.ENGINES` before touching private engine classes. `VllmPlan.llm`, `SglangPlan.engine` and
+  `sync_drafter` raise `UnsupportedEngineVersionError` outside the supported range; the engine plugins log an error
+  and install nothing (they used to warn and patch anyway). `ECONOMIZE_ALLOW_UNTESTED_ENGINES=vllm,sglang,trl` turns
+  this into an `UntestedEngineWarning`. The `sglang` extra is capped at `<0.6`.
 
 ## 0.5.0 (2026-11-18)
 

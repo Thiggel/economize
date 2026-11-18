@@ -20,18 +20,23 @@ raises and changes nothing for other drafters. It knows no technique: it install
 The hooks look the drafter up when vLLM constructs a proposer, so a drafter registered after :func:`register` ran
 is routed by the hooks already installed; call :func:`register` again to install what it adds beyond them.
 
+The hooks patch private vLLM classes, so :func:`register` installs nothing on a vLLM release outside
+``economize._compat.ENGINES["vllm"]`` and logs an error naming the release to install (listing ``vllm`` in the
+variable ``economize._compat.ALLOW_UNTESTED_ENV`` installs them anyway). Every hook re-checks the release through
+``economize._compat`` before it imports the private class it patches.
+
 Set ``VLLM_PLUGINS`` to a comma-separated allow-list (vLLM's own variable) to keep the plugin out of a deployment.
 """
 
 from __future__ import annotations
 
-import importlib
 import logging
 from collections.abc import Callable
 from functools import partial
 from types import ModuleType
 from typing import Any
 
+from ..._compat import ENGINES, check_engine, private_module, require_engine
 from ..._deprecation import moved_getattr, warn_moved
 from .drafters import VllmDrafter, drafter_of, import_path, registered_drafters
 from .extensions import registered_extensions
@@ -42,10 +47,10 @@ logger = logging.getLogger(__name__)
 
 _MARK = "__economize_drafter_hook__"
 _SPECULATORS = "vllm.transformers_utils.configs.speculators.algos"
-#: vLLM release series (``major.minor``) the hooks were tested against. They patch private vLLM classes, so another
-#: series may move them; :func:`check_vllm_version` names it in the log. Extend this when a new series passes
-#: ``tests/integrations/test_vllm_gpu.py``.
-TESTED_VLLM = ("0.30",)
+#: vLLM release series (``major.minor``) the hooks were tested against, from ``economize._compat.ENGINES["vllm"]``
+#: (widen the range there when a new series passes ``tests/integrations/test_vllm_gpu.py``).
+TESTED_VLLM = tuple(f"0.{minor}" for minor in range(int(ENGINES["vllm"].minimum.split(".")[1]),
+                                                   int(ENGINES["vllm"].below.split(".")[1])))
 
 
 def _jump() -> ModuleType:
@@ -65,17 +70,13 @@ def is_jump_draft(vllm_config: Any) -> bool:
     return VLLM_DRAFTERS.get("jump").matches(vllm_config)
 
 
-def check_vllm_version() -> None:
-    """Log a warning when the installed vLLM is outside :data:`TESTED_VLLM` (the plugin still tries to install).
-    Silent when vLLM cannot be imported: the hooks then log their own failures."""
-    try:
-        import vllm
-    except ImportError:
-        return
-    version = str(getattr(vllm, "__version__", ""))
-    if ".".join(version.split(".")[:2]) not in TESTED_VLLM:
-        logger.warning("economize: vLLM %s is not among the tested series %s; the drafter hooks patch private vLLM "
-                       "classes and may fail to install", version or "(unknown)", ", ".join(TESTED_VLLM))
+def check_vllm_version() -> bool:
+    """Whether the hooks may be installed on this vLLM; logs an error naming the release to install when not
+    (listing ``vllm`` in ``economize._compat.ALLOW_UNTESTED_ENV`` allows an untested release with a warning)."""
+    problem = check_engine("vllm")
+    if problem is not None:
+        logger.error("economize: the vLLM drafter hooks are not installed: %s", problem)
+    return problem is None
 
 
 def _register_model(drafter: VllmDrafter) -> None:
@@ -86,7 +87,7 @@ def _register_model(drafter: VllmDrafter) -> None:
 
 
 def _wrap_speculators_updater(algorithm: str) -> None:
-    algos = importlib.import_module(_SPECULATORS)
+    algos = private_module("vllm", _SPECULATORS)
     original = algos.SUPPORTED_SPECULATORS_TYPES.get(algorithm)
     if original is None or getattr(original, _MARK, False):
         return
@@ -111,6 +112,7 @@ def _wrap_speculators_updater(algorithm: str) -> None:
 def _hook_constructor(target: str) -> None:
     """Route ``Class(vllm_config, ...)`` (``target`` is ``"module:Class"``) to the replacement that the drafter of
     ``vllm_config`` declares for it, if any."""
+    require_engine("vllm")  # the class is private to vLLM
     cls = import_path(target)
     if cls.__dict__.get(_MARK, False):
         return
@@ -147,8 +149,10 @@ def _steps() -> list[tuple[str, Callable[[], None]]]:
 
 
 def register() -> None:
-    """Entry point of ``vllm.general_plugins``; idempotent, and logs instead of raising."""
-    check_vllm_version()
+    """Entry point of ``vllm.general_plugins``; idempotent, and logs instead of raising. Installs nothing on an
+    unsupported vLLM release (see :func:`check_vllm_version`)."""
+    if not check_vllm_version():
+        return
     for what, step in _steps():
         try:
             step()

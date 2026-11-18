@@ -396,3 +396,15 @@ def test_load_into_an_unreachable_engine_is_refused() -> None:
     llm = SimpleNamespace(llm_engine=SimpleNamespace())
     with pytest.raises(ConfigError, match="cannot reach the model inside this vLLM engine"):
         _load_into_engine(SimpleNamespace(llm=llm), [("w", torch.ones(1))])
+
+
+def test_sync_drafter_refuses_an_unsupported_trl(applied_jump: Callable[..., Any], tmp_path: Path,
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    """sync_drafter wraps a private TRL method, so a TRL release outside the supported range is refused by name."""
+    from economize.errors import UnsupportedEngineVersionError
+
+    model, _, generation, _ = _rig(applied_jump, tmp_path, "full")
+    monkeypatch.delenv("ECONOMIZE_ALLOW_UNTESTED_ENGINES", raising=False)
+    monkeypatch.setitem(sys.modules, "trl", types.SimpleNamespace(__version__="2.0.0"))
+    with pytest.raises(UnsupportedEngineVersionError, match=r"trl 2\.0\.0"):
+        sync_drafter(_trainer(generation), model)

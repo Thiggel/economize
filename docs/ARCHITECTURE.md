@@ -22,6 +22,7 @@ layers. A change to a contract in Section 3 is written here first.
 src/economize/
   __init__.py          public API only (apply, load, from_pretrained, save, EfficientModel, configs, registries, errors)
   _version.py          __version__, the single source (economize.__version__, checkpoints, pyproject's hatch version)
+  _compat.py           engine version guards: the vLLM / SGLang / TRL releases whose private classes economize hooks
   _deprecation.py      warn_moved: the DeprecationWarning of every shim that keeps a moved or renamed name alive
   _identity.py         IdentityMap: values keyed by the identity of live objects (tensors, modules), safe against
                        id reuse; per-object state lives on its owner or in such a map, never under a bare id()
@@ -81,7 +82,7 @@ against the table below (it reads the table from this file, so a new package mus
 
 | Layer | Packages |
 |---|---|
-| 0 | `_version`, `_deprecation`, `_identity`, `errors`, `unwrap`, `validation` |
+| 0 | `_version`, `_compat`, `_deprecation`, `_identity`, `errors`, `unwrap`, `validation` |
 | 1 | `registry`, `modules`, `attention` |
 | 2 | `arch` |
 | 3 | `runtime` |

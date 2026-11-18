@@ -403,7 +403,8 @@ def test_llm_installs_the_plugin_when_needed(monkeypatch: pytest.MonkeyPatch, pl
 
     calls: list[str] = []
     monkeypatch.setattr(vllm_plugin, "register", lambda: calls.append("register"))
-    monkeypatch.setitem(sys.modules, "vllm", types.SimpleNamespace(LLM=lambda **kwargs: calls.append("llm") or kwargs))
+    monkeypatch.setitem(sys.modules, "vllm", types.SimpleNamespace(
+        LLM=lambda **kwargs: calls.append("llm") or kwargs, __version__="0.30.0"))
     techniques = {"jump": "plugin"} if plugin else {"lookup": "native"}
     plan = VllmPlan(model="m", engine={"dtype": "float32"}, techniques=techniques)
     assert plan.llm(seed=0) == {"model": "m", "dtype": "float32", "seed": 0}
@@ -419,7 +420,7 @@ def test_llm_spawns_the_engine_unless_told_otherwise(monkeypatch: pytest.MonkeyP
         monkeypatch.delenv("VLLM_WORKER_MULTIPROC_METHOD", raising=False)
     else:
         monkeypatch.setenv("VLLM_WORKER_MULTIPROC_METHOD", preset)
-    monkeypatch.setitem(sys.modules, "vllm", types.SimpleNamespace(LLM=lambda **kwargs: kwargs))
+    monkeypatch.setitem(sys.modules, "vllm", types.SimpleNamespace(LLM=lambda **kwargs: kwargs, __version__="0.30.0"))
     VllmPlan(model="m").llm()
     assert os.environ["VLLM_WORKER_MULTIPROC_METHOD"] == (preset or "spawn")
 
@@ -478,3 +479,14 @@ def test_a_registered_adapter_extends_the_backend(tiny_dir: Path, tmp_path: Path
 def test_plan_path_raises_while_checking() -> None:
     with pytest.raises(ConfigError, match="only checks"):
         serving.PlanBuilder(None, None).path("model")
+
+
+def test_llm_refuses_an_unsupported_vllm(monkeypatch: pytest.MonkeyPatch) -> None:
+    import types
+
+    from economize.errors import UnsupportedEngineVersionError
+
+    monkeypatch.delenv("ECONOMIZE_ALLOW_UNTESTED_ENGINES", raising=False)
+    monkeypatch.setitem(sys.modules, "vllm", types.SimpleNamespace(LLM=lambda **kwargs: kwargs, __version__="0.31.1"))
+    with pytest.raises(UnsupportedEngineVersionError, match=r"vllm>=0\.30,<0\.31"):
+        VllmPlan(model="m").llm()
