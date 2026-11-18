@@ -21,7 +21,7 @@ All drafters share these properties, tested per drafter in `tests/techniques/tes
 | EAGLE-3 | `eagle3` | yes | `eagle3_ttt`, `distill_kl` | official, SpecForge, AngelSlim | `test_drafter_eagle3_oracle.py` |
 | Medusa | `medusa` | yes | `medusa_ce` | FasterDecoding | `test_drafter_medusa_oracle.py` |
 | Early exit / LayerSkip | `early_exit` | yes | `early_exit_kl`, `distill_kl`, `layerskip` | economize's own | `test_drafter_early_exit_oracle.py` |
-| Layer skipping (Draft & Verify, SWIFT, CLaSp) | `layer_skip` | no | | | `test_drafter_layer_skip_oracle.py` |
+| Static layer skipping (after Draft & Verify, SWIFT, CLaSp) | `layer_skip` | no | | | `test_drafter_layer_skip_oracle.py` |
 | Draft views (Draft & Verify, SWIFT, QSpec, MagicDec) | `draft_with` | no | | | none |
 | Two-model speculative decoding | `draft_model` | no | | any HF causal LM | `test_drafter_draft_model_oracle.py` |
 | PARD parallel draft LM | `pard` | no | | PARD draft LMs (any HF causal LM with a mask token) | none |
@@ -128,10 +128,18 @@ training of LayerSkip (layer dropout plus early-exit loss) is the `layerskip` ob
 ## Layer skipping (`layer_skip`)
 
 Draft & Verify [@zhang2024draftverify], SWIFT [@xia2025swift] and CLaSp [@chen2025clasp] draft with the model
-minus a set of layers. economize takes a given skip set or searches one offline on calibration data (`greedy` on KL
-or greedy-token mismatch, or `uniform`). Draft & Verify uses Bayesian optimization, SWIFT an online search during
-decoding and CLaSp a per-step dynamic-programming search; these searches are not implemented (new searches
-register in `SKIP_SEARCHES`). Skipped layers write no K/V and the next exact pass recomputes the drafted positions.
+minus a set of layers. `layer_skip` is a simplified stand-in for the three: it skips whole decoder layers, takes a
+given skip set or searches one offline on calibration data (`greedy` on KL or greedy-token mismatch, or `uniform`),
+and keeps that set fixed for the whole generation. None of the three published searches is implemented. Draft &
+Verify chooses attention and MLP sub-layers separately by Bayesian optimization, SWIFT re-optimizes the set online
+during decoding from the context's own matchness, and CLaSp re-chooses it by dynamic programming on the last
+verified states in every cycle. Numbers from `layer_skip` are therefore numbers of static whole-layer skipping and
+are not reproductions of any of these papers (new searches register in `SKIP_SEARCHES`). Skipped layers write no
+K/V and the next exact pass recomputes the drafted positions.
+
+The name refers to skipping layers in the middle of the model. Meta's LayerSkip [@elhoushi2024layerskip], which
+drafts with the first layers and exits early, is the `early_exit` technique (with the `layerskip` training
+objective) and has nothing to do with `layer_skip`.
 
 ## Draft views (`draft_with`)
 

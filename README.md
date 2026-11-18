@@ -88,7 +88,7 @@ serving, a tutorial for every technique and how to extend the library.
 
 | Family | Techniques |
 |---|---|
-| Drafters for speculative decoding | EAGLE-1/2, EAGLE-3, HASS, Medusa, Hydra, ReDrafter, DFlash, early exit and LayerSkip, Kangaroo, layer skipping (SWIFT), KnapSpec, FREE, DMTD, Hidden Transfer, separate draft models (also on another GPU), PARD, the Gemma-4 MTP assistant, prompt lookup, Lookahead, REST, SuffixDecoding, FR-Spec, MTP heads of DeepSeek-V3, GLM-4.5, MiMo and Qwen3.5, MagicDec and TriForce for long contexts |
+| Drafters for speculative decoding | EAGLE-1/2, EAGLE-3, HASS, Medusa, Hydra, ReDrafter, DFlash, early exit and LayerSkip, Kangaroo, static layer skipping (after Draft & Verify and SWIFT), KnapSpec, FREE, DMTD, Hidden Transfer, separate draft models (also on another GPU), PARD, the Gemma-4 MTP assistant, prompt lookup, Lookahead, REST, SuffixDecoding, FR-Spec, MTP heads of DeepSeek-V3, GLM-4.5, MiMo and Qwen3.5, MagicDec and TriForce for long contexts |
 | Dynamic depth | CALM, GateSkip, Mixture-of-Depths, FlexiDepth, SkipDecode, LoRA-Drop |
 | Weights and activations | ShortGPT and SLEB, magnitude, Wanda and SparseGPT pruning with 2:4 sparsity, SliceGPT, FLAP width pruning, SVD-LLM, LittleBit, RTN, GPTQ and AWQ to int2-int8 or fp8 with Marlin, Machete, torchao or compressed-tensors kernels, rotations, draft-only quantization, TEAL, CATS and DejaVu activation sparsity |
 | KV cache and attention | KIVI, FP8 KV cache, StreamingLLM, H2O and SnapKV eviction, DuoAttention, with fused attention kernels, Quest sparse decoding attention, MInference sparse prefill |
