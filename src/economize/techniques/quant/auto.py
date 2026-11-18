@@ -15,6 +15,7 @@ candidate       rank  runs
 ``machete``     40    vLLM's Machete int4 / int8 GEMM (Hopper)
 ``marlin``      30    vLLM's Marlin int4 / int8 / fp8 GEMM (sm80+; sm75 in fp16)
 ``cutlass``     20    vLLM's CUTLASS W8A8 int8 GEMM (``activations="int8"``)
+``triton``      15    economize's Triton weight-only int8 / fp8 GEMM (sm80+, bf16 / fp16; no vLLM needed)
 ``torchao``     10    torchao tensor subclasses (tinygemm int4 on sm80+ bf16, int8, fp8)
 ==============  ====  ======================================================================================
 
@@ -69,6 +70,7 @@ AUTO_QUANT_CANDIDATES: Registry[AutoCandidate] = Registry("automatic quantizatio
 AUTO_QUANT_CANDIDATES.register("machete", AutoCandidate(40, "pip install 'economize[vllm]'"))
 AUTO_QUANT_CANDIDATES.register("marlin", AutoCandidate(30, "pip install 'economize[vllm]'"))
 AUTO_QUANT_CANDIDATES.register("cutlass", AutoCandidate(20, "pip install 'economize[vllm]'"))
+AUTO_QUANT_CANDIDATES.register("triton", AutoCandidate(15, "pip install triton (shipped with PyTorch's CUDA wheels)"))
 AUTO_QUANT_CANDIDATES.register("torchao", AutoCandidate(10, "pip install 'economize[quant]'"))
 
 _OPTIONS = ("fp8_activations", "activations")

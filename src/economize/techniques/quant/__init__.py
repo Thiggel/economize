@@ -3,10 +3,10 @@ activation quantization (W8A8) and drafter-only quantization.
 
 Methods, number formats, kernel backends and AWQ scale groups are registries, so a new one is added by
 registration: :data:`QUANT_METHODS`, :data:`QUANT_FORMATS`, :data:`QUANT_BACKENDS`, :data:`AWQ_SCALE_GROUPS`,
-:data:`TORCHAO_TENSORS` (with :data:`TORCHAO_CONSTRAINTS`), :data:`MARLIN_FORMATS`. What a kernel accepts for a format
-(group sizes, zero points, dtypes, GPUs) is a :class:`KernelConstraints` registered with the format, which the
-backends check generically. A method or backend lists the config fields it reads (``options``); the others must keep
-their defaults.
+:data:`TORCHAO_TENSORS` (with :data:`TORCHAO_CONSTRAINTS`), :data:`MARLIN_FORMATS`, :data:`TRITON_FORMATS`. What a
+kernel accepts for a format (group sizes, zero points, dtypes, GPUs) is a :class:`KernelConstraints` registered with
+the format, which the backends check generically. A method or backend lists the config fields it reads (``options``);
+the others must keep their defaults.
 """
 
 from .activations import ACTIVATION_SCHEMES, ActivationScheme, DynamicFp8PerToken, DynamicIntPerToken
@@ -35,6 +35,7 @@ from .model import quantizable, quantize_model, quantize_modules
 from .readback import CODE_READERS, CodeReader, read_quantized_weight
 from .smoothquant import SmoothQuantMethod, smoothquant_scales
 from .technique import DraftQuantTechnique, QuantTechnique
+from .triton_gemm import TRITON_FORMATS, TritonBackend, TritonWeight, triton_available
 
 __all__ = [
     "ACTIVATION_SCHEMES",
@@ -48,6 +49,7 @@ __all__ = [
     "QUANT_METHODS",
     "TORCHAO_CONSTRAINTS",
     "TORCHAO_TENSORS",
+    "TRITON_FORMATS",
     "ActivationScheme",
     "AutoCandidate",
     "AutoQuantBackend",
@@ -81,6 +83,8 @@ __all__ = [
     "QuantizedWeight",
     "ScaleGroup",
     "SmoothQuantMethod",
+    "TritonBackend",
+    "TritonWeight",
     "awq_clip_thresholds",
     "awq_scale_layer",
     "cutlass_available",
@@ -103,4 +107,5 @@ __all__ = [
     "restore_draft",
     "search_scale",
     "smoothquant_scales",
+    "triton_available",
 ]
