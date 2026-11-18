@@ -249,6 +249,15 @@ class Technique(nn.Module):
     def detach(self) -> None:
         """Undo every change made to the base model."""
 
+    def plain_save_issue(self) -> str | None:
+        """Why the base model, once this technique attached, no longer survives ``transformers``' plain
+        ``save_pretrained`` followed by ``from_pretrained`` (``None`` if it does). A reason makes the base model's
+        ``save_pretrained`` refuse to write (see :func:`~economize.core.plain_save.guard_plain_save`), so a
+        transform kept in hooks or in modules ``transformers`` cannot rebuild is never saved as a silently wrong
+        checkpoint. Default: ``None``.
+        """
+        return None
+
     def layer_copies(self) -> Mapping[int, nn.Module]:
         """Copies of base-model decoder layers (1-based index to module) that the technique runs in place of the
         layer on some path, reading and writing that layer's KV cache (e.g. a drafter's trainable copies).

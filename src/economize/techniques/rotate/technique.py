@@ -50,6 +50,11 @@ class RotateTechnique(CalibratedWeightTransform):
     methods: ClassVar[Registry[Any]] = ROTATIONS
     config: RotateConfig
 
+    def plain_save_issue(self) -> str | None:
+        if not self.config.online:
+            return None  # every rotation is folded into the weights
+        return f"the online rotations of {list(self.config.online)} are forward hooks, which the weights omit"
+
     @classmethod
     def conflict(
         cls, config: TechniqueConfig | None, other: type[Technique], other_config: TechniqueConfig | None

@@ -19,6 +19,7 @@ from .cache_wrapping import CacheWrapping
 from .config import TechniqueConfig
 from .hub import EconomizeHubMixin
 from .metadata import Simulation
+from .plain_save import guard_plain_save
 from .recipe import States, attach_techniques
 from .serialization import source_digests
 from .technique import Capability, Technique, technique_for
@@ -322,6 +323,8 @@ def build_model(
     rewrites = any(Capability.WEIGHTS in technique_for(c).capabilities for c in configs)
     digests = source_digests(model) if rewrites and adapter.tensor_parallel_size == 1 else None
     techniques = attach_techniques(adapter.model, adapter, configs, states=states, calibration=calibration)
+    issues = [f"{t.name}: {issue}" for t in techniques if (issue := t.plain_save_issue()) is not None]
+    guard_plain_save(list({id(m): m for m in (model, adapter.model)}.values()), issues)
     if decoding is None:
         drafts = any(Capability.DRAFTER in t.capabilities for t in techniques)
         decoding = DecodeConfig(cycle_length=4 if drafts else 1)
