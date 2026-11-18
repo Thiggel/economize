@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Checkpoints record a `schema_version` in `economize_config.json`. Loading upgrades older checkpoints through the
+  registered steps of `economize.core.serialization.MIGRATIONS` (checkpoints without a version, including effkit
+  ones, are version 0) and refuses a newer schema with the release to install.
+- Configuration fields unknown to this release (saved by a newer one) are dropped with an `UnknownFieldWarning`
+  instead of failing the load, and fields an older release did not save take their defaults.
+- Releases are published by `.github/workflows/release.yml` only after the full CI passes on the tagged commit,
+  and CI tests Python 3.10 to 3.13.
+
 ## 0.5.0 (2026-11-18)
 
 ### Added

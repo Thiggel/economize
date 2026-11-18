@@ -7,7 +7,7 @@ from dataclasses import dataclass, field, fields
 from typing import Any
 
 from ..errors import ConfigError
-from ..validation import check_positive, check_unit_interval
+from ..validation import check_positive, check_unit_interval, known_fields
 
 __all__ = ["DecodeConfig"]
 
@@ -129,10 +129,9 @@ class DecodeConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DecodeConfig:
-        unknown = set(data) - set(cls.__dataclass_fields__)
-        if unknown:
-            raise ConfigError(f"unknown DecodeConfig fields {sorted(unknown)}")
-        return cls(**data)
+        """The options written by :meth:`to_dict`. Missing fields take their defaults; fields this release does not
+        know (saved by a newer one) are dropped with an :class:`~economize.errors.UnknownFieldWarning`."""
+        return cls(**known_fields(cls.__name__, data, set(cls.__dataclass_fields__)))
 
 
 def _frozen(value: Any) -> Any:

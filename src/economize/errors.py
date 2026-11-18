@@ -10,6 +10,7 @@ __all__ = [
     "IncompatibleTechniquesError",
     "SimulatedPathWarning",
     "TeacherMismatchWarning",
+    "UnknownFieldWarning",
     "UnknownNameError",
     "UnregisteredNameError",
     "UnsupportedModelError",
@@ -56,6 +57,11 @@ class SimulatedPathWarning(UserWarning):
     """A technique attached on a path that reproduces its outputs without realizing its saving (fake quantization,
     masked eviction; see :class:`~economize.Simulation`). Quality numbers are valid; memory and speed numbers of the
     path are not those of the technique."""
+
+
+class UnknownFieldWarning(UserWarning):
+    """A saved configuration names fields this version of economize does not know (typically a checkpoint written by
+    a newer release). The fields are ignored and the configuration is built from the fields that are known."""
 
 
 class TeacherMismatchWarning(UserWarning):

@@ -55,9 +55,10 @@ def test_jump_config_round_trips_through_json() -> None:
     assert JumpConfig.from_dict(data) == config
 
 
-def test_jump_config_rejects_unknown_fields() -> None:
-    with pytest.raises(ConfigError, match="unknown JumpConfig fields \\['m'\\]"):
-        JumpConfig.from_dict({"target_layer": 2, "source_layer": 4, "m": 2})
+def test_jump_config_drops_unknown_fields_with_a_warning() -> None:
+    with pytest.warns(economize.UnknownFieldWarning, match="unknown JumpConfig fields \\['m'\\]"):
+        config = JumpConfig.from_dict({"target_layer": 2, "source_layer": 4, "m": 2})
+    assert config == JumpConfig(target_layer=2, source_layer=4)
 
 
 def test_jump_config_from_dict_reports_missing_fields() -> None:
@@ -100,8 +101,8 @@ def test_decode_config_validation_and_resolution() -> None:
 def test_decode_config_round_trip() -> None:
     config = DecodeConfig(cycle_length=6, lossless=False, min_confidence=0.25)
     assert DecodeConfig.from_dict(json.loads(json.dumps(config.to_dict()))) == config
-    with pytest.raises(ConfigError, match="unknown DecodeConfig fields"):
-        DecodeConfig.from_dict({"N": 4})
+    with pytest.warns(economize.UnknownFieldWarning, match="unknown DecodeConfig fields"):
+        assert DecodeConfig.from_dict({"N": 4}) == DecodeConfig()
 
 
 def test_decode_config_options_round_trip_and_hash() -> None:

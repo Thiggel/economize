@@ -6,6 +6,7 @@ import dataclasses
 from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
 from ..errors import ConfigError
+from ..validation import known_fields
 
 if TYPE_CHECKING:
     from ..arch import ArchAdapter
@@ -36,22 +37,24 @@ class TechniqueConfig:
     def from_dict(cls: type[C], data: dict[str, Any]) -> C:
         """The configuration written by :meth:`to_dict` (lists become tuples).
 
+        A field missing from ``data`` takes its default, so a configuration saved before the field existed still
+        loads. A field the class does not have (one added by a newer release) is dropped with an
+        :class:`~economize.errors.UnknownFieldWarning`, so a checkpoint of a newer minor version loads on an older
+        one as long as the remaining fields describe it.
+
         Raises:
-            ConfigError: ``data`` names a field the class does not have, or lacks a field without a default.
+            ConfigError: ``data`` lacks a field without a default.
         """
         fields = dataclasses.fields(cls)
-        names = {f.name for f in fields}
-        unknown = set(data) - names
-        if unknown:
-            raise ConfigError(f"unknown {cls.__name__} fields {sorted(unknown)}; known: {sorted(names)}")
+        known = known_fields(cls.__name__, data, {f.name for f in fields})
         missing = [
             f.name for f in fields
-            if f.init and f.name not in data
+            if f.init and f.name not in known
             and f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING
         ]
         if missing:
             raise ConfigError(f"{cls.__name__} needs the fields {missing}")
-        return cls(**{k: tuple(v) if isinstance(v, list) else v for k, v in data.items()})
+        return cls(**{k: tuple(v) if isinstance(v, list) else v for k, v in known.items()})
 
 
 def _to_json(value: object) -> object:

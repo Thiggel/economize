@@ -10,6 +10,11 @@ Loading compares the fingerprint with that of the base model the techniques are 
 (:class:`~economize.TeacherMismatchWarning`) when they differ, e.g. when a drafter trained on one checkpoint of a model
 is attached to another.
 
+Every checkpoint records the :data:`SCHEMA_VERSION` of its ``economize_config.json``. Reading upgrades an older one
+step by step through :data:`MIGRATIONS` (checkpoints written before the version existed count as version 0) and
+refuses a newer one with a message that names the release to install. Adding an entry or a technique field does not
+change the version: a release that does not know the field drops it with an :class:`~economize.UnknownFieldWarning`.
+
 Other checkpoint layouts (e.g. ``jump.pt`` files or official draft heads) are read by registering a
 :class:`CheckpointFormat` in :data:`FORMATS`. :func:`read_checkpoint` asks every registered format whether it
 recognizes a path and refuses to guess when more than one does, so a new format's :meth:`~CheckpointFormat.detect`
@@ -22,7 +27,7 @@ import hashlib
 import json
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -46,6 +51,8 @@ if TYPE_CHECKING:
 __all__ = [
     "CONFIG_FILE",
     "FORMATS",
+    "MIGRATIONS",
+    "SCHEMA_VERSION",
     "TRAINED_ENTRY",
     "WEIGHTS_FILE",
     "Checkpoint",
@@ -57,6 +64,7 @@ __all__ = [
     "check_teacher_fingerprint",
     "from_pretrained",
     "load",
+    "migrate",
     "read_checkpoint",
     "save",
     "teacher_fingerprint",
@@ -65,6 +73,44 @@ __all__ = [
 
 CONFIG_FILE = "economize_config.json"
 WEIGHTS_FILE = "economize_model.safetensors"
+
+#: Version of the layout of :data:`CONFIG_FILE`. It changes only when an existing entry changes its form or meaning,
+#: together with a migration from the previous version registered in :data:`MIGRATIONS`.
+SCHEMA_VERSION = 1
+
+#: A step of :func:`migrate`: the metadata of schema version ``v`` turned into that of version ``v + 1``.
+Migration = Callable[[dict[str, Any]], dict[str, Any]]
+
+#: Checkpoint migrations, registered under the version they upgrade from (``"0"`` upgrades to 1). A new schema version
+#: registers one more step here and never edits the existing ones.
+MIGRATIONS: Registry[Migration] = Registry("checkpoint migration")
+
+
+@MIGRATIONS.register("0")
+def _unversioned(meta: dict[str, Any]) -> dict[str, Any]:
+    """Checkpoints of releases up to 0.5, which wrote no ``schema_version``, have the layout of version 1."""
+    return meta
+
+
+def migrate(meta: Mapping[str, Any]) -> dict[str, Any]:
+    """``meta`` (the contents of a :data:`CONFIG_FILE`) upgraded to :data:`SCHEMA_VERSION` by the steps of
+    :data:`MIGRATIONS`. Metadata without ``schema_version`` is version 0.
+
+    Raises:
+        CheckpointFormatError: The checkpoint has a newer schema than this release reads.
+    """
+    out = dict(meta)
+    version = int(out.get("schema_version", 0))
+    if version > SCHEMA_VERSION:
+        raise CheckpointFormatError(
+            f"the checkpoint has schema version {version} (written by economize {out.get('economize_version')}), "
+            f"this release reads up to version {SCHEMA_VERSION}: upgrade economize to load it"
+        )
+    while version < SCHEMA_VERSION:
+        out = MIGRATIONS.get(str(version))(out)
+        version += 1
+        out["schema_version"] = version
+    return out
 
 
 @dataclass
@@ -109,7 +155,7 @@ class EconomizeFormat(CheckpointFormat):
     def read(self, path: Path, map_location: str | torch.device = "cpu") -> Checkpoint:
         from safetensors.torch import load_file
 
-        meta = json.loads((path / self.config_file).read_text())
+        meta = migrate(json.loads((path / self.config_file).read_text()))
         configs = [nested_config(entry) for entry in meta["techniques"]]
         states: dict[str, dict[str, torch.Tensor]] = {t["technique"]: {} for t in meta["techniques"]}
         for key, value in load_file(path / self.weights_file, device=str(map_location)).items():
@@ -256,6 +302,7 @@ def save(
     path = Path(path)
     excluded = trained_parameter_names(model, trained)
     meta: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
         "economize_version": __version__,
         "base_model": getattr(model.base_model.config, "_name_or_path", None),
         "teacher_fingerprint": _recorded_fingerprint(model, excluded),
