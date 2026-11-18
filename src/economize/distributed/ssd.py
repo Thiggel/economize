@@ -36,6 +36,7 @@ with the SSD statistics added.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -137,14 +138,35 @@ class SSDResult(DecodeResult):
         return 1 + self.mean_accepted
 
     def summary(self) -> dict[str, Any]:
-        """The statistics above and the target's cost summary."""
+        """The statistics above, the target's cost summary and the drafter's work.
+
+        The target's keys (``exact_calls``, ``layer_tokens``, ``relative_layer_tokens``, ...) count the target's
+        passes only. The drafter's side: ``draft_steps`` and ``wasted_draft_steps`` count its draft steps,
+        ``draft_layer_tokens`` the layers of the target's architecture it ran (a self-drafter's), and
+        ``module_layer_tokens`` the layers of separate networks per network (``"draft_model"`` for a separate draft
+        LM, in its own layers). ``relative_layer_tokens_with_draft`` adds ``draft_layer_tokens`` to the target's
+        work relative to plain decoding. A separate network's layers have another size, so price them with
+        :class:`~economize.bench.CostModel` (``draft=CallSpec(shape=...)``) over :attr:`cost` and
+        :attr:`draft_cost`.
+        """
+        generated = self.tokens.numel()
+        target = self.cost_summary()
+        draft = self.draft_cost.summary(self.num_layers, self.prompt_length, generated)
+        modules: Counter[str] = Counter(target["module_layer_tokens"])
+        modules.update(draft["module_layer_tokens"])
+        plain = max(1, (self.prompt_length + generated - 1) * self.num_layers)
         return {
-            "generated": self.tokens.numel(),
+            "generated": generated,
             "rounds": self.rounds,
             "acceptance_length": self.acceptance_length,
             "hit_rate": self.hit_rate,
             "draft_calls": len(self.draft_cost.events),
-            **self.cost_summary(),
+            **target,
+            "draft_steps": target["draft_steps"] + draft["draft_steps"],
+            "wasted_draft_steps": target["wasted_draft_steps"] + draft["wasted_draft_steps"],
+            "draft_layer_tokens": draft["layer_tokens"],
+            "module_layer_tokens": dict(modules),
+            "relative_layer_tokens_with_draft": (target["layer_tokens"] + draft["layer_tokens"]) / plain,
         }
 
 

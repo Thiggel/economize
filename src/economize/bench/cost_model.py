@@ -7,7 +7,7 @@ layers run and the module that ran them). This module prices those events for a 
     costs = CostModel(shape)
     report = costs.log(result.cost)                      # every call of one generation
     costs.relative(result.cost, prompt_tokens, generated, "a100-80gb")
-    # {"flops": 0.71, "bytes": 0.43, "seconds": 0.45, "speedup": 2.2, ...}
+    # {"flops": 0.71, "bytes": 0.43, "modelled_seconds": 0.45, "modelled_speedup": 2.2, ...}
     CostModel(shape, draft=CallSpec(shape=draft_shape))  # a separate draft model (module "draft_model")
     CostModel(shape, modules={"eagle3": CallSpec(shape=eagle_shape)})  # any other draft network
 
@@ -304,7 +304,10 @@ class Hardware:
         name: Display name.
         flops: Peak dense FLOP/s at the weights' precision (bf16 tensor cores for the presets).
         bandwidth: Memory bandwidth in bytes/s.
-        call_overhead: Seconds added to every call (kernel launches, host work).
+        call_overhead: Seconds added to every call (kernel launches, host work). The presets set ``0``: their
+            roofline times leave launch and host overhead out, which favours methods that make many small calls.
+            Measure it on your runtime and set it with ``dataclasses.replace(get_hardware("a100-80gb"),
+            call_overhead=...)`` to include it.
     """
 
     name: str
@@ -318,7 +321,9 @@ class Hardware:
         return self.flops / self.bandwidth
 
 
-#: Accelerator presets (extensible by registration or the ``economize.hardware`` entry-point group).
+#: Accelerator presets (extensible by registration or the ``economize.hardware`` entry-point group): dense bf16
+#: tensor-core TFLOP/s without structured sparsity and memory bandwidth in GB/s, from the vendor datasheets (the L40
+#: and the L40S share their memory system; the L40S has twice the tensor throughput). ``call_overhead`` is 0.
 HARDWARE: Registry[Hardware] = Registry("hardware", "economize.hardware")
 for _name, _tflops, _gbps in (
     ("a40", 149.7, 696), ("a100-40gb", 312, 1555), ("a100-80gb", 312, 2039), ("h100-sxm", 989, 3350),
@@ -547,13 +552,15 @@ class CostModel:
         """A generation's cost relative to plain decoding of the same output.
 
         Returns:
-            ``flops`` and ``bytes`` ratios (below 1 is cheaper) and, with ``hardware``, the ``seconds`` ratio of the
-            roofline times and its inverse ``speedup``.
+            ``flops``, ``bytes`` and ``calls`` ratios (below 1 is cheaper) and, with ``hardware``, the
+            ``modelled_seconds`` ratio of the roofline times and its inverse ``modelled_speedup``. Both are
+            modelled, never measured (time a generation with :func:`benchmark_generation` for that); ``seconds``
+            and ``speedup`` are kept as aliases of the two.
         """
         report, plain = self.log(log), self.plain(prompt_tokens, generated)
         result = {"flops": report.flops / plain.flops, "bytes": report.bytes / plain.bytes,
                   "calls": len(report.calls) / len(plain.calls)}
         if hardware is not None:
             seconds = report.seconds(hardware) / plain.seconds(hardware)
-            result.update(seconds=seconds, speedup=1 / seconds)
+            result.update(modelled_seconds=seconds, modelled_speedup=1 / seconds, seconds=seconds, speedup=1 / seconds)
         return result

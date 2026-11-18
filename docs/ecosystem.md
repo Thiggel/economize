@@ -404,7 +404,10 @@ print(costs.relative(result.cost, result.prompt_length, len(result.tokens), hard
 ```
 
 `relative` compares the generation with plain decoding of the same output and returns ratios of FLOPs, bytes and
-sequential calls, plus the modelled speedup. Calls of the target's own layers (an early exit, LayerSkip) are priced
+sequential calls, plus the roofline speedup under the key `modelled_speedup` (`speedup` is an alias kept for old
+code). The presets leave per-call launch and host overhead out (`call_overhead=0`), so set `call_overhead` on the
+`Hardware` before comparing methods that make different numbers of calls, and compare measured times only within one
+runtime (economize's loop against `model.generate` also changes the runtime). Calls of the target's own layers (an early exit, LayerSkip) are priced
 from `shape`; a separate draft network such as the EAGLE-3 layer is priced by the `CallSpec` given for its module
 name, and `CostModel` refuses a log with calls of a module it has no entry for. The dense FLOPs of one decode step match PyTorch's `FlopCounterMode`
 up to the rotary embedding, and parameter counts match the `transformers` models of Llama, Mixtral, Qwen2-MoE and
