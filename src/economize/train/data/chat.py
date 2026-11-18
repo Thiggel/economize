@@ -113,6 +113,7 @@ def generate_self_distillation(
     generate_kwargs.setdefault("do_sample", False)
     pad = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
     device = next(model.parameters()).device
+    stops = _stop_ids(tokenizer, model, generate_kwargs)
     examples: list[Example] = []
     for first in range(0, len(prompts), batch_size):
         chunk = prompts[first : first + batch_size]
@@ -133,9 +134,7 @@ def generate_self_distillation(
             pad_token_id=pad, **generate_kwargs,
         ).cpu()
         for i, e in enumerate(encoded):
-            continuation = out[i, width:].tolist()
-            if tokenizer.eos_token_id is not None and tokenizer.eos_token_id in continuation:
-                continuation = continuation[: continuation.index(tokenizer.eos_token_id) + 1]
+            continuation = _finished(out[i, width:].tolist(), stops, pad)
             if not continuation:
                 continue
             tokens = torch.tensor(list(e) + continuation, dtype=torch.long)
@@ -145,3 +144,36 @@ def generate_self_distillation(
         if progress is not None:
             progress(min(first + batch_size, len(prompts)), len(prompts))
     return examples
+
+
+def _ids(value: object) -> set[int]:
+    """Token ids from an ``eos_token_id`` setting (``None``, an int or a list of ints)."""
+    if isinstance(value, int):
+        return {value}
+    if isinstance(value, (list, tuple)):
+        return {v for v in value if isinstance(v, int)}
+    return set()
+
+
+def _stop_ids(tokenizer: Any, model: nn.Module, generate_kwargs: Mapping[str, Any]) -> set[int]:
+    """Every id ``generate`` stops on: the tokenizer's EOS, the model's generation config (Llama 3 and Qwen chat
+    models list several) and an ``eos_token_id`` passed to the call."""
+    config = getattr(model, "generation_config", None)
+    return (
+        _ids(tokenizer.eos_token_id)
+        | _ids(getattr(config, "eos_token_id", None))
+        | _ids(generate_kwargs.get("eos_token_id"))
+    )
+
+
+def _finished(continuation: list[int], stops: set[int], pad: int | None) -> list[int]:
+    """A generated row up to and including its first stop id. ``generate`` fills a row that finished before the
+    others with ``pad``; a row that finished on a criterion without a stop id (``stop_strings``) keeps such a
+    filler tail, which is dropped so it never becomes a loss target."""
+    for index, token in enumerate(continuation):
+        if token in stops:
+            return continuation[: index + 1]
+    if pad is not None and pad not in stops:
+        while continuation and continuation[-1] == pad:
+            continuation = continuation[:-1]
+    return continuation
