@@ -42,7 +42,7 @@ from vllm.model_executor.layers.quantization import register_quantization_config
 from vllm.model_executor.layers.quantization.base_config import QuantizationConfig, QuantizeMethodBase
 from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.model_executor.utils import set_weight_attrs
-from vllm.utils.torch_utils import direct_register_custom_op
+from vllm.utils.torch_utils import direct_register_custom_op, vllm_lib
 
 from ....errors import ConfigError
 from ...exporters import UnsupportedBackendError
@@ -100,10 +100,20 @@ def _factored_linear_fake(x: Tensor, bias: Optional[Tensor], weight: Optional[Te
     return x.new_empty((*x.shape[:-1], sum(sizes)))
 
 
+def _register(name: str, op: Any, fake: Any) -> None:
+    """Register ``op`` for the platform's device and for CPU tensors, which it computes in plain PyTorch too
+    (vLLM registers a custom op for the platform's dispatch key only, CUDA on a GPU host)."""
+    from vllm.platforms import current_platform
+
+    direct_register_custom_op(name, op, fake_impl=fake)
+    if current_platform.dispatch_key != "CPU":
+        vllm_lib.impl(name, op, dispatch_key="CPU")
+
+
 if not hasattr(torch.ops.vllm, TEAL_OP):
-    direct_register_custom_op(TEAL_OP, teal_linear_op, fake_impl=_teal_linear_fake)
+    _register(TEAL_OP, teal_linear_op, _teal_linear_fake)
 if not hasattr(torch.ops.vllm, FACTORED_OP):
-    direct_register_custom_op(FACTORED_OP, factored_linear_op, fake_impl=_factored_linear_fake)
+    _register(FACTORED_OP, factored_linear_op, _factored_linear_fake)
 
 
 def _column_major(param: Tensor) -> None:

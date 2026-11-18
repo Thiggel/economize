@@ -105,6 +105,8 @@
 - Attention taps and the SDPA guard see one query head per head on transformers 5.23, which folds the query heads of
   a single-token grouped-query call onto the K/V heads (`pack_gqa`): the guard repeats K/V for such calls, so
   KV eviction scores, the sparse-KV draft and watched and unwatched decoding agree bit for bit again.
+- The vLLM linear methods of `teal` and `lowrank` also run on CPU tensors on a GPU host: vLLM registers a custom op
+  for the platform's dispatch key only, so the ops are registered for CPU as well.
 
 ## 0.4.0 (2026-11-04)
 
