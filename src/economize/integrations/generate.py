@@ -18,7 +18,10 @@ stopping criteria, finished rows are padded with ``pad_token_id``). ``row_stoppi
 rows, e.g. lm-eval's stop sequences, which differ between requests and keep state per row. Greedy outputs equal those
 of decoding the rows one by one; sampled rows draw from the same distributions, but the random numbers are consumed in
 another order.
-``output_scores`` / ``output_logits`` cost one extra forward pass over the finished sequences.
+``output_scores`` / ``output_logits`` cost one extra forward pass of the base model over the finished sequences.
+They are refused when that pass would not reproduce the logits the tokens were chosen from: lossy verification
+(``accept_all``, ``typical``) or a lossy technique that acts at decoding time (KV cache, activation sparsity, layer
+skipping). Weight transformations live in the base model and are included.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from typing import Any, cast
 
 import torch
 
+from ..core.metadata import Capability
 from ..decoding.verifiers import VERIFIERS
 from ..errors import ConfigError
 from ..unwrap import base_model_of  # re-exported: integrations import it from here
@@ -65,6 +69,32 @@ def _check_sampling(model: Any, decoding: Any) -> None:
         raise ConfigError(
             f"do_sample=True cannot be verified by the {name!r} verifier; use a sampling verifier such as "
             "DecodeConfig(verifier='rejection') for lossless speculative sampling, or DecodeConfig(lossless=False)"
+        )
+
+
+#: Capabilities of lossy techniques that the scores pass reproduces: rewritten weights live in the base model, and
+#: drafts are verified against it.
+_SCORED_CAPABILITIES = Capability.WEIGHTS | Capability.DRAFTER
+
+
+def _check_scores(model: Any, decoding: Any, config: Any) -> None:
+    """``output_scores`` / ``output_logits`` are recomputed by a plain forward of the base model (see
+    :func:`_dict_output`). Raise :class:`ConfigError` when that forward is not what chose the tokens."""
+    wanted = [name for name in ("output_scores", "output_logits") if getattr(config, name, False)]
+    if not wanted:
+        return
+    problems = []
+    if _drafts(model, decoding) and not VERIFIERS.get(decoding.verifier_name).lossless:
+        problems.append(f"the lossy {decoding.verifier_name!r} verifier keeps tokens the model would not choose")
+    lossy = getattr(model, "lossy_techniques", None)
+    techniques = lossy(_SCORED_CAPABILITIES) if callable(lossy) else []
+    if techniques:
+        problems.append(f"the lossy technique(s) {techniques} change the decoding passes but not a plain forward")
+    if problems:
+        raise ConfigError(
+            f"{' and '.join(wanted)} would be recomputed by a plain forward of the base model, which does not "
+            f"describe the generated tokens here: {'; '.join(problems)}. Drop {' / '.join(wanted)}, or decode "
+            "losslessly without these techniques"
         )
 
 
@@ -108,6 +138,8 @@ class EconomizeGenerate:
         do_sample = bool(getattr(config, "do_sample", False))
         if do_sample:
             _check_sampling(self.model, decoding)
+        if getattr(config, "return_dict_in_generate", False):
+            _check_scores(self.model, decoding, config)
         batch, width = input_ids.shape
         if self.streamer is not None:
             if batch != 1:
@@ -265,7 +297,9 @@ def generate(
 
     Raises:
         ConfigError: An argument selects behaviour economize cannot reproduce (beam search, assisted generation,
-            guidance, attentions or hidden states as outputs, prefilled caches, sampling with a greedy verifier).
+            guidance, attentions or hidden states as outputs, prefilled caches, sampling with a greedy verifier),
+            or ``output_scores`` / ``output_logits`` that the recomputing forward would not reproduce (lossy
+            verifier, lossy technique acting at decoding time).
     """
     for name, what in _REJECTED_ARGS.items():
         if kwargs.get(name) is not None:

@@ -251,14 +251,23 @@ class EfficientModel(nn.Module, EconomizeHubMixin):
         """
         return GENERATE_IMPLEMENTATIONS.get(self.generate_implementation)(self, inputs, **kwargs)
 
+    def lossy_techniques(self, compatible: Capability = Capability.NONE) -> list[str]:
+        """Names of the attached lossy techniques that have a capability outside ``compatible``.
+
+        ``lossy_techniques(LOSSLESS_COMPATIBLE)`` lists those that make ``lossless=True`` impossible;
+        ``lossy_techniques(Capability.WEIGHTS | Capability.DRAFTER)`` those whose effect a plain forward of the
+        base model does not reproduce (``generate`` refuses ``output_scores`` with them).
+        """
+        return [t.name for t in self.techniques.values()
+                if not t.lossless and not (t.capabilities and t.capabilities in compatible)]
+
     # ---- helpers -----------------------------------------------------------------------------------------------
     def _first(self, capability: Capability) -> Technique | None:
         return next((t for t in self.techniques.values() if capability in t.capabilities), None)
 
     def _check_lossless(self) -> None:
         """Raise :class:`ConfigError` when a lossy technique outside :data:`LOSSLESS_COMPATIBLE` is attached."""
-        lossy = [t.name for t in self.techniques.values()
-                 if not t.lossless and not (t.capabilities and t.capabilities in LOSSLESS_COMPATIBLE)]
+        lossy = self.lossy_techniques(LOSSLESS_COMPATIBLE)
         if lossy:
             raise ConfigError(
                 f"lossless=True contradicts the lossy technique(s) {lossy}: they change the exact pass itself "

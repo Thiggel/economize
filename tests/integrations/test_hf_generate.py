@@ -425,3 +425,31 @@ def test_history_free_selector_matches_the_row_selector() -> None:
     assert torch.equal(greedy.distributions(logits).argmax(-1), logits.argmax(-1))
     penalty = make_selector(LogitsProcessorList([Suppress(3)]), do_sample=False)
     assert type(penalty) is ProcessedSelector and not isinstance(penalty, BatchSelector)
+
+
+def test_scores_are_refused_where_the_recomputing_forward_would_not_describe_the_tokens(jump_model) -> None:
+    """``output_scores`` / ``output_logits`` come from a plain forward of the base model: a lossy verifier or a lossy
+    technique that acts while decoding would make them disagree with the tokens, so they raise instead."""
+    from economize.techniques.kv_evict import KVEvictConfig
+    from economize.techniques.quant import QuantConfig
+
+    prompt = _prompt(13)
+    scored = dict(max_new_tokens=6, return_dict_in_generate=True, output_scores=True)
+    lossy = DecodeConfig(cycle_length=4, lossless=False)
+    for name in ("output_scores", "output_logits"):
+        with pytest.raises(ConfigError, match=f"{name}.*'accept_all'"):
+            generate(jump_model(), prompt, max_new_tokens=6, return_dict_in_generate=True, decoding=lossy,
+                     **{name: True})
+    with pytest.raises(ConfigError, match="'typical'"):
+        generate(jump_model(), prompt, decoding=DecodeConfig(cycle_length=4, verifier="typical"), **scored)
+    evicting = economize.apply(make_tiny_model(), KVEvictConfig(method="h2o", recent=4, heavy=4))
+    with pytest.raises(ConfigError, match=r"\['kv_evict'\]"):
+        generate(evicting, prompt, **scored)
+    # without the extra outputs the same decodes run
+    assert generate(evicting, prompt, max_new_tokens=6).shape == (1, PROMPT_LEN + 6)
+    assert generate(jump_model(), prompt, max_new_tokens=6, decoding=lossy).shape == (1, PROMPT_LEN + 6)
+    # lossless drafting over quantized weights: the forward is the model that chose the tokens
+    quantized = economize.apply(make_tiny_model(), QuantConfig(backend="fake", group_size=None), JumpConfig(
+        target_layer=2, source_layer=4), decoding=DecodeConfig(cycle_length=4))
+    out = generate(quantized, prompt, output_logits=True, **scored)
+    assert torch.equal(torch.stack(out.scores).argmax(-1).T, out.sequences[:, PROMPT_LEN:])

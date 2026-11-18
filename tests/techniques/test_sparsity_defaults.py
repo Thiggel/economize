@@ -163,10 +163,15 @@ def test_default_decodes_with_the_kernels_like_the_dense_reference(config, monke
         if backend == "auto":
             assert model.simulations() == {}
             counts = _count_calls(monkeypatch)
-        out = model.generate(
-            prompt, max_new_tokens=12, do_sample=False, output_logits=True, return_dict_in_generate=True
-        )
-        tokens[backend], logits[backend] = out.sequences, torch.stack(out.logits).float()
+        # the step logits as the loop computes them (generate's output_logits would be a dense recomputation,
+        # which economize refuses for activation sparsity)
+        steps: list[torch.Tensor] = []
+        hook = base.lm_head.register_forward_hook(lambda m, i, out, steps=steps: steps.append(out[:, -1].float()))
+        try:
+            tokens[backend] = model.generate(prompt, max_new_tokens=12, do_sample=False)
+        finally:
+            hook.remove()
+        logits[backend] = torch.stack(steps[:12])
     assert counts["teal_gemv"] >= 11  # every decoding step (the prefill takes the exact dense path)
     if config is not TealConfig:
         assert counts["row_masked_gemv"] >= 11
