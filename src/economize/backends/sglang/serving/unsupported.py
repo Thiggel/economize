@@ -44,6 +44,8 @@ UNSUPPORTED: dict[str, tuple[Role, str]] = {
                            "STANDALONE proposer drafts autoregressively" + _VLLM),
     "hybrid": (Role.DRAFTER, "a lookup with a model fallback needs two proposers in one engine; SGLang runs one "
                              "speculative algorithm per engine. Serve the lookup or the fallback alone"),
+    "union": (Role.DRAFTER, "a union needs several proposers in one engine; SGLang runs one speculative algorithm "
+                            "per engine. Serve one member alone"),
     # ---- KV-cache compression and activation sparsity ----
     "kivi": (Role.KV_CACHE, "SGLang's KV pool stores bf16 / fp8 / fp4 entries; KIVI's 2/4-bit per-channel keys "
                             "and per-token values with a full-precision window need an own attention backend" + _HF),
