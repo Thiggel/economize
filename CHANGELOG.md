@@ -99,6 +99,9 @@
 - The attention kernels run in Triton's CPU interpreter (`TRITON_INTERPRET=1`): the interpreter cannot call
   libdevice, so the round-to-nearest helpers of the decode, MInference and KIVI kernels are plain operators there,
   and the Quest kernel no longer masks a block with a scalar bool.
+- Attention taps and the SDPA guard see one query head per head on transformers 5.23, which folds the query heads of
+  a single-token grouped-query call onto the K/V heads (`pack_gqa`): the guard repeats K/V for such calls, so
+  KV eviction scores, the sparse-KV draft and watched and unwatched decoding agree bit for bit again.
 
 ## 0.4.0 (2026-11-04)
 
