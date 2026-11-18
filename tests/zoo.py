@@ -66,6 +66,7 @@ from economize.techniques.slicegpt import SliceGPTConfig
 from economize.techniques.sparse_kv_draft import MagicDecConfig, TriForceConfig
 from economize.techniques.sparsity import TealConfig
 from economize.techniques.suffix_decoding import SuffixDecodingConfig
+from economize.techniques.union import UnionConfig
 from economize.techniques.vendor_mtp import VendorMTPConfig
 from economize.techniques.width_prune import WidthPruneConfig
 from helpers import VOCAB, make_tiny_model
@@ -131,6 +132,7 @@ _SPECIMENS: dict[str, Callable[[Path], TechniqueConfig]] = {
     "gateskip": lambda _: GateSkipConfig(),
     "hidden_transfer": lambda _: HiddenTransferConfig(),
     "hybrid": lambda _: HybridConfig(fallback=JumpConfig(**_JUMP)),
+    "union": lambda _: UnionConfig(members=(JumpConfig(**_JUMP), JumpConfig(**_JUMP))),
     "hydra": lambda _: HydraConfig(),
     "jump": lambda _: JumpConfig(**_JUMP),
     "kangaroo": lambda _: KangarooConfig(),

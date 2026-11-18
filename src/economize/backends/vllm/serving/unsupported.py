@@ -33,6 +33,9 @@ UNSUPPORTED: dict[str, tuple[Role, str]] = {
                              "of each batch row, with no request ids, KV pages or target hidden states: a draft "
                              "model fallback needs its own per-request KV cache, and a self-drafter, EAGLE-3 or MTP "
                              "fallback reads the target's hidden states. Serve the lookup or the fallback alone"),
+    "union": (Role.DRAFTER, "a union runs several drafters per request and verifies their merged token tree in one "
+                            "pass; vLLM 0.30 builds one drafter per engine from speculative_config.method. Serve "
+                            "one member alone"),
     # ---- class B: KV-cache compression (a cache dtype or an attention backend) ----
     "kv_evict_fused": (Role.KV_EVICTION, "SnapKV / H2O-prefill with economize's fused decode kernel (the methods "
                                          "it accepts) keep a different set of entries per KV head, chosen from "

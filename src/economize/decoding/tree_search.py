@@ -26,7 +26,16 @@ if TYPE_CHECKING:
     from ..runtime import KVCache, LayerRunner
     from .request import DraftRequest
 
-__all__ = ["LOGP_FLOOR", "TreePolicy", "TreeSearchDrafter", "TreeStepDrafter", "select_candidates", "weak_method"]
+__all__ = [
+    "LOGP_FLOOR",
+    "TreePolicy",
+    "TreeSearchDrafter",
+    "TreeStepDrafter",
+    "accepted_chain",
+    "chain_logits",
+    "select_candidates",
+    "weak_method",
+]
 
 #: Floor of a candidate's log-probability, so that tokens of probability zero keep a finite score and a child always
 #: scores below its parent.
@@ -228,35 +237,59 @@ class TreeSearchDrafter(Drafter):
 
     def _accepted_chain(self, exact: ExactPass, ctx: LayerContext,
                         columns: torch.Tensor) -> tuple[ExactPass, torch.Tensor]:
-        """The tree pass ``exact`` rewritten as the chain of every row's accepted path (root first), and the column
-        of the last accepted token in it."""
-        tree = ctx.tree
-        assert tree is not None
-        device = tree.visible.device
-        batch, size = tree.visible.shape[:2]
-        rows = torch.arange(batch, device=device)
-        path = tree.visible[rows, columns.to(device)]  # [B, S]: the last accepted node and its ancestors
-        width = min(size, self.max_depth + 1)
-        order = torch.where(path, torch.arange(size, device=device), size).sort(-1).values[:, :width]
-        valid = order < size
-        index = order.clamp(max=size - 1)
-        picked = ctx.select(index, valid)
-        layout = ContextLayout(picked.positions, torch.where(valid, picked.positions, self._trash), valid, None)
-        context = LayerContext.from_layout(picked.adapter, picked.cache, layout, picked.token_inputs)
-
-        def gather(states: torch.Tensor) -> torch.Tensor:
-            local = index.to(states.device)
-            return states[torch.arange(batch, device=states.device)[:, None], local]
-
-        chain = ExactPass(gather(exact.final), {layer: gather(h) for layer, h in exact.hidden.items()}, context)
-        self._index = index
-        return chain, (path.sum(-1) - 1).to(columns.device)
+        """The tree pass ``exact`` rewritten as the chain of every row's accepted path (see :func:`accepted_chain`)."""
+        chain, path_columns, self._index = accepted_chain(exact, columns, self.max_depth + 1, self._trash)
+        return chain, path_columns
 
     def observe_logits(self, logits: torch.Tensor) -> None:
         if type(self.inner).observe_logits is Drafter.observe_logits:
             return
-        index = self._index
-        if index is not None and index.shape[1] < logits.shape[1]:
-            local = index.to(logits.device)
-            logits = logits[torch.arange(logits.shape[0], device=logits.device)[:, None], local]
-        self.inner.observe_logits(logits)
+        self.inner.observe_logits(chain_logits(logits, self._index))
+
+
+def accepted_chain(exact: ExactPass, columns: torch.Tensor, width: int,
+                   trash: int) -> tuple[ExactPass, torch.Tensor, torch.Tensor]:
+    """The tree pass ``exact`` rewritten as the chain of every row's accepted path, root first.
+
+    A chain drafter that observes a verified draft tree sees this chain instead, so it keeps the state it knows.
+
+    Args:
+        exact: An exact pass over a draft tree (its context's ``tree`` is set).
+        columns: Column of every row's last accepted node in ``exact``, ``[B]``.
+        width: Columns of the chain: at least one more than the deepest accepted path.
+        trash: The cache's trash slot, where the chain's padding columns point.
+
+    Returns:
+        The chain pass, the column of every row's last accepted token in it, and the column of ``exact`` behind every
+        chain column ``[B, width]`` (for :func:`chain_logits`).
+    """
+    ctx = exact.context
+    assert ctx is not None and ctx.tree is not None
+    tree = ctx.tree
+    device = tree.visible.device
+    batch, size = tree.visible.shape[:2]
+    rows = torch.arange(batch, device=device)
+    path = tree.visible[rows, columns.to(device)]  # [B, S]: the last accepted node and its ancestors
+    width = min(size, width)
+    order = torch.where(path, torch.arange(size, device=device), size).sort(-1).values[:, :width]
+    valid = order < size
+    index = order.clamp(max=size - 1)
+    picked = ctx.select(index, valid)
+    layout = ContextLayout(picked.positions, torch.where(valid, picked.positions, trash), valid, None)
+    context = LayerContext.from_layout(picked.adapter, picked.cache, layout, picked.token_inputs)
+
+    def gather(states: torch.Tensor) -> torch.Tensor:
+        local = index.to(states.device)
+        return states[torch.arange(batch, device=states.device)[:, None], local]
+
+    chain = ExactPass(gather(exact.final), {layer: gather(h) for layer, h in exact.hidden.items()}, context)
+    return chain, (path.sum(-1) - 1).to(columns.device), index
+
+
+def chain_logits(logits: torch.Tensor, index: torch.Tensor | None) -> torch.Tensor:
+    """The exact logits ``[B, T + 1, V]`` of a tree pass at the columns of its accepted chain (``index`` from
+    :func:`accepted_chain`; ``None`` for a chain pass, whose logits stay as they are)."""
+    if index is None or index.shape[1] >= logits.shape[1]:
+        return logits
+    local = index.to(logits.device)
+    return logits[torch.arange(logits.shape[0], device=logits.device)[:, None], local]
