@@ -288,30 +288,38 @@ class MagnitudeSampleObserver:
     """A uniform random subsample of input magnitudes ``|x|`` (at most ``max_samples`` values), for quantiles.
 
     TEAL sets each threshold to a quantile of the dense activation magnitudes. The subsample keeps memory bounded
-    on long calibration sets; with ``2^20`` samples the quantile error is about ``1e-3`` in probability.
+    on long calibration sets; with ``2^20`` samples the quantile error is about ``1e-3`` in probability. It is a
+    reservoir sample: every observed value gets an independent uniform key and the ``max_samples`` smallest keys
+    are kept, so each value survives with the same probability whatever call it arrived in.
     """
 
     def __init__(self, module: nn.Module | None = None, max_samples: int = 1 << 20, seed: int = 0) -> None:
         self.max_samples = max_samples
-        self.samples: list[Tensor] = []
+        self.samples = torch.zeros(0)
+        self.keys = torch.zeros(0)
         self.count = 0
         self.generator = torch.Generator().manual_seed(seed)
 
     def update(self, x: Tensor) -> None:
-        flat = x.detach().reshape(-1).abs().float()
-        per_call = max(1, self.max_samples // 16)
-        if flat.numel() > per_call:
-            index = torch.randint(0, flat.numel(), (per_call,), generator=self.generator).to(flat.device)
-            flat = flat[index]
-        self.samples.append(flat.cpu())
+        flat = x.detach().reshape(-1)
+        keys = torch.rand(flat.numel(), generator=self.generator)
         self.count += flat.numel()
-        if self.count > 2 * self.max_samples:
-            merged = torch.cat(self.samples)
-            keep = torch.randperm(merged.numel(), generator=self.generator)[: self.max_samples]
-            self.samples, self.count = [merged[keep]], self.max_samples
+        if self.keys.numel() >= self.max_samples:  # only keys below the reservoir's largest can enter
+            index = (keys < self.keys.max()).nonzero().squeeze(1)
+        else:
+            index = torch.arange(flat.numel())
+        if index.numel() > self.max_samples:
+            index = index[keys[index].topk(self.max_samples, largest=False).indices]
+        values = flat[index.to(flat.device)].abs().float().cpu()
+        keys = torch.cat([self.keys, keys[index]])
+        values = torch.cat([self.samples, values])
+        if keys.numel() > self.max_samples:
+            keep = keys.topk(self.max_samples, largest=False).indices
+            keys, values = keys[keep], values[keep]
+        self.keys, self.samples = keys, values
 
     def values(self) -> Tensor:
-        return torch.cat(self.samples) if self.samples else torch.zeros(0)
+        return self.samples
 
     def quantile(self, q: float) -> float:
         """The ``q``-quantile of the observed magnitudes (lower interpolation)."""
