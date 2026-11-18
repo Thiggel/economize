@@ -99,6 +99,8 @@
 - The attention kernels run in Triton's CPU interpreter (`TRITON_INTERPRET=1`): the interpreter cannot call
   libdevice, so the round-to-nearest helpers of the decode, MInference and KIVI kernels are plain operators there,
   and the Quest kernel no longer masks a block with a scalar bool.
+- The 2:4 GPU test asserts the sparse GEMM speed-up only on A100 and H100. On an A6000 the default cuSPARSELt
+  kernel is slower than dense, and the weights docs now say so.
 
 ## 0.4.0 (2026-11-04)
 

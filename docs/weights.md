@@ -125,9 +125,12 @@ Storage (`semi_structured`): the default (`None`) with the default `sparsity="2:
 (A100, A6000, L40, H100) and fp16 or bf16 weights, and pruning refuses other devices before it changes a weight.
 Unstructured and other N:M patterns have no sparse kernel, so they are refused unless `semi_structured=False` asks
 for the reference explicitly: the pruned weights stay zeros in the dense tensor, the model runs anywhere with the
-method's quality and no speed-up, and `economize.backend_support` reports it as simulated. The sparse tensor-core GEMM is
-about 1.1-1.6x faster than the dense one at large token counts (prefill, verification of long drafts, batched
-serving) and close to 1x at batch-1 decoding, where the GEMV is bound by the bytes of values plus metadata. Sparse
+method's quality and no speed-up, and `economize.backend_support` reports it as simulated. On data-center GPUs (A100, H100)
+the sparse tensor-core GEMM is about 1.1-1.6x faster than the dense one at large token counts (prefill, verification
+of long drafts, batched serving) and close to 1x at batch-1 decoding, where the GEMV is bound by the bytes of values
+plus metadata. On workstation GPUs the default cuSPARSELt GEMM can be slower than dense: on an A6000 (sm86) it ran
+Llama-7B-sized maps at 0.5-0.7x of the dense speed with 4096 tokens and 0.25x with one, so there the memory saving is
+the gain and `semi_structured_kernel="auto"` keeps the faster dense or CUTLASS kernel per shape. Sparse
 tensors cannot be factorized or quantized afterwards, so `check_compatible` rejects sparse storage (the default)
 together with `lowrank` or `quant`; combine those with `semi_structured=False`.
 
