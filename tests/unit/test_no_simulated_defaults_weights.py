@@ -19,12 +19,12 @@ from helpers import make_tiny_model
 
 #: The weight-compression techniques and the backends on which their default configuration runs a real kernel.
 REAL_DEFAULTS: dict[str, set[str]] = {
-    "quant": {"transformers", "vllm", "sglang", "onnx", "gguf", "mlx"},
+    "quant": {"transformers", "vllm", "sglang", "onnx", "gguf"},  # mlx: untested, economize never ran MLX
     "draft_quant": {"transformers"},
     "prune": {"transformers"},
     "lowrank": {"transformers", "vllm", "onnx"},
     "littlebit": {"transformers"},
-    "depth_prune": {"transformers", "vllm", "sglang", "onnx", "gguf", "mlx", "trtllm"},
+    "depth_prune": {"transformers", "vllm", "sglang", "onnx", "gguf"},  # mlx, trtllm: untested
 }
 BACKENDS = {"transformers", "vllm", "sglang", "onnx", "gguf", "mlx", "trtllm"}
 

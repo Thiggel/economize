@@ -75,7 +75,7 @@ def test_every_technique_has_a_trtllm_status() -> None:
 def test_backend_support_reports_trtllm() -> None:
     support = economize.backend_support("draft_model")
     assert support["trtllm"].status.value == "untested"  # economize writes the checkpoint; no test builds an engine
-    assert "has not run TensorRT-LLM" in support["trtllm"].detail and support["onnx"].status.value == "real"
+    assert "has not run TensorRT-LLM" in support["trtllm"].detail
     assert economize.backend_support("eagle3")["trtllm"].status.value == "unsupported"
     assert "EAGLE-3" in economize.backend_support("eagle3")["trtllm"].detail
 

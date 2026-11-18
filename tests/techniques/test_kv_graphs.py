@@ -60,7 +60,9 @@ def _run(model: economize.EfficientModel, prompts: list[torch.Tensor], max_new: 
          decoding: DecodeConfig) -> tuple[list[list[int]], dict[str, float]]:
     results = model.decode_batch(prompts, max_new, decoding=decoding)
     technique = next(t for t in model.techniques.values() if t.name != "jump")
-    return [r.tokens.tolist() for r in results], technique.kv_stats(0)
+    # the graph path keeps one static cache for all batches, so only the modelled bytes are comparable
+    stats = {k: v for k, v in technique.kv_stats(0).items() if k != "kv_bytes_allocated_batch"}
+    return [r.tokens.tolist() for r in results], stats
 
 
 @pytest.fixture
