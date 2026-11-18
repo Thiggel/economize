@@ -15,7 +15,15 @@ from ..registry import Registry
 from ..validation import check_choice
 from .sharding import clone_sharded, copy_tensor_parallel_forwards, is_sharded
 
-__all__ = ["COPY_DTYPES", "DENSE_LINEARS", "DenseLinear", "InModelDtype", "copy_dtype_of", "trainable_copy"]
+__all__ = [
+    "COPY_DTYPES",
+    "DENSE_LINEARS",
+    "DenseLinear",
+    "Float32Parameters",
+    "InModelDtype",
+    "copy_dtype_of",
+    "trainable_copy",
+]
 
 #: Storage dtypes of trainable layer copies: float32, or the model's own dtype (to be trained with float32 master
 #: weights in the optimizer, see ``economize.train.OffloadedAdamW``).
@@ -26,6 +34,27 @@ def copy_dtype_of(name: str, model_dtype: torch.dtype) -> torch.dtype:
     """The storage dtype that the name in :data:`COPY_DTYPES` stands for in a model of ``model_dtype``."""
     check_choice("copy_dtype", name, COPY_DTYPES)
     return torch.float32 if name == "float32" else model_dtype
+
+
+class Float32Parameters(nn.Module):
+    """A module whose float32 parameters and buffers stay float32 when the module is cast to another dtype.
+
+    Drafter parts are trained and run in float32 inside a model of any dtype and cast their inputs and outputs
+    themselves. Casting the whole :class:`~economize.EfficientModel` (``model.half()``, ``model.to(torch.bfloat16)``,
+    ``model.double()``) casts the base model as asked; this module then follows device moves only, so its float32
+    tensors keep their precision and its forward keeps working. Tensors of other dtypes (copies stored in the model's
+    dtype) follow the cast.
+    """
+
+    def _apply(self, fn: Callable[[torch.Tensor], torch.Tensor], recurse: bool = True) -> Float32Parameters:
+        def keep_float32(tensor: torch.Tensor) -> torch.Tensor:
+            if tensor.dtype != torch.float32:
+                return fn(tensor)
+            moved = fn(tensor.new_empty(0))  # what the conversion does to a float32 tensor on this device
+            return fn(tensor) if moved.dtype == torch.float32 else tensor.to(device=moved.device)
+
+        super()._apply(keep_float32, recurse)
+        return self
 
 
 #: Turns a quantized linear module into an equivalent float32 ``nn.Linear``, or returns ``None`` for modules of

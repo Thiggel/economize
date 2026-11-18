@@ -13,7 +13,7 @@ from ...core.config import TechniqueConfig
 from ...core.metadata import Family, Saving, TechniqueInfo
 from ...core.technique import AttachContext, Capability, Technique, register_technique
 from ...errors import ConfigError
-from ...modules import LayerLoRA, ReadoutAdapter, copy_dtype_of
+from ...modules import Float32Parameters, LayerLoRA, ReadoutAdapter, copy_dtype_of
 from .._drafting import StepDrafterDefaults
 from .config import EarlyExitConfig
 from .path import DraftPath
@@ -31,7 +31,7 @@ __all__ = ["EarlyExitTechnique"]
 
 
 @register_technique
-class EarlyExitTechnique(StepDrafterDefaults, Technique):
+class EarlyExitTechnique(StepDrafterDefaults, Float32Parameters, Technique):
     """Self-speculative early exit: draft tokens run the model's first ``r`` layers and exit there.
 
     A draft step embeds the last token, runs layers ``1..r`` at its position (writing their K/V into the shared
@@ -40,7 +40,8 @@ class EarlyExitTechnique(StepDrafterDefaults, Technique):
     recomputes every drafted position with the unmodified model.
 
     Parameters (float32 unless ``copy_dtype="model"`` stores ``path.blocks`` in the model's dtype): ``readout``
-    (``head="readout"``) and ``path`` (``path.lora`` or ``path.blocks``).
+    (``head="readout"``) and ``path`` (``path.lora`` or ``path.blocks``). Casting the model to another dtype leaves
+    the float32 parameters in float32 (:class:`~economize.modules.Float32Parameters`).
     """
 
     name = EarlyExitConfig.technique

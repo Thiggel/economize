@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from .dtype import COPY_DTYPES, DENSE_LINEARS, DenseLinear, InModelDtype, copy_dtype_of, trainable_copy
+from .dtype import (
+    COPY_DTYPES,
+    DENSE_LINEARS,
+    DenseLinear,
+    Float32Parameters,
+    InModelDtype,
+    copy_dtype_of,
+    trainable_copy,
+)
 from .kv_cache import DraftKVCache
 from .lora import LayerLoRA, LoRADelta
 from .norm import RMSNorm, rms_normalize
@@ -15,6 +23,7 @@ __all__ = [
     "DENSE_LINEARS",
     "DenseLinear",
     "DraftKVCache",
+    "Float32Parameters",
     "GatedMLP",
     "InModelDtype",
     "LayerLoRA",

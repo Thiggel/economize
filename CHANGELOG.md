@@ -43,6 +43,9 @@
 - `generate` with `do_sample=True` (the default of `pipeline("text-generation")`) on a drafting model whose
   verifier is not named verifies by rejection sampling, which keeps the sampled distribution exact. It used to raise
   `ConfigError` for the implicit greedy verifier. A verifier named explicitly is kept, and a greedy one still raises.
+- `model.half()`, `model.double()` and `model.to(dtype)` on an `EfficientModel` with a `jump` or `early_exit` drafter
+  cast the base model and leave the drafter's float32 parameters in float32
+  (`economize.modules.Float32Parameters`). The drafter used to be cast too and then failed on its float32 inputs.
 
 ## 0.5.0 (2026-11-18)
 

@@ -261,3 +261,27 @@ def test_jump_lora_adapts_unmerged_peft_layers(tiny_factory, prompt) -> None:
         torch.testing.assert_close(model(ids).logits, reference(ids).logits, rtol=1e-4, atol=1e-4)
     result = model.decode(prompt, MAX_NEW, decoding=DecodeConfig(cycle_length=4))
     assert result.tokens.tolist() == reference_greedy(policy, prompt, MAX_NEW).tolist()
+
+
+@pytest.mark.parametrize("config", [
+    JumpConfig(target_layer=2, source_layer=4),
+    JumpConfig(target_layer=1, source_layer=3, exit_layer=3, adaptation="lora"),
+    JumpConfig(target_layer=2, source_layer=4, adaptation="full"),
+    "early_exit",
+], ids=["jump", "jump_exit_lora", "jump_full", "early_exit"])
+@pytest.mark.parametrize("cast", ["half", "double"])
+def test_casting_the_model_keeps_the_drafter_working(tiny_model, prompt, config, cast) -> None:
+    """``model.half()`` / ``model.double()`` cast the base model; the drafter's float32 parts stay float32."""
+    from economize.techniques.early_exit import EarlyExitConfig
+
+    model = economize.apply(tiny_model, EarlyExitConfig(exit_layer=2) if config == "early_exit" else config)
+    perturb(model.drafting_technique, 0.02)
+    state = {k: v.clone() for k, v in model.drafting_technique.state_dict().items()}
+    getattr(model, cast)()
+    assert next(model.base_model.parameters()).dtype == (torch.float16 if cast == "half" else torch.float64)
+    for key, value in model.drafting_technique.state_dict().items():
+        assert value.dtype == state[key].dtype and torch.equal(value, state[key]), key
+    result = model.decode(prompt, MAX_NEW, decoding=DecodeConfig(cycle_length=4))
+    assert result.tokens.numel() == MAX_NEW
+    if cast == "double":  # float64 verification is exact: the drafts change only the speed
+        assert result.tokens.tolist() == reference_greedy(model.base_model, prompt, MAX_NEW).tolist()

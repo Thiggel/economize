@@ -91,3 +91,26 @@ def test_copy_of_a_dispatched_layer_runs_its_own_weights() -> None:
         reference = reference[0] if isinstance(reference, tuple) else reference
     assert block.forward.args[0] is block
     assert not torch.equal(out, reference)
+
+
+def test_float32_parameters_follow_device_moves_and_ignore_dtype_casts() -> None:
+    from economize.modules import Float32Parameters
+
+    class Part(Float32Parameters):
+        def __init__(self) -> None:
+            super().__init__()
+            self.linear = torch.nn.Linear(4, 4)
+            self.copy = torch.nn.Linear(4, 4).to(torch.bfloat16)  # a copy stored in the model's dtype
+            self.register_buffer("steps", torch.zeros((), dtype=torch.long))
+
+    part = Part()
+    weight = part.linear.weight.detach().clone()
+    for cast in (torch.nn.Module.half, torch.nn.Module.double, lambda m: m.to(torch.bfloat16)):
+        assert cast(part) is part
+        assert part.linear.weight.dtype == torch.float32 and torch.equal(part.linear.weight, weight)
+        assert part.linear.weight.requires_grad and isinstance(part.linear.weight, torch.nn.Parameter)
+    assert part.copy.weight.dtype == torch.bfloat16 and part.steps.dtype == torch.long  # the last cast
+    part.to("meta")
+    assert part.linear.weight.is_meta and part.linear.weight.dtype == torch.float32
+    part.to_empty(device="cpu")
+    assert part.linear.weight.device.type == "cpu" and part.linear.weight.dtype == torch.float32

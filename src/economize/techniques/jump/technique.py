@@ -12,7 +12,7 @@ from torch import nn
 from ...core.metadata import Family, Saving, TechniqueInfo
 from ...core.technique import AttachContext, Capability, Technique, register_technique
 from ...errors import ConfigError, IncompatibleTechniquesError
-from ...modules import InModelDtype, LayerLoRA, ReadoutAdapter, copy_dtype_of, trainable_copy
+from ...modules import Float32Parameters, InModelDtype, LayerLoRA, ReadoutAdapter, copy_dtype_of, trainable_copy
 from ...modules.sharding import check_adaptable_split
 from .config import JumpConfig
 from .mixer import MIXERS, SourceMixer
@@ -28,7 +28,7 @@ __all__ = ["JumpTechnique"]
 
 
 @register_technique
-class JumpTechnique(Technique):
+class JumpTechnique(Float32Parameters, Technique):
     """Cross-layer jump drafting.
 
     A draft step for the token at position ``p`` embeds the token, predicts its state after layer ``m`` from the
@@ -38,7 +38,8 @@ class JumpTechnique(Technique):
 
     Parameters (all float32): ``predictor``, optionally ``mixer`` (several source layers), ``readout`` (``r < L``),
     ``lora`` (``adaptation="lora"``) or ``blocks`` (``adaptation="full"``: trainable copies of layers ``m+1..r``).
-    On a quantized base the copies are dequantized (see :func:`trainable_copy`).
+    On a quantized base the copies are dequantized (see :func:`trainable_copy`). Casting the model to another dtype
+    leaves them in float32 (:class:`~economize.modules.Float32Parameters`).
     """
 
     name = JumpConfig.technique
