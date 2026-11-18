@@ -107,6 +107,8 @@
   KV eviction scores, the sparse-KV draft and watched and unwatched decoding agree bit for bit again.
 - The vLLM linear methods of `teal` and `lowrank` also run on CPU tensors on a GPU host: vLLM registers a custom op
   for the platform's dispatch key only, so the ops are registered for CPU as well.
+- The SDPA guard copies the K/V heads it repeats: with one K/V head the repeat was a stride-0 view, and PyTorch
+  2.13's memory-efficient CUDA kernel returns wrong masked outputs for such K/V at head dim > 128.
 
 ## 0.4.0 (2026-11-04)
 

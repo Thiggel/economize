@@ -138,6 +138,18 @@ def test_fallback_is_exact_with_one_kv_head(queries: int, keys: int, dim: int) -
     assert float((out.double() - expected).abs().max()) < 1e-4
 
 
+@pytest.mark.parametrize("kv_heads", [1, 2, 8])
+def test_ungrouped_states_are_contiguous_copies(kv_heads: int) -> None:
+    """With one K/V head ``reshape`` would keep a stride-0 view; PyTorch 2.13's memory-efficient kernel computes
+    wrong masked outputs for such K/V on CUDA (head dim > 128), so the guard materializes them."""
+    from economize.attention.sdpa_guard import _ungrouped
+
+    states = torch.randn(2, kv_heads, 5, 16)
+    out = _ungrouped(states, 8)
+    assert out.is_contiguous() and 0 not in out.stride()
+    torch.testing.assert_close(out, states.repeat_interleave(8 // kv_heads, dim=1), rtol=0, atol=0)
+
+
 def test_install_registers_the_guard_under_sdpa() -> None:
     from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 
