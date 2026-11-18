@@ -173,16 +173,15 @@ def _greedy_unless_sampling(kwargs: dict[str, Any]) -> dict[str, Any]:
 
 
 def _base_of_checkpoint(economize: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    """The base model name (and revision) an economize checkpoint records."""
+    """The base model name (and revision) an economize checkpoint records (see
+    :func:`economize.core.serialization.resolve_base_model`)."""
     from ..core.hub import download, read_meta
+    from ..core.serialization import resolve_base_model
 
     meta = read_meta(download(economize))
     if not meta.get("base_model"):
         raise ConfigError(f"the economize checkpoint {economize!r} names no base model; pass pretrained=<base model>")
-    kwargs = dict(kwargs)
-    if meta.get("base_model_revision") and "revision" not in kwargs:
-        kwargs["revision"] = meta["base_model_revision"]
-    return str(meta["base_model"]), kwargs
+    return resolve_base_model(meta, None, kwargs, source=f"the economize checkpoint {economize!r}")
 
 
 def main(argv: Sequence[str] | None = None) -> None:

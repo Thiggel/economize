@@ -36,6 +36,10 @@
   `sync_drafter` raise `UnsupportedEngineVersionError` outside the supported range; the engine plugins log an error
   and install nothing (they used to warn and patch anyway). `ECONOMIZE_ALLOW_UNTESTED_ENGINES=vllm,sglang,trl` turns
   this into an `UntestedEngineWarning`. The `sglang` extra is capped at `<0.6`.
+- `economize.from_pretrained` loads the base model at the revision the checkpoint records (only the Hub loader did),
+  through `economize.core.serialization.resolve_base_model`, which the Hub and lm-eval loaders share.
+  `trust_remote_code=True` is refused with a `ConfigError` when only the checkpoint names the base repository: name
+  the base model explicitly to run its code.
 
 ## 0.5.0 (2026-11-18)
 

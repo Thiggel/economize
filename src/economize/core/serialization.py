@@ -37,7 +37,7 @@ from torch import nn
 
 from .._version import __version__
 from ..decoding import DecodeConfig
-from ..errors import CheckpointFormatError, TeacherMismatchWarning
+from ..errors import CheckpointFormatError, ConfigError, TeacherMismatchWarning
 from ..modules.sharding import full_tensor
 from ..registry import Registry
 from ..unwrap import base_model_of, peft_base
@@ -66,6 +66,7 @@ __all__ = [
     "load",
     "migrate",
     "read_checkpoint",
+    "resolve_base_model",
     "save",
     "teacher_fingerprint",
     "trained_parameter_names",
@@ -423,15 +424,52 @@ def from_pretrained(
 ) -> EfficientModel:
     """Load the base model named in the checkpoint (or ``base_model``) with ``transformers`` and attach the techniques.
 
-    ``model_kwargs`` go to ``AutoModelForCausalLM.from_pretrained`` (e.g. ``dtype``, ``device_map``). For Hub
-    repositories, revisions and model cards see :mod:`economize.integrations.hub`.
+    ``model_kwargs`` go to ``AutoModelForCausalLM.from_pretrained`` (e.g. ``dtype``, ``device_map``). The base model
+    is loaded at the revision the checkpoint records unless ``model_kwargs`` name one (see :func:`resolve_base_model`,
+    which also explains why ``trust_remote_code=True`` needs an explicit ``base_model``). For Hub repositories and
+    model cards see :mod:`economize.integrations.hub`.
     """
     checkpoint = read_checkpoint(_local(path), format)
-    name = base_model or checkpoint.base_model
-    if not name:
-        raise CheckpointFormatError(f"{path} does not name its base model; pass base_model=...")
+    name, model_kwargs = resolve_base_model(checkpoint.meta or {"base_model": checkpoint.base_model}, base_model,
+                                            model_kwargs, source=str(path))
     base = load_base_model(name, **model_kwargs)
     return attach(base, checkpoint, decoding, calibration=calibration, check_teacher=check_teacher)
+
+
+def resolve_base_model(
+    meta: Mapping[str, Any], base_model: str | None, model_kwargs: Mapping[str, Any], *, source: str = "the checkpoint"
+) -> tuple[str, dict[str, Any]]:
+    """The base model to load for a checkpoint and the ``from_pretrained`` arguments to load it with.
+
+    Every path that loads a base model for a checkpoint (:func:`from_pretrained`, the Hub loader, the lm-eval model)
+    resolves it here, so they agree:
+
+    - The name is ``base_model``, or the ``base_model`` the checkpoint records.
+    - When that is the recorded base model, ``revision`` defaults to the recorded ``base_model_revision``, so the
+      techniques meet the weights they were trained on.
+    - ``trust_remote_code=True`` runs code from the base repository. When the checkpoint alone chooses that
+      repository, a downloaded checkpoint could make it any repository, so this is refused unless ``base_model``
+      names the repository explicitly.
+
+    Raises:
+        CheckpointFormatError: Neither ``base_model`` nor the checkpoint names a base model.
+        ConfigError: ``trust_remote_code=True`` with a base model only the checkpoint names.
+    """
+    recorded = meta.get("base_model")
+    name = base_model or recorded
+    if not name:
+        raise CheckpointFormatError(f"{source} does not name its base model; pass base_model=...")
+    kwargs = dict(model_kwargs)
+    if base_model is None and kwargs.get("trust_remote_code"):
+        raise ConfigError(
+            f"{source} names the base model {recorded!r}, and trust_remote_code=True would run code from that "
+            f"repository. Name it explicitly (base_model={recorded!r}, or pretrained= in lm-eval) to confirm that you "
+            "trust it"
+        )
+    revision = meta.get("base_model_revision")
+    if name == recorded and revision and "revision" not in kwargs:
+        kwargs["revision"] = revision
+    return str(name), kwargs
 
 
 def load_base_model(name: str | Path, **model_kwargs: Any) -> PreTrainedModel:

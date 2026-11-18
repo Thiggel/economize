@@ -251,3 +251,53 @@ def test_recorded_base_revision_is_requested(tiny_dir: Path, applied_jump: Any, 
     assert seen["revision"] == "abc123" and seen["name"] == str(tiny_dir)
     hub.from_pretrained(tmp_path, str(tiny_dir), base_revision="main", check_base=False)
     assert seen["revision"] == "main"
+
+
+def test_every_loader_requests_the_recorded_base_revision(tiny_dir: Path, applied_jump: Any, tmp_path: Path,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    """economize.from_pretrained (no Hub) loads the base at the recorded revision too, as the lm-eval model does
+    through the same resolve_base_model."""
+    import transformers
+
+    import economize
+    from economize.core.serialization import resolve_base_model
+    from economize.integrations import hub
+
+    hub.save_pretrained(applied_jump(_base(tiny_dir)), tmp_path)
+    meta = json.loads((tmp_path / "economize_config.json").read_text())
+    meta["base_model_revision"] = "abc123"
+    (tmp_path / "economize_config.json").write_text(json.dumps(meta))
+    seen: dict[str, Any] = {}
+    original = transformers.AutoModelForCausalLM.from_pretrained
+
+    def spy(name: Any, **kwargs: Any) -> Any:
+        seen.update(kwargs, name=name)
+        kwargs.pop("revision", None)  # a local folder has no revisions
+        return original(name, **kwargs)
+
+    monkeypatch.setattr(transformers.AutoModelForCausalLM, "from_pretrained", spy)
+    economize.from_pretrained(tmp_path, check_teacher=False)
+    assert seen["revision"] == "abc123"
+    seen.clear()
+    economize.from_pretrained(tmp_path, check_teacher=False, revision="main")
+    assert seen["revision"] == "main"
+    assert resolve_base_model(hub.read_meta(tmp_path), None, {}) == (str(tiny_dir), {"revision": "abc123"})
+    assert resolve_base_model(hub.read_meta(tmp_path), "other/base", {}) == ("other/base", {})
+
+
+def test_remote_code_needs_an_explicitly_named_base(tiny_dir: Path, applied_jump: Any, tmp_path: Path) -> None:
+    """A downloaded checkpoint must not choose the repository whose code trust_remote_code=True runs."""
+    import economize
+    from economize.core.serialization import resolve_base_model
+    from economize.errors import ConfigError
+    from economize.integrations import hub
+
+    hub.save_pretrained(applied_jump(_base(tiny_dir)), tmp_path)
+    with pytest.raises(ConfigError, match="trust_remote_code"):
+        economize.from_pretrained(tmp_path, trust_remote_code=True)
+    with pytest.raises(ConfigError, match="trust_remote_code"):
+        hub.from_pretrained(tmp_path, trust_remote_code=True)
+    with pytest.raises(ConfigError, match="trust_remote_code"):
+        resolve_base_model(hub.read_meta(tmp_path), None, {"trust_remote_code": True})
+    model = economize.from_pretrained(tmp_path, str(tiny_dir), trust_remote_code=True, check_teacher=False)
+    assert isinstance(model, economize.EfficientModel)
