@@ -16,10 +16,12 @@ model (LoRA adapters of a PEFT model, a fine-tuned backbone), those parameters b
 :class:`~economize.train.EffTrainer` keeps the Hugging Face ``Trainer``'s own checkpoint directories and rotation and
 shares only :func:`save_trained` and :func:`load_trained` with :func:`fit`.
 
-Trust boundary: the weights are safetensors, but ``trainer_state.pt``, ``rank_state_<rank>.pt`` and
-``train_result.pt`` hold optimizer, random-generator and data-source state as pickles (``torch.load`` with
-``weights_only=False``), which can run arbitrary code. Resume only from run directories you wrote yourself;
-``economize.load`` of a ``final/`` or ``checkpoint-<step>/`` directory reads the safetensors files alone and is safe.
+Trust boundary: the weights are safetensors, and ``trainer_state.pt``, ``rank_state_<rank>.pt`` and
+``train_result.pt`` (optimizer, random-generator and data-source state) are read with ``torch.load(...,
+weights_only=True)``, which builds tensors and plain Python values only and runs no code from the file. A data source
+whose ``state_dict`` holds other objects therefore fails to resume with a :class:`~economize.CheckpointFormatError`;
+register its types with ``torch.serialization.add_safe_globals`` if you trust them. Numpy arrays (in the random state
+written by economize 0.5 and earlier) are allowed.
 :func:`save_trained` records the teacher fingerprint without the base parameters the objective trained (listed under
 :data:`~economize.core.serialization.TRAINED_ENTRY`), and :func:`load_trained` compares it with the frozen part of the
 model it restores the run onto (:func:`economize.core.check_teacher`), so restoring onto a different base model warns.
@@ -29,12 +31,14 @@ from __future__ import annotations
 
 import json
 import logging
+import pickle
 import re
 import shutil
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+import numpy as np
 import torch
 from torch import nn
 
@@ -290,10 +294,10 @@ class RunCheckpointer:
         """The trainer state of checkpoint ``path``, with this process's own random and data state where the
         checkpoint has one."""
         path = Path(path)
-        state = torch.load(path / STATE_FILE, map_location="cpu", weights_only=False)
+        state = load_safe(path / STATE_FILE)
         own_file = path / RANK_STATE_FILE.format(rank=self.rank)
         if own_file.is_file():
-            state.update(torch.load(own_file, map_location="cpu", weights_only=False))
+            state.update(load_safe(own_file))
         elif self.world > 1:
             logger.warning("%s has no %s: process %d continues with the data and random state of process 0",
                            path, own_file.name, self.rank)
@@ -313,7 +317,33 @@ class RunCheckpointer:
         """The result of the finished run (empty for a run finished by an economize version that wrote none)."""
         if self.output_dir is None or not (self.output_dir / RESULT_FILE).is_file():
             return {}
-        return torch.load(self.output_dir / RESULT_FILE, map_location="cpu", weights_only=False)
+        return load_safe(self.output_dir / RESULT_FILE)
+
+
+def _numpy_array_globals() -> tuple[Callable[..., object], ...]:
+    """What unpickling a numpy array needs (the random state of economize 0.5 and earlier holds one)."""
+    reconstruct = cast(Callable[..., object], np.empty(0).__reduce__()[0])
+    return (reconstruct, np.ndarray, np.dtype, type(np.dtype(np.uint32)))
+
+
+def load_safe(path: Path) -> dict[str, Any]:
+    """A state file of :func:`save_atomic`, read with ``weights_only=True`` (tensors, plain values and numpy arrays).
+
+    Raises:
+        CheckpointFormatError: The file holds other objects.
+    """
+    try:
+        with torch.serialization.safe_globals([*_numpy_array_globals()]):
+            state = torch.load(path, map_location="cpu", weights_only=True)
+    except pickle.UnpicklingError as error:
+        raise CheckpointFormatError(
+            f"{path} holds objects other than tensors and plain Python values, which economize does not unpickle "
+            f"(torch.load with weights_only=True). If you trust the file, register their types with "
+            f"torch.serialization.add_safe_globals. {error}"
+        ) from error
+    if not isinstance(state, dict):
+        raise CheckpointFormatError(f"{path} holds a {type(state).__name__}, not a state dictionary")
+    return state
 
 
 def save_atomic(obj: Any, path: Path) -> None:

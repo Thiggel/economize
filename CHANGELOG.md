@@ -11,6 +11,14 @@
   instead of failing the load, and fields an older release did not save take their defaults.
 - Releases are published by `.github/workflows/release.yml` only after the full CI passes on the tagged commit,
   and CI tests Python 3.10 to 3.13.
+- Training state and result files are read with `torch.load(weights_only=True)`: a file holding code objects raises
+  `CheckpointFormatError` instead of running it. Register trusted custom types with
+  `torch.serialization.add_safe_globals`. Older state files still load.
+- Per-rank, per-epoch and per-position seeds are derived with `economize.train.utils.spawn_seed` (numpy `SeedSequence`)
+  instead of `seed + rank` and `seed + epoch`, so neighbouring seeds no longer share streams. Random sources draw
+  different (equally distributed) batches than in 0.5.0 for the same seed.
+- A `LoaderSource` (what `fit` and `as_source` make of a `DataLoader`) reseeds the loader's shuffling generator from the seed and
+  epoch, so resuming through a shuffling `DataLoader` reproduces the batches of an uninterrupted run.
 
 ## 0.5.0 (2026-11-18)
 
