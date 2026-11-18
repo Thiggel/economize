@@ -82,6 +82,15 @@ These rules are explained in `docs/ARCHITECTURE.md`; the tests named here enforc
 - **Errors** derive from `economize.errors.EconomizeError` (and from the built-in exception they refine, such as
   `ValueError` for `ConfigError`), so callers can catch economize's errors as a group.
 
+## Releasing
+
+A release is a pushed tag `v<version>` whose version equals `__version__` in `src/economize/_version.py` (the single
+source of the version). The tag starts `.github/workflows/release.yml`, which first runs the whole of `ci.yml` (lint,
+type gate, the test matrix over every supported Python version and the docs build) on the tagged commit. The build and
+the PyPI upload need that job, so a commit whose checks fail is never published, and the build job refuses a tag that
+does not match the package version. The upload uses PyPI trusted publishing from the `pypi` environment; nothing is
+uploaded by hand. `CHANGELOG.md` gets its section in the commit that bumps the version.
+
 ## Adding a reproduction
 
 A reproduction compares a number from a technique's paper with the same quantity measured with economize, and appears

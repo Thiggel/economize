@@ -1,5 +1,6 @@
 # Lint, type gate, CPU test suite and docs build on every push and pull request (docs/CONTRIBUTING.md, "Checks
-# before a change lands"). The tools and the torch/transformers versions are pinned in ci/constraints.txt so that a
+# before a change lands"). release.yml calls this workflow on the tagged commit and publishes only when every job
+# passes. The tools and the torch/transformers versions are pinned in ci/constraints.txt so that a
 # result does not depend on the day the workflow runs; bump them in a change of their own.
 name: ci
 
@@ -7,12 +8,13 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -50,12 +52,12 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     # About 13 minutes of tests on 4 workers on Python 3.12 and 20 on 3.10, plus the install; the
-    # limit leaves headroom for slower runners.
+    # limit leaves headroom for slower runners. Every Python version of the classifiers in pyproject.toml runs.
     timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
