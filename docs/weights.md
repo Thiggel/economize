@@ -269,6 +269,10 @@ RTN, and its outputs equal the `fake` backend to within 1e-4 (tested). A new bac
 export) is one `QuantBackend` subclass registered in `QUANT_BACKENDS`; it joins the `auto` choice when it is also
 registered in `AUTO_QUANT_CANDIDATES` with a priority.
 
+Measured with economize 0.5.0 (eager greedy decoding of Llama-3.1-8B, 1000 generated tokens, one RTX A6000, bf16
+39.6 tok/s): weight-only int8 per channel runs at 1.56x the bf16 speed with `backend="triton"` and at 0.39x with
+`torchao`; weight-only fp8 per channel runs at 1.57x with `triton` and 0.11x with `torchao`.
+
 SmoothQuant (r) (abstract): up to 1.56x speed-up and 2x memory reduction with negligible accuracy loss for W8A8
 models up to 530B parameters.
 
