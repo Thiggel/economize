@@ -6,7 +6,9 @@ each side waits for the other. SSD (Kumar et al., 2026, "Speculative Speculative
 the target verifies the spine ``d_1..d_k``, the drafter guesses the verification outcome ``(a, y)`` (the target
 keeps ``a`` drafts and appends ``y``) and drafts the next chain behind every guess. When the actual outcome is among
 the guesses (a *hit*) the next round starts at once; otherwise (a *miss*) the drafter drafts the next chain after
-the verification, as ordinary speculative decoding would.
+the verification, as ordinary speculative decoding would. A miss does not cancel the speculation: its tree passes
+are already queued on the drafter's stream (CUDA work cannot be withdrawn once launched), so the chain after a miss
+starts once they finish, and a low hit rate costs that much extra drafter latency per round.
 
 The guesses for outcome ``a < k`` are the drafter's ``fanout`` likeliest tokens at depth ``a`` other than
 ``d_{a+1}`` (which the target rejected), and for ``a = k`` its likeliest tokens after ``d_k``. All
