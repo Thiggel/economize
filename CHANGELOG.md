@@ -114,6 +114,8 @@
   model is quantized.
 - The 2:4 GPU test asserts the sparse GEMM speed-up only on A100 and H100. On an A6000 the default cuSPARSELt
   kernel is slower than dense, and the weights docs now say so.
+- The TEAL CUDA-graph test compares replay and eager outputs within bf16 rounding: the split-K GEMV adds its
+  float32 partial sums atomically in a run-dependent order, so bit equality failed intermittently.
 
 ## 0.4.0 (2026-11-04)
 
