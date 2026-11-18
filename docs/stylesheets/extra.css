@@ -41,6 +41,10 @@
 .md-typeset .support-matrix .sim {
   color: var(--md-accent-fg-color);
 }
+.md-typeset .support-matrix .untested {
+  color: var(--md-accent-fg-color);
+  font-style: italic;
+}
 .md-typeset .support-matrix .no {
   color: var(--md-default-fg-color--lighter);
 }

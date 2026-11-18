@@ -87,6 +87,9 @@ class SupportStatus(enum.Enum):
 
     #: The backend realizes the technique's saving (:attr:`~economize.TechniqueInfo.saves`).
     REAL = "real"
+    #: The backend's export maps the technique onto a path that would realize its saving, but economize's tests
+    #: have never run that runtime: the format is checked, the outputs and the saving are not.
+    UNTESTED = "untested"
     #: The backend reproduces the technique's outputs without (all of) its saving.
     SIMULATED = "simulated"
     #: The backend cannot run the technique.
@@ -98,7 +101,7 @@ class BackendSupport:
     """How one backend runs one configured technique.
 
     Attributes:
-        status: Real, simulated or unsupported.
+        status: Real, untested, simulated or unsupported.
         detail: What the backend runs, or why it cannot.
         simulation: For a simulated path, the saving it does not realize.
     """
@@ -140,7 +143,8 @@ def _transformers(technique: type[Technique], config: TechniqueConfig | None) ->
 def backend_support(technique: TechniqueRef) -> Mapping[str, BackendSupport]:
     """How every registered backend runs ``technique``, by backend name.
 
-    A benchmark of memory or speed on a backend needs :attr:`SupportStatus.REAL` there.
+    A benchmark of memory or speed on a backend needs :attr:`SupportStatus.REAL` there;
+    :attr:`SupportStatus.UNTESTED` marks a runtime whose exports economize writes but has never run.
     """
     cls, config = resolve(technique)
     return {name: BACKEND_SUPPORT.get(name)(cls, config) for name in BACKEND_SUPPORT.names()}

@@ -76,6 +76,7 @@ TRTLLM = ExportRuntime(
     fallback="the TensorRT-LLM export has no path for this technique",
     exclusive={Role.DRAFTER: "speculative decoding mode", Role.KV_CACHE: "KV-cache type",
                Role.KV_EVICTION: "attention window"},
+    verified=False,  # the tests check the checkpoint and build config; no test builds or runs an engine
 )
 
 

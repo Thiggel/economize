@@ -68,6 +68,19 @@ def test_cells_are_markdown() -> None:
     assert '<abbr title="needs &quot;x&quot; &lt;y&gt;">no</abbr>' in line
 
 
+
+def test_support_matrix_marks_untested_runtimes() -> None:
+    """An export economize writes but never runs gets its own symbol, distinct from a verified one."""
+    row = hook.Row("x", "X.", {}, {"gguf": ("real", ""), "mlx": ("untested", "export format only")})
+    line = hook.support_matrix([row]).splitlines()[4]
+    assert '<abbr class="yes" title="real">✓</abbr>' in line
+    assert '<abbr class="untested" title="untested: export format only">?</abbr>' in line
+    if hasattr(economize, "backend_support"):
+        mlx = {row.name: row for row in hook.rows()}["draft_model"].support["mlx"]
+        assert mlx[0] == "untested"
+    assert "?" in hook.BACKEND_LEGEND
+
+
 def test_page_placeholder_is_replaced() -> None:
     markdown = PAGE.read_text()
     assert hook.PLACEHOLDER in markdown

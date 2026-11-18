@@ -59,6 +59,7 @@ MLX = ExportRuntime(
     },
     fallback="the MLX export has no path for this technique",
     exclusive={Role.DRAFTER: "draft model (--draft-model)", Role.KV_EVICTION: "cache size (--max-kv-size)"},
+    verified=False,  # the tests check the files mlx_lm reads; no test loads them in mlx_lm (Apple silicon only)
 )
 
 

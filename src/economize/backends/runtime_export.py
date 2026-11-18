@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, ClassVar, TypeVar, overload
 import torch
 from torch import nn
 
-from ..core.compatibility import BackendSupport, resolve
+from ..core.compatibility import BackendSupport, SupportStatus, resolve
 from ..core.config import TechniqueConfig
 from ..core.metadata import Simulation
 from ..core.technique import TECHNIQUES, Technique, listed_techniques
@@ -174,6 +174,10 @@ class ExportRuntime:
         The refusal of a technique whose family :attr:`defaults` does not list.
     exclusive : Mapping[Role, str]
         Roles that one technique of an export may take, with the runtime setting that makes them single.
+    verified : bool
+        Whether economize's tests load the exports in the runtime and generate with them. An unverified runtime
+        reports :attr:`~economize.core.compatibility.SupportStatus.UNTESTED` where its adapter would realize the
+        saving.
     """
 
     name: str
@@ -182,6 +186,7 @@ class ExportRuntime:
     defaults: Mapping[str, tuple[Role, str]]
     fallback: str
     exclusive: Mapping[Role, str] = field(default_factory=dict)
+    verified: bool = True
 
     @overload
     def register(self, adapter: _A, *, override: bool = False) -> _A: ...
@@ -292,12 +297,16 @@ class ExportRuntime:
         Returns
         -------
         BackendSupport
-            Real, simulated or unsupported, with the adapter's reason.
+            Real (untested on an unverified runtime), simulated or unsupported, with the adapter's reason.
         """
         adapter = self.adapter_for(technique.name)
         level = adapter.level(config) if config is not None else adapter.support
         reason = adapter.reason_for(config) if config is not None else adapter.reason
-        return adapter_support(self.title, technique, level, reason, adapter.simulation)
+        support = adapter_support(self.title, technique, level, reason, adapter.simulation)
+        if self.verified or support.status is not SupportStatus.REAL:
+            return support
+        note = f"export format only: economize has not run {self.title} on it"
+        return BackendSupport(SupportStatus.UNTESTED, f"{support.detail} ({note})" if support.detail else note)
 
     def support_table(self, names: Iterable[str] | None = None) -> list[tuple[str, str, str, str]]:
         """``(technique, role, support, reason)`` of every registered technique (or of ``names``), sorted.
