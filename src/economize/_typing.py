@@ -7,13 +7,15 @@ that only serializes accepts ``Mapping[str, object]``.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import TypeAlias, Union
 
 __all__ = ["JSONDict", "JSONScalar", "JSONValue"]
 
 #: A JSON leaf.
 JSONScalar: TypeAlias = str | int | float | bool | None
-#: Any JSON value, as ``json.loads`` returns it (lists and dicts nest).
-JSONValue: TypeAlias = Union[JSONScalar, "list[JSONValue]", "dict[str, JSONValue]"]
-#: A JSON object, as ``json.loads`` returns it.
+#: Any JSON value. Nested containers are typed read-only (``Sequence``, ``Mapping``) so that a ``dict[str, str]`` or
+#: a tuple is a valid value; ``json.loads`` returns lists and dicts, which a reader narrows with ``isinstance``.
+JSONValue: TypeAlias = Union[JSONScalar, "Sequence[JSONValue]", "Mapping[str, JSONValue]"]
+#: A JSON object at the top level of a payload, mutable so that writers can add fields.
 JSONDict: TypeAlias = dict[str, JSONValue]
