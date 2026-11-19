@@ -30,10 +30,10 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, fields
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import torch
 from torch import nn
@@ -43,6 +43,16 @@ from ..errors import ConfigError
 from ..unwrap import base_model_of, peft_base
 from ._trl_common import inject_logs, is_eval_log
 from .generate import generate
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
+    from transformers import Trainer, TrainerControl, TrainerState, TrainingArguments
+    from transformers.generation.utils import GenerateOutput
+
+    from ..core.model import EfficientModel
+    from ..decoding.config import DecodeConfig
+    from ..decoding.protocols import VerifyEvent, VerifyObserver
+    from ..decoding.result import DecodeResult
 
 __all__ = ["RolloutStats", "RolloutStatsCallback", "SpeculativeRollouts", "VerifyBuffer", "attach_rollouts"]
 
@@ -63,7 +73,7 @@ class RolloutStats:
     plain_layer_tokens: float = 0.0
     wall_clock_s: float = 0.0
 
-    def add(self, results: Sequence[Any], seconds: float) -> None:
+    def add(self, results: Sequence[DecodeResult], seconds: float) -> None:
         """Add one ``generate`` call: the ``DecodeResult`` of each row and the call's wall-clock time."""
         self.calls += 1
         self.sequences += len(results)
@@ -74,11 +84,12 @@ class RolloutStats:
                 self.drafted_tokens += int(drafted)
                 self.accepted_tokens += int(accepted)
                 self.verify_passes += 1
-            summary = result.cost_summary() if hasattr(result, "cost_summary") else {}
-            relative = float(summary.get("relative_layer_tokens", 0.0))
+            summary: Mapping[str, object] = result.cost_summary() if hasattr(result, "cost_summary") else {}
+            relative = float(cast(float, summary.get("relative_layer_tokens", 0.0)))
             if relative > 0:
-                self.layer_tokens += float(summary["layer_tokens"])
-                self.plain_layer_tokens += float(summary["layer_tokens"]) / relative
+                layer_tokens = float(cast(float, summary["layer_tokens"]))
+                self.layer_tokens += layer_tokens
+                self.plain_layer_tokens += layer_tokens / relative
 
     def metrics(self, prefix: str = "rollout/") -> dict[str, float]:
         """The statistics as log values. Ratios are formed from the window's totals.
@@ -107,12 +118,12 @@ class VerifyBuffer:
     """
 
     def __init__(self, max_events: int = 4096) -> None:
-        self.events: deque[Any] = deque(maxlen=max_events)
+        self.events: deque[VerifyEvent] = deque(maxlen=max_events)
 
-    def __call__(self, event: Any) -> None:
+    def __call__(self, event: VerifyEvent) -> None:
         self.events.append(event)
 
-    def drain(self) -> list[Any]:
+    def drain(self) -> list[VerifyEvent]:
         """All buffered events, oldest first; the buffer is emptied."""
         out = list(self.events)
         self.events.clear()
@@ -135,14 +146,16 @@ class SpeculativeRollouts:
         refreshes: Calls of the model's ``refresh()``.
     """
 
-    def __init__(self, model: Any, *, decoding: Any = None, refresh: RefreshPolicy = "step") -> None:
+    def __init__(
+        self, model: EfficientModel, *, decoding: DecodeConfig | None = None, refresh: RefreshPolicy = "step"
+    ) -> None:
         if refresh not in ("step", "call", "never"):
             raise ConfigError(f"refresh must be 'step', 'call' or 'never', got {refresh!r}")
         self.model, self.decoding, self.refresh_policy = model, decoding, refresh
         self.policy_updates = self.drafter_age = self.refreshes = 0
         self._stale = False
         self._stats = {"train": RolloutStats(), "eval": RolloutStats()}
-        self._handles: list[Any] = []
+        self._handles: list[RemovableHandle] = []
         self._undo: list[Callable[[], None]] = []
 
     # ---- weights -----------------------------------------------------------------------------------------------
@@ -165,7 +178,7 @@ class SpeculativeRollouts:
             self.refreshes += 1
         self._stale = False
 
-    def observe(self, observer: Callable[[Any], None]) -> Any:
+    def observe(self, observer: VerifyObserver) -> RemovableHandle:
         """Register ``observer`` for every verification pass (``EfficientModel.add_verify_observer``).
 
         Returns:
@@ -176,23 +189,26 @@ class SpeculativeRollouts:
             raise ConfigError(
                 "this economize core has no add_verify_observer(); update economize to observe verification"
             )
-        handle = add(observer)
+        handle = cast("RemovableHandle", add(observer))
         self._handles.append(handle)
         return handle
 
     # ---- generation --------------------------------------------------------------------------------------------
-    def __call__(self, inputs: torch.Tensor | None = None, **kwargs: Any) -> Any:
+    def __call__(self, inputs: torch.Tensor | None = None, **kwargs: object) -> torch.LongTensor | GenerateOutput:
         """``generate(input_ids=..., attention_mask=..., generation_config=...)`` as TRL calls it."""
         if inputs is None:
-            inputs = kwargs.pop("input_ids", None)
+            inputs = cast("torch.Tensor | None", kwargs.pop("input_ids", None))
         base = base_model_of(self.model)
         mode = "train" if getattr(base, "training", False) else "eval"
         if self.refresh_policy == "call" or (self.refresh_policy == "step" and self._stale):
             self.refresh()
-        results: list[Any] = []
+        results: list[DecodeResult] = []
         with _eval_mode(self.model if isinstance(self.model, nn.Module) else base):
             start = time.perf_counter()
-            output = generate(self.model, inputs, decoding=self.decoding, on_results=results.extend, **kwargs)
+            # TRL's generate keywords arrive as one untyped mapping; generate types its own keywords one by one
+            economize_generate: Callable[..., torch.LongTensor | GenerateOutput] = generate
+            output = economize_generate(self.model, inputs, decoding=self.decoding, on_results=results.extend,
+                                        **kwargs)
             if isinstance(inputs, torch.Tensor) and inputs.is_cuda:
                 torch.cuda.synchronize(inputs.device)
             self._stats[mode].add(results, time.perf_counter() - start)
@@ -233,22 +249,31 @@ class RolloutStatsCallback(TrainerCallback):
     def __init__(self, rollouts: SpeculativeRollouts) -> None:
         self.rollouts = rollouts
 
-    def on_optimizer_step(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+    def on_optimizer_step(
+        self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs: object
+    ) -> None:
         self.rollouts.mark_policy_updated()
 
-    def on_log(self, args: Any, state: Any, control: Any, logs: dict[str, float] | None = None, **kwargs: Any) -> None:
+    def on_log(
+        self,
+        args: TrainingArguments,
+        state: TrainerState,
+        control: TrainerControl,
+        logs: dict[str, float] | None = None,
+        **kwargs: object,
+    ) -> None:
         if logs is None:
             return
         inject_logs(state, logs, self.rollouts.pop_metrics("eval" if is_eval_log(logs) else "train"))
 
 
 def attach_rollouts(
-    trainer: Any,
-    model: Any,
+    trainer: Trainer,
+    model: EfficientModel,
     *,
-    decoding: Any = None,
+    decoding: DecodeConfig | None = None,
     refresh: RefreshPolicy = "step",
-    observer: Callable[[Any], None] | None = None,
+    observer: VerifyObserver | None = None,
 ) -> SpeculativeRollouts:
     """Generate ``trainer``'s rollouts with ``model`` (an EfficientModel built on the trainer's policy).
 
@@ -275,7 +300,7 @@ def attach_rollouts(
                 f"the trainer generates {what}; economize rollouts need use_vllm=False and plain generate"
             )
     accelerator = getattr(trainer, "accelerator", None)
-    policy = accelerator.unwrap_model(trainer.model) if accelerator is not None else trainer.model
+    policy = cast(nn.Module, accelerator.unwrap_model(trainer.model) if accelerator is not None else trainer.model)
     if not _is_policy(policy, base_model_of(model)):
         raise ConfigError("the EfficientModel must wrap the trainer's policy object: build it with "
                           "economize.apply(trainer.model, ...) after constructing the trainer")
@@ -302,13 +327,13 @@ def attach_rollouts(
     return rollouts
 
 
-def _is_policy(policy: Any, base: Any) -> bool:
+def _is_policy(policy: object, base: object) -> bool:
     """Whether ``base`` is ``policy`` or the model inside a PEFT ``policy``."""
     return base is policy or peft_base(policy) is base
 
 
 @contextmanager
-def _eval_mode(module: Any) -> Iterator[None]:
+def _eval_mode(module: object) -> Iterator[None]:
     """Evaluation mode for the duration of a rollout: no dropout, and gradient checkpointing (active only in
     training mode) does not drop the cache. Every submodule's own flag is restored afterwards."""
     if not isinstance(module, nn.Module):
