@@ -11,7 +11,12 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias, cast
+
+from .._typing import JSONValue
+
+if TYPE_CHECKING:
+    from transformers import PretrainedConfig
 
 __all__ = [
     "PER_LAYER_CONFIG_FIELDS",
@@ -25,19 +30,23 @@ __all__ = [
     "text_config",
 ]
 
-#: A Hugging Face ``PretrainedConfig`` or a stand-in with the same attributes. Its fields differ per family and are
-#: read by name (``config.head_dim``, :func:`config_value`), so the alias stays dynamic; it names what is passed.
-HFConfig: TypeAlias = Any
+#: A Hugging Face ``PretrainedConfig``. Its fields differ per family and are read by name (``config.head_dim``,
+#: :func:`config_value`); ``PretrainedConfig.__getattribute__`` types them dynamically.
+HFConfig: TypeAlias = "PretrainedConfig"
 
 #: Config fields that hold one entry per decoder layer; :meth:`ArchAdapter.remove_layers` drops the entries of
 #: removed layers. Families with more such fields extend :attr:`ArchAdapter.per_layer_config_fields`.
 PER_LAYER_CONFIG_FIELDS: tuple[str, ...] = ("layer_types", "no_rope_layers")
 
 
-def text_config(config: HFConfig) -> HFConfig:
-    """The config of the text decoder (``config`` itself for a plain causal LM, the text sub-config of a wrapper)."""
+def text_config(config: object) -> HFConfig:
+    """The config of the text decoder (``config`` itself for a plain causal LM, the text sub-config of a wrapper).
+
+    ``config`` is typed ``object`` because callers pass ``model.config`` of an ``nn.Module``, which torch types as
+    ``Tensor | Module``.
+    """
     getter = getattr(config, "get_text_config", None)
-    return getter() if callable(getter) else config
+    return cast("HFConfig", getter() if callable(getter) else config)
 
 
 def is_heterogeneous(config: HFConfig) -> bool:
@@ -45,7 +54,7 @@ def is_heterogeneous(config: HFConfig) -> bool:
     return bool(getattr(config, "is_heterogeneous", False))
 
 
-def config_value(config: HFConfig, name: str, default: Any = None) -> Any:  # a field's type depends on the field
+def config_value(config: HFConfig, name: str, default: object = None) -> Any:  # Any: field types vary per model
     """``config.<name>`` or ``default``, also for a per-layer attribute of a heterogeneous config.
 
     There it is the global value, the one of every layer without an override. Adapters that give some layers other
@@ -66,18 +75,18 @@ def config_value(config: HFConfig, name: str, default: Any = None) -> Any:  # a 
         config.allow_global_per_layer_attribute_access = previous
 
 
-def layer_overrides(config: HFConfig) -> dict[int, dict[str, Any]]:
+def layer_overrides(config: HFConfig) -> dict[int, dict[str, JSONValue]]:
     """The attributes each layer overrides, by 0-indexed layer (``{}`` for a homogeneous config).
 
     Read from the config's serialized form (``to_dict()["per_layer_config"]``), the public view of the overrides.
     """
     if not is_heterogeneous(config):
         return {}
-    serialized: Mapping[str, Mapping[str, Any]] = config.to_dict().get("per_layer_config") or {}
+    serialized = cast("Mapping[str, Mapping[str, JSONValue]]", config.to_dict().get("per_layer_config") or {})
     return {int(index): dict(overrides) for index, overrides in serialized.items()}
 
 
-def set_layer_overrides(config: HFConfig, overrides: Mapping[int, Mapping[str, Any]]) -> None:
+def set_layer_overrides(config: HFConfig, overrides: Mapping[int, Mapping[str, object]]) -> None:
     """Replace the per-layer overrides of a heterogeneous ``config`` (0-indexed layers of the current
     ``num_hidden_layers``). transformers validates the indices and drops values equal to the global ones."""
     config.per_layer_config = {index: copy.deepcopy(dict(values)) for index, values in overrides.items()}

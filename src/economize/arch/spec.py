@@ -16,7 +16,7 @@ import enum
 from collections.abc import Callable, Iterator, Mapping
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import torch
 
@@ -34,6 +34,7 @@ __all__ = [
     "WINDOWED_KINDS",
     "AttentionSpec",
     "HeadGeometry",
+    "LayerCache",
     "LayerKind",
     "PassContext",
     "StateKind",
@@ -191,6 +192,21 @@ class HeadGeometry:
     head_dim: int
 
 
+class LayerCache(Protocol):
+    """The part of a KV cache an adapter uses: one layer's keys and values, read whole and written at the pass's slots.
+
+    :class:`economize.runtime.KVCache` implements it.
+    """
+
+    def read(self, layer_idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Keys and values of layer ``layer_idx``."""
+        ...
+
+    def write(self, layer_idx: int, key_states: torch.Tensor, value_states: torch.Tensor) -> None:
+        """Store the pass's keys and values of layer ``layer_idx``."""
+        ...
+
+
 class PassContext(Protocol):
     """What an adapter reads from the context of a pass through some decoder layers.
 
@@ -203,9 +219,13 @@ class PassContext(Protocol):
         token_inputs: Extra per-token inputs that some families feed to every layer.
     """
 
-    cache: Any
     slots: torch.Tensor
-    token_inputs: dict[str, Any]
+    token_inputs: dict[str, torch.Tensor]
+
+    @property
+    def cache(self) -> LayerCache:
+        """The cache every layer reads and writes."""
+        ...
 
     def mask(self, spec: AttentionSpec, device: torch.device) -> torch.Tensor | StructuredMask | None:
         """The attention mask of a layer with pattern ``spec`` on ``device``."""
