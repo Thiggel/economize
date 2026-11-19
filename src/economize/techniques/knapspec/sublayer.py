@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 import torch
 from torch import nn
@@ -85,8 +85,8 @@ class _ZeroAttention(nn.Module):
         super().__init__()
         self.width = width
 
-    def forward(self, *args: Any, **kwargs: Any) -> tuple[torch.Tensor, None]:
-        hidden = kwargs["hidden_states"] if "hidden_states" in kwargs else args[0]
+    def forward(self, *args: object, **kwargs: object) -> tuple[torch.Tensor, None]:
+        hidden = cast(torch.Tensor, kwargs["hidden_states"] if "hidden_states" in kwargs else args[0])
         return hidden.new_zeros(*hidden.shape[:-1], self.width), None
 
 
@@ -97,7 +97,7 @@ class _ZeroModule(nn.Module):
         super().__init__()
         self.width = width
 
-    def forward(self, first: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def forward(self, first: torch.Tensor, *args: object, **kwargs: object) -> torch.Tensor:
         return first.new_zeros(*first.shape[:-1], self.width)
 
 
@@ -117,10 +117,12 @@ class PartialLayer:
         self._unit: torch.Tensor | None = None
         if scale is not None:
             value = getattr(layer, scale)
-            self._store: dict[str, Any] = layer._buffers if scale in layer._buffers else layer._parameters
+            # the unit scale swapped in is a plain tensor, also where the scale is a parameter
+            self._store = layer._buffers if scale in layer._buffers else cast(
+                "dict[str, torch.Tensor | None]", layer._parameters)
             self._unit = torch.ones_like(value.detach())
 
-    def __call__(self, hidden: torch.Tensor, *args: Any, **kwargs: Any) -> Any:
+    def __call__(self, hidden: torch.Tensor, *args: object, **kwargs: object) -> torch.Tensor:
         own = self.layer._modules
         saved = {name: own[name] for name in self.modules}
         own.update(self.modules)
