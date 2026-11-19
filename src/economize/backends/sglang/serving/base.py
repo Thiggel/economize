@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, ClassVar, TypeVar, overload
 
 from torch import nn
 
+from ...._compat import require_engine
 from ....core.metadata import Simulation
 from ....errors import ConfigError, IncompatibleTechniquesError
 from ....registry import Registry
@@ -225,7 +226,13 @@ class SglangPlan:
         os.environ.update(self.env)
 
     def engine(self, **overrides: object) -> Engine:
-        """Start an offline ``sglang.Engine`` with this plan (imports ``sglang``)."""
+        """Start an offline ``sglang.Engine`` with this plan (imports ``sglang``).
+
+        Raises:
+            UnsupportedEngineVersionError: SGLang is missing or outside the supported releases
+                (``economize._compat.ENGINES``).
+        """
+        require_engine("sglang")
         import sglang
 
         self.apply_env()

@@ -289,3 +289,17 @@ def test_a_new_adapter_is_added_by_registration(tiny_dir: Path) -> None:
         assert check_servable(model) == {"kv_evict": Support.NATIVE}
     finally:
         serving.register_sglang_technique(type(previous), override=True)
+
+
+def test_the_sglang_plugin_registers_nothing_on_an_unsupported_sglang(monkeypatch: pytest.MonkeyPatch,
+                                                                    caplog: pytest.LogCaptureFixture) -> None:
+    """SGLang calls the plugin in every process, so an unsupported release is logged and nothing is registered."""
+    import types
+
+    import economize.backends.sglang as backend
+
+    monkeypatch.delenv("ECONOMIZE_ALLOW_UNTESTED_ENGINES", raising=False)
+    monkeypatch.setitem(sys.modules, "sglang", types.SimpleNamespace(__version__="0.6.0"))
+    with caplog.at_level("ERROR", logger=backend.__name__):
+        backend.register()
+    assert any("sglang 0.6.0" in record.getMessage() for record in caplog.records)

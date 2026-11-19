@@ -10,7 +10,7 @@ description = "Composable efficiency techniques (speculative decoding, early exi
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Filipe Laitenberger", email = "f.laitenberger@gmail.com" }]
 keywords = [
     "llm", "inference", "efficiency", "speculative-decoding", "early-exit", "layer-skipping", "quantization",
@@ -30,11 +30,15 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Typing :: Typed",
 ]
+# Each core dependency is capped below its next major release, the one its deprecation policy allows to remove
+# APIs: economize subclasses transformers' cache and modeling classes, registers torch custom ops, and writes
+# safetensors and Hub checkpoints, so a new major is admitted only after the full CI passes on it
+# (tests/unit/test_packaging.py requires a cap and checks that it admits the tested release).
 dependencies = [
-    "torch>=2.4",
-    "transformers>=5.0",
-    "safetensors>=0.4",
-    "huggingface_hub>=1.0",
+    "torch>=2.4,<3",
+    "transformers>=5.0,<6",
+    "safetensors>=0.4,<1",
+    "huggingface_hub>=1.0,<3",
 ]
 
 [project.urls]
@@ -55,15 +59,16 @@ quant = ["torchao>=0.18", "compressed-tensors>=0.17"]
 kernels = ["kernels>=0.17"]
 train = ["accelerate>=1.14", "datasets>=5.0", "trl>=1.14"]
 eval = ["lm-eval[hf]>=0.4.13"]
-# The vLLM plugin patches private vLLM classes, so the extra is capped at the series in
-# economize.backends.vllm.plugin.TESTED_VLLM (tests/unit/test_packaging.py keeps the two in step). A vLLM installed
-# outside the extra still loads the plugin, which logs a warning.
+# The vLLM plugin and the SGLang draft model patch or subclass private engine classes, so both extras admit exactly
+# the releases of economize._compat.ENGINES (tests/unit/test_packaging.py keeps them in step). On a release outside
+# them the plugins install nothing and log an error, and economize's own entry points raise
+# UnsupportedEngineVersionError; ECONOMIZE_ALLOW_UNTESTED_ENGINES=vllm,sglang relaxes both to a warning.
 vllm = ["vllm>=0.30,<0.31"]
 # Suffix decoding on vLLM (method="suffix" imports arctic_inference.suffix_decoding). Its vLLM patches stay off unless
 # ARCTIC_INFERENCE_ENABLED=1 (they target vLLM 0.26 and refuse 0.30); economize uses only the suffix trees.
 arctic = ["economize[vllm]", "arctic-inference>=0.3"]
 bench = ["datasets>=5.0"]
-sglang = ["sglang>=0.5.21"]
+sglang = ["sglang>=0.5.21,<0.6"]
 # Export runtimes (economize.backends.gguf / .onnx / .mlx / .trtllm). llama-cpp-python only loads a GGUF
 # export (economize.backends.gguf.load_llama); the MLX and TensorRT-LLM exports are written without their runtime
 # (TensorRT-LLM installs from NVIDIA's index on GPU machines, so it has no extra here).
@@ -107,7 +112,7 @@ path = "src/economize/_version.py"
 packages = ["src/economize"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/economize", "tests", "docs", "README.md", "CHANGELOG.md", "LICENSE", "pyproject.toml"]
+include = ["src/economize", "tests", "docs", "README.md", "CHANGELOG.md", "LICENSE", "NOTICE", "pyproject.toml"]
 exclude = ["__pycache__", "*.pyc"]
 
 [tool.pytest.ini_options]

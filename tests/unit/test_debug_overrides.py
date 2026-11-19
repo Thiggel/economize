@@ -14,6 +14,7 @@ SRC = Path(__file__).resolve().parents[2] / "src" / "economize"
 
 #: Every debug override and the module that reads it.
 DEBUG_OVERRIDES = {
+    "ECONOMIZE_ALLOW_UNTESTED_ENGINES": "_compat.py",
     "ECONOMIZE_FLASH_DECODE": "attention/flash.py",
     "ECONOMIZE_FLASH_PREFILL": "attention/interface.py",
     "ECONOMIZE_HUB_KERNELS": "integrations/kernels.py",

@@ -18,11 +18,11 @@ batches the interrupted run would have seen. Built in:
 :func:`as_source` turns tensors, paths and iterables into sources.
 
 Several processes. :func:`~economize.train.fit` on ``accelerate`` calls :func:`shard_source` on every process. The
-random sources (:class:`TokenStream`, :class:`TensorSource`, :class:`SequenceSource`) then draw with ``seed + rank``,
-so the processes read independent random batches of the whole data (not disjoint shards); :class:`LoaderSource`
-gives process ``rank`` every ``world``-th item, so the processes read disjoint batches. A user-defined source is
-sharded through its own ``shard(rank, world)`` method; one without it is read as given on every process (with a
-warning), so it must split the data by itself.
+random sources (:class:`TokenStream`, :class:`TensorSource`, :class:`SequenceSource`) then draw with
+``spawn_seed(seed, rank)``, so the processes read independent random batches of the whole data (not disjoint
+shards); :class:`LoaderSource` gives process ``rank`` every ``world``-th item, so the processes read disjoint
+batches. A user-defined source is sharded through its own ``shard(rank, world)`` method; one without it is read as
+given on every process (with a warning), so it must split the data by itself.
 """
 
 from .chat import generate_self_distillation, tokenize_chats, tokenize_texts

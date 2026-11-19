@@ -8,6 +8,7 @@ from typing import Any
 import torch
 from torch import nn
 
+from economize import DecodeConfig
 from helpers import VOCAB
 
 
@@ -20,17 +21,21 @@ class FakeEfficientModel:
     ``stop``, as the core does.
     """
 
-    def __init__(self, base: nn.Module, chunk: int = 1, drafting: bool = False, verifier: str = "greedy") -> None:
+    def __init__(
+        self, base: nn.Module, chunk: int = 1, drafting: bool = False, verifier: str | None = "greedy"
+    ) -> None:
         self.base_model = base
         self.chunk = chunk
-        self.decoding = SimpleNamespace(cycle_length=4 if drafting else 1, verifier_name=verifier)
+        self.decoding = DecodeConfig(cycle_length=4 if drafting else 1, verifier=verifier)
         self.drafting_technique = object() if drafting else None
         self.decode_calls = 0
+        self.decodings: list[Any] = []
 
     @torch.no_grad()
     def decode(self, input_ids: torch.Tensor, max_new_tokens: int, *, decoding: Any = None, selector: Any = None,
                stop: Any = None) -> SimpleNamespace:
         self.decode_calls += 1
+        self.decodings.append(decoding)
         prompt = input_ids.view(-1)
         new: list[int] = []
         acceptance: list[tuple[int, int]] = []

@@ -16,6 +16,11 @@ base weights before any weight technique (``source_fingerprint``) and all weight
 (``calibrated_fingerprint``). When the base matches and the replayed weights do not, loading warns with
 :class:`~economize.CalibrationMismatchWarning`.
 
+Every checkpoint records the :data:`SCHEMA_VERSION` of its ``economize_config.json``. Reading upgrades an older one
+step by step through :data:`MIGRATIONS` (checkpoints written before the version existed count as version 0) and
+refuses a newer one with a message that names the release to install. Adding an entry or a technique field does not
+change the version: a release that does not know the field drops it with an :class:`~economize.UnknownFieldWarning`.
+
 Other checkpoint layouts (e.g. ``jump.pt`` files or official draft heads) are read by registering a
 :class:`CheckpointFormat` in :data:`FORMATS`. :func:`read_checkpoint` asks every registered format whether it
 recognizes a path and refuses to guess when more than one does, so a new format's :meth:`~CheckpointFormat.detect`
@@ -28,7 +33,7 @@ import hashlib
 import json
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -38,7 +43,7 @@ from torch import nn
 
 from .._version import __version__
 from ..decoding import DecodeConfig
-from ..errors import CalibrationMismatchWarning, CheckpointFormatError, TeacherMismatchWarning
+from ..errors import CalibrationMismatchWarning, CheckpointFormatError, ConfigError, TeacherMismatchWarning
 from ..modules.sharding import full_tensor
 from ..registry import Registry
 from ..unwrap import base_model_of, peft_base
@@ -52,6 +57,8 @@ if TYPE_CHECKING:
 __all__ = [
     "CONFIG_FILE",
     "FORMATS",
+    "MIGRATIONS",
+    "SCHEMA_VERSION",
     "TRAINED_ENTRY",
     "WEIGHTS_FILE",
     "Checkpoint",
@@ -63,7 +70,9 @@ __all__ = [
     "check_teacher_fingerprint",
     "from_pretrained",
     "load",
+    "migrate",
     "read_checkpoint",
+    "resolve_base_model",
     "save",
     "source_digests",
     "teacher_fingerprint",
@@ -72,6 +81,44 @@ __all__ = [
 
 CONFIG_FILE = "economize_config.json"
 WEIGHTS_FILE = "economize_model.safetensors"
+
+#: Version of the layout of :data:`CONFIG_FILE`. It changes only when an existing entry changes its form or meaning,
+#: together with a migration from the previous version registered in :data:`MIGRATIONS`.
+SCHEMA_VERSION = 1
+
+#: A step of :func:`migrate`: the metadata of schema version ``v`` turned into that of version ``v + 1``.
+Migration = Callable[[dict[str, Any]], dict[str, Any]]
+
+#: Checkpoint migrations, registered under the version they upgrade from (``"0"`` upgrades to 1). A new schema version
+#: registers one more step here and never edits the existing ones.
+MIGRATIONS: Registry[Migration] = Registry("checkpoint migration")
+
+
+@MIGRATIONS.register("0")
+def _unversioned(meta: dict[str, Any]) -> dict[str, Any]:
+    """Checkpoints of releases up to 0.5, which wrote no ``schema_version``, have the layout of version 1."""
+    return meta
+
+
+def migrate(meta: Mapping[str, Any]) -> dict[str, Any]:
+    """``meta`` (the contents of a :data:`CONFIG_FILE`) upgraded to :data:`SCHEMA_VERSION` by the steps of
+    :data:`MIGRATIONS`. Metadata without ``schema_version`` is version 0.
+
+    Raises:
+        CheckpointFormatError: The checkpoint has a newer schema than this release reads.
+    """
+    out = dict(meta)
+    version = int(out.get("schema_version", 0))
+    if version > SCHEMA_VERSION:
+        raise CheckpointFormatError(
+            f"the checkpoint has schema version {version} (written by economize {out.get('economize_version')}), "
+            f"this release reads up to version {SCHEMA_VERSION}: upgrade economize to load it"
+        )
+    while version < SCHEMA_VERSION:
+        out = MIGRATIONS.get(str(version))(out)
+        version += 1
+        out["schema_version"] = version
+    return out
 
 
 @dataclass
@@ -116,7 +163,7 @@ class EconomizeFormat(CheckpointFormat):
     def read(self, path: Path, map_location: str | torch.device = "cpu") -> Checkpoint:
         from safetensors.torch import load_file
 
-        meta = json.loads((path / self.config_file).read_text())
+        meta = migrate(json.loads((path / self.config_file).read_text()))
         configs = [nested_config(entry) for entry in meta["techniques"]]
         states: dict[str, dict[str, torch.Tensor]] = {t["technique"]: {} for t in meta["techniques"]}
         for key, value in load_file(path / self.weights_file, device=str(map_location)).items():
@@ -338,6 +385,7 @@ def save(
     path = Path(path)
     excluded = trained_parameter_names(model, trained)
     meta: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
         "economize_version": __version__,
         "base_model": getattr(model.base_model.config, "_name_or_path", None),
         "teacher_fingerprint": _recorded_fingerprint(model, excluded),
@@ -459,15 +507,52 @@ def from_pretrained(
 ) -> EfficientModel:
     """Load the base model named in the checkpoint (or ``base_model``) with ``transformers`` and attach the techniques.
 
-    ``model_kwargs`` go to ``AutoModelForCausalLM.from_pretrained`` (e.g. ``dtype``, ``device_map``). For Hub
-    repositories, revisions and model cards see :mod:`economize.integrations.hub`.
+    ``model_kwargs`` go to ``AutoModelForCausalLM.from_pretrained`` (e.g. ``dtype``, ``device_map``). The base model
+    is loaded at the revision the checkpoint records unless ``model_kwargs`` name one (see :func:`resolve_base_model`,
+    which also explains why ``trust_remote_code=True`` needs an explicit ``base_model``). For Hub repositories and
+    model cards see :mod:`economize.integrations.hub`.
     """
     checkpoint = read_checkpoint(_local(path), format)
-    name = base_model or checkpoint.base_model
-    if not name:
-        raise CheckpointFormatError(f"{path} does not name its base model; pass base_model=...")
+    name, model_kwargs = resolve_base_model(checkpoint.meta or {"base_model": checkpoint.base_model}, base_model,
+                                            model_kwargs, source=str(path))
     base = load_base_model(name, **model_kwargs)
     return attach(base, checkpoint, decoding, calibration=calibration, check_teacher=check_teacher)
+
+
+def resolve_base_model(
+    meta: Mapping[str, Any], base_model: str | None, model_kwargs: Mapping[str, Any], *, source: str = "the checkpoint"
+) -> tuple[str, dict[str, Any]]:
+    """The base model to load for a checkpoint and the ``from_pretrained`` arguments to load it with.
+
+    Every path that loads a base model for a checkpoint (:func:`from_pretrained`, the Hub loader, the lm-eval model)
+    resolves it here, so they agree:
+
+    - The name is ``base_model``, or the ``base_model`` the checkpoint records.
+    - When that is the recorded base model, ``revision`` defaults to the recorded ``base_model_revision``, so the
+      techniques meet the weights they were trained on.
+    - ``trust_remote_code=True`` runs code from the base repository. When the checkpoint alone chooses that
+      repository, a downloaded checkpoint could make it any repository, so this is refused unless ``base_model``
+      names the repository explicitly.
+
+    Raises:
+        CheckpointFormatError: Neither ``base_model`` nor the checkpoint names a base model.
+        ConfigError: ``trust_remote_code=True`` with a base model only the checkpoint names.
+    """
+    recorded = meta.get("base_model")
+    name = base_model or recorded
+    if not name:
+        raise CheckpointFormatError(f"{source} does not name its base model; pass base_model=...")
+    kwargs = dict(model_kwargs)
+    if base_model is None and kwargs.get("trust_remote_code"):
+        raise ConfigError(
+            f"{source} names the base model {recorded!r}, and trust_remote_code=True would run code from that "
+            f"repository. Name it explicitly (base_model={recorded!r}, or pretrained= in lm-eval) to confirm that you "
+            "trust it"
+        )
+    revision = meta.get("base_model_revision")
+    if name == recorded and revision and "revision" not in kwargs:
+        kwargs["revision"] = revision
+    return str(name), kwargs
 
 
 def load_base_model(name: str | Path, **model_kwargs: Any) -> PreTrainedModel:

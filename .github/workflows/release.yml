@@ -1,0 +1,49 @@
+# Publishes a release to PyPI when a tag v<version> is pushed. The full CI (ci.yml: lint, type gate, the test matrix
+# and the docs build) runs on the tagged commit first, and the build and upload jobs need it, so a release whose
+# checks fail is never published. The upload uses PyPI trusted publishing (Settings > Environments > "pypi", and the
+# project's trusted publisher on pypi.org pointing at this workflow); no token is stored in the repository.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      # The tag must name the version the package reports (src/economize/_version.py, the single source).
+      - name: Check that the tag matches the package version
+        run: |
+          version=$(python3 -c 'import runpy; print(runpy.run_path("src/economize/_version.py")["__version__"])')
+          test "${GITHUB_REF_NAME}" = "v${version}" || {
+            echo "tag ${GITHUB_REF_NAME} does not match the package version ${version}"; exit 1; }
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

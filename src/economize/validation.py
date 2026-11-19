@@ -7,12 +7,13 @@ imports nothing from economize but :mod:`economize.errors`, so every layer of th
 from __future__ import annotations
 
 import math
-from collections.abc import Collection, Iterable, Sequence
+import warnings
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import fields, is_dataclass
 from numbers import Integral, Real
-from typing import Protocol
+from typing import Protocol, TypeVar
 
-from .errors import ConfigError, UnregisteredNameError
+from .errors import ConfigError, UnknownFieldWarning, UnregisteredNameError
 
 __all__ = [
     "check_choice",
@@ -25,7 +26,10 @@ __all__ = [
     "check_positive",
     "check_registered",
     "check_unit_interval",
+    "known_fields",
 ]
+
+V = TypeVar("V")
 
 
 class _HasNumLayers(Protocol):
@@ -166,3 +170,17 @@ def check_options(config: object, owner: str, used: Collection[str], options: Co
                 f"{name}={getattr(config, name)!r} has no effect with {owner} (of the options {sorted(options)} "
                 f"it reads {reads}); leave {name} at its default {defaults[name]!r}"
             )
+
+
+def known_fields(kind: str, data: Mapping[str, V], names: Collection[str]) -> dict[str, V]:
+    """The entries of ``data`` whose keys are in ``names``; the others are dropped with an
+    :class:`~economize.errors.UnknownFieldWarning` that names them (``kind`` names the configuration class)."""
+    unknown = sorted(set(data) - set(names))
+    if unknown:
+        warnings.warn(
+            f"ignoring unknown {kind} fields {unknown} (known: {sorted(names)}); the configuration was probably "
+            "saved by a newer economize release",
+            UnknownFieldWarning,
+            stacklevel=3,
+        )
+    return {k: v for k, v in data.items() if k in names}

@@ -121,6 +121,45 @@ def test_run_checkpointer_layout(tmp_path: Path) -> None:
         RunCheckpointer(None).resume_path(True)
 
 
+class _Payload:
+    """Unpickling it would run code: ``__reduce__`` names ``os.system``."""
+
+    def __reduce__(self) -> tuple[Any, tuple[str]]:
+        import os
+
+        return os.system, ("echo unpickled",)
+
+
+def test_state_files_are_read_without_unpickling_code(tmp_path: Path) -> None:
+    """trainer_state.pt, rank_state_<rank>.pt and train_result.pt are read with weights_only=True: the random and
+    data state economize writes loads, the numpy random state of 0.5 checkpoints loads, and other objects are
+    refused."""
+    import numpy as np
+
+    from economize import CheckpointFormatError
+    from economize.train.utils import rng_state, set_rng_state
+
+    checkpoints = RunCheckpointer(tmp_path)
+    np.random.seed(4)
+    state = {"step": 3, "rng": rng_state(), "data": {"rng": np.random.default_rng(2).bit_generator.state}}
+    expected = np.random.rand(3)
+    checkpoints.save(3, save_weights=lambda path: path.mkdir(parents=True), shared_state=lambda: state, own_state={})
+    loaded = checkpoints.load_state(tmp_path / "checkpoint-3")
+    set_rng_state(loaded["rng"])
+    assert np.array_equal(np.random.rand(3), expected) and loaded["data"] == state["data"]
+
+    legacy = dict(loaded["rng"], numpy=np.random.get_state())  # economize 0.5 saved the numpy state as is
+    torch.save({"step": 3, "rng": legacy}, tmp_path / "checkpoint-3" / STATE_FILE)
+    set_rng_state(checkpoints.load_state(tmp_path / "checkpoint-3")["rng"])
+
+    torch.save({"step": 3, "data": _Payload()}, tmp_path / "checkpoint-3" / STATE_FILE)
+    with pytest.raises(CheckpointFormatError, match=r"weights_only=True.*add_safe_globals"):
+        checkpoints.load_state(tmp_path / "checkpoint-3")
+    torch.save({"steps": 1, "history": [_Payload()]}, tmp_path / RESULT_FILE)
+    with pytest.raises(CheckpointFormatError, match="weights_only=True"):
+        checkpoints.load_result()
+
+
 # ---- resume of multi-process runs ----------------------------------------------------------------------------------
 def _run(token_file: Path, out: Path, seed: int, rank: int, **options: Any) -> _Run:
     config = TrainConfig(steps=2, batch_size=4, seq_len=16, seed=seed, output_dir=str(out), save_every=1, **options)

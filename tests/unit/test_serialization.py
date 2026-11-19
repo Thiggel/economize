@@ -13,7 +13,7 @@ from safetensors.torch import load_file, save_file
 import economize
 from economize import CheckpointFormatError, DecodeConfig, JumpConfig
 from economize.compat.tskip import jump_config_from_tskip, jump_state_from_tskip
-from economize.core.serialization import CONFIG_FILE, WEIGHTS_FILE
+from economize.core.serialization import CONFIG_FILE, MIGRATIONS, SCHEMA_VERSION, WEIGHTS_FILE, migrate
 from helpers import perturb
 
 CONFIGS = {
@@ -64,6 +64,77 @@ def test_checkpoints_saved_under_the_old_name_still_load(tiny_factory, prompt, t
     loaded = economize.load(tiny_factory(), tmp_path)
     assert loaded.techniques["jump"].config == CONFIGS["frozen"]
     assert loaded.decode(prompt, 12).tokens.tolist() == model.decode(prompt, 12).tokens.tolist()
+
+
+def _edit_meta(path: Path, edit) -> None:
+    file = next(f for f in (path / CONFIG_FILE, path / "effkit_config.json") if f.exists())
+    meta = json.loads(file.read_text())
+    edit(meta)
+    file.write_text(json.dumps(meta))
+
+
+@pytest.mark.parametrize("legacy_names", [False, True])
+def test_checkpoints_without_a_schema_version_still_load(tiny_factory, prompt, tmp_path: Path,
+                                                          legacy_names: bool) -> None:
+    """Releases up to 0.5 wrote no schema_version (and effkit wrote other file names)."""
+    model = _trained(tiny_factory(), CONFIGS["lora_readout"], DecodeConfig(cycle_length=3))
+    economize.save(model, tmp_path)
+    assert json.loads((tmp_path / CONFIG_FILE).read_text())["schema_version"] == SCHEMA_VERSION
+    _edit_meta(tmp_path, lambda meta: meta.pop("schema_version"))
+    if legacy_names:
+        (tmp_path / CONFIG_FILE).rename(tmp_path / "effkit_config.json")
+        (tmp_path / WEIGHTS_FILE).rename(tmp_path / "effkit_model.safetensors")
+    loaded = economize.load(tiny_factory(), tmp_path)
+    assert loaded.techniques["jump"].config == CONFIGS["lora_readout"]
+    assert loaded.decoding == DecodeConfig(cycle_length=3)
+    assert loaded.decode(prompt, 12).tokens.tolist() == model.decode(prompt, 12).tokens.tolist()
+
+
+def test_a_newer_schema_is_refused_with_the_release_to_install(tiny_factory, tmp_path: Path) -> None:
+    economize.save(_trained(tiny_factory(), CONFIGS["frozen"]), tmp_path)
+    _edit_meta(tmp_path, lambda meta: meta.update(schema_version=SCHEMA_VERSION + 1, economize_version="9.0.0"))
+    newer = r"schema version \d+ \(written by economize 9\.0\.0\).*upgrade economize"
+    with pytest.raises(CheckpointFormatError, match=newer):
+        economize.load(tiny_factory(), tmp_path)
+
+
+def test_fields_of_a_newer_minor_release_are_dropped_with_a_warning(tiny_factory, tmp_path: Path) -> None:
+    economize.save(_trained(tiny_factory(), CONFIGS["frozen"]), tmp_path)
+
+    def add_fields(meta: dict) -> None:
+        meta["techniques"][0]["config"]["future_option"] = 3
+        meta["decoding"]["future_decoding_option"] = True
+
+    _edit_meta(tmp_path, add_fields)
+    with pytest.warns(economize.UnknownFieldWarning) as caught:
+        loaded = economize.load(tiny_factory(), tmp_path)
+    assert loaded.techniques["jump"].config == CONFIGS["frozen"]
+    assert {"future_option", "future_decoding_option"} <= {w for r in caught for w in str(r.message).split("'")}
+
+
+def test_fields_missing_from_an_older_checkpoint_take_their_defaults(tiny_factory, tmp_path: Path) -> None:
+    economize.save(_trained(tiny_factory(), CONFIGS["frozen"]), tmp_path)
+    _edit_meta(tmp_path, lambda meta: (meta["techniques"][0]["config"].pop("mixer"),
+                                       meta["decoding"].pop("min_confidence")))
+    loaded = economize.load(tiny_factory(), tmp_path)
+    assert loaded.techniques["jump"].config == CONFIGS["frozen"]
+
+
+def test_migrations_run_in_order_from_the_saved_version(monkeypatch) -> None:
+    import economize.core.serialization as serialization
+
+    def rename(meta: dict) -> dict:
+        meta["renamed"] = meta.pop("old")
+        return meta
+
+    assert migrate({"schema_version": SCHEMA_VERSION}) == {"schema_version": SCHEMA_VERSION}
+    monkeypatch.setattr(serialization, "SCHEMA_VERSION", SCHEMA_VERSION + 1)
+    MIGRATIONS.register(str(SCHEMA_VERSION), rename)
+    try:
+        assert serialization.migrate({"old": 1}) == {"renamed": 1, "schema_version": SCHEMA_VERSION + 1}
+        assert serialization.migrate({"renamed": 2, "schema_version": SCHEMA_VERSION + 1})["renamed"] == 2
+    finally:
+        MIGRATIONS.unregister(str(SCHEMA_VERSION))
 
 
 def test_from_pretrained_loads_the_named_base_model(tiny_factory, prompt, tmp_path: Path) -> None:

@@ -54,9 +54,6 @@ if TYPE_CHECKING:
 
 __all__ = ["EffCollator", "EffTrainer", "EffTrainingArguments", "economize_training_args"]
 
-#: economize schedules that ``transformers`` implements under its own name (they decay to zero there, ignoring
-#: ``min_lr_ratio``); :func:`economize_training_args` uses economize's implementation for every other schedule.
-_HF_SCHEDULES = {"cosine": "cosine", "linear": "linear", "constant": "constant_with_warmup"}
 
 
 @dataclass
@@ -139,11 +136,10 @@ def economize_training_args(objective: str | Objective, output_dir: str, **overr
     """:class:`EffTrainingArguments` with the optimizer and schedule settings the objective recommends.
 
     Learning rate, backbone rate, weight decay, AdamW betas, warmup steps and gradient clipping come from the
-    objective's :class:`~economize.train.OptimDefaults`. A schedule that ``transformers`` implements (``cosine``,
-    ``linear``, ``constant``) is set as its ``lr_scheduler_type`` (cosine and linear decay to zero there; set
-    ``economize_schedule=`` or pass ``schedule=`` to :class:`EffTrainer` for economize's schedules with a floor). Any
-    other registered schedule is set as ``economize_schedule`` with the objective's ``min_lr_ratio``. ``overrides``
-    are further fields and win over the defaults.
+    objective's :class:`~economize.train.OptimDefaults`, and the schedule is the objective's ``schedule`` with its
+    ``min_lr_ratio`` floor (``economize_schedule``), so :class:`EffTrainer` follows the same learning rates as
+    :func:`~economize.train.fit`. ``overrides`` are further fields and win over the defaults; passing
+    ``lr_scheduler_type`` without ``economize_schedule`` selects that ``transformers`` schedule instead.
     """
     defaults = (objective if isinstance(objective, Objective) else build_objective(objective)).defaults
     settings: dict[str, Any] = {
@@ -155,9 +151,7 @@ def economize_training_args(objective: str | Objective, output_dir: str, **overr
         "warmup_steps": defaults.warmup_steps,
         "max_grad_norm": defaults.grad_clip or 0.0,
     }
-    if defaults.schedule in _HF_SCHEDULES:
-        settings["lr_scheduler_type"] = _HF_SCHEDULES[defaults.schedule]
-    else:
+    if "lr_scheduler_type" not in overrides:
         settings.update(economize_schedule=defaults.schedule, min_lr_ratio=defaults.min_lr_ratio)
     settings.update(overrides)
     return EffTrainingArguments(output_dir=output_dir, **settings)

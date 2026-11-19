@@ -177,8 +177,7 @@ class EconomizeHubMixin(
             # check_teacher=False: check_base_model below also compares the revision and the quantization.
             model = load(base_model, folder, format=format, decoding=decoding, check_teacher=False)
         else:
-            if base_model is None or base_model == meta.get("base_model"):
-                base_revision = base_revision or meta.get("base_model_revision")
+            # from_pretrained (resolve_base_model) defaults the revision to the recorded one.
             if base_revision is not None:
                 model_kwargs.setdefault("revision", base_revision)
             model = from_pretrained(folder, base_model, format=format, decoding=decoding, check_teacher=False,

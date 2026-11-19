@@ -90,7 +90,10 @@ respect to the processed target. Differences from stock `generate`:
   activation sparsity, layer skipping). Quantized, pruned or otherwise rewritten weights are part of the pass.
 - Options that select another algorithm raise `ConfigError` and are never ignored: beam search, assisted
   generation (`assistant_model`), classifier-free guidance, prefilled `past_key_values`, `output_attentions` /
-  `output_hidden_states`, `synced_gpus=True`, and `do_sample=True` with a greedy-only verifier.
+  `output_hidden_states`, `synced_gpus=True`, and `do_sample=True` with an explicitly named
+  greedy-only verifier.
+- `do_sample=True` (the default of `pipeline("text-generation")`) with a drafter whose verifier is left implicit
+  verifies by lossless speculative sampling (`verifier="rejection"`).
 
 ## Hub checkpoints
 

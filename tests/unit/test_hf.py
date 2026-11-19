@@ -66,13 +66,38 @@ def test_eos_stops_generation(model, prompt) -> None:
 
 
 def test_sampling_needs_lossy_decoding(rejecting, prompt) -> None:
+    greedy = DecodeConfig(cycle_length=4, verifier="greedy")
     with pytest.raises(ConfigError, match="lossless=False"):
-        rejecting.generate(prompt[None], max_new_tokens=4, do_sample=True)
+        rejecting.generate(prompt[None], max_new_tokens=4, do_sample=True, decoding=greedy)
     lossy = DecodeConfig(cycle_length=4, lossless=False)
     runs = []
     for _ in range(2):
         torch.manual_seed(7)
         runs.append(rejecting.generate(prompt[None], max_new_tokens=MAX_NEW, do_sample=True, top_k=0, decoding=lossy))
+    assert runs[0].tolist() == runs[1].tolist() and runs[0].shape[1] == prompt.numel() + MAX_NEW
+
+
+def test_pipeline_sampling_defaults_run_lossless_speculative_sampling(rejecting, prompt, monkeypatch) -> None:
+    """``pipeline("text-generation")`` passes ``do_sample=True`` unless told otherwise. With the default decoding
+    options the drafter then verifies by rejection sampling, which reproduces sampling from the base model."""
+    from transformers import GenerationConfig
+    from transformers.pipelines.text_generation import TextGenerationPipeline
+
+    defaults = TextGenerationPipeline._default_generation_config
+    assert defaults.do_sample
+    config = GenerationConfig(do_sample=True, temperature=defaults.temperature, top_k=0, max_new_tokens=MAX_NEW)
+    decode_batch, verifiers = rejecting.decode_batch, []
+
+    def recording(*args, **kwargs):
+        verifiers.append(kwargs["decoding"].verifier_name)
+        return decode_batch(*args, **kwargs)
+
+    monkeypatch.setattr(rejecting, "decode_batch", recording)
+    runs = []
+    for _ in range(2):
+        torch.manual_seed(3)
+        runs.append(rejecting.generate(prompt[None], generation_config=config))
+    assert verifiers == ["rejection", "rejection"]
     assert runs[0].tolist() == runs[1].tolist() and runs[0].shape[1] == prompt.numel() + MAX_NEW
 
 

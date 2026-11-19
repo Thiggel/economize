@@ -23,6 +23,7 @@ layers. A change to a contract in Section 3 is written here first.
 src/economize/
   __init__.py          public API only (apply, load, from_pretrained, save, EfficientModel, configs, registries, errors)
   _version.py          __version__, the single source (economize.__version__, checkpoints, pyproject's hatch version)
+  _compat.py           engine version guards: the vLLM / SGLang / TRL releases whose private classes economize hooks
   _deprecation.py      warn_moved: the DeprecationWarning of every shim that keeps a moved or renamed name alive
   _identity.py         IdentityMap: values keyed by the identity of live objects (tensors, modules), safe against
                        id reuse; per-object state lives on its owner or in such a map, never under a bare id()
@@ -82,7 +83,7 @@ against the table below (it reads the table from this file, so a new package mus
 
 | Layer | Packages |
 |---|---|
-| 0 | `_version`, `_deprecation`, `_identity`, `errors`, `unwrap`, `validation` |
+| 0 | `_version`, `_compat`, `_deprecation`, `_identity`, `errors`, `unwrap`, `validation` |
 | 1 | `registry`, `modules`, `attention` |
 | 2 | `arch` |
 | 3 | `runtime` |
@@ -726,7 +727,7 @@ class MyObjective(Objective):        # dataclass fields = the objective's hyperp
   `TeacherMismatchWarning`.
 - **Loops.** `fit(model, data, objective=None, *, config=TrainConfig(), eval_data, teacher_model, callbacks,
   **overrides) -> TrainResult`: plain loop, gradient accumulation, optional autocast, `accelerate=True` for
-  data-parallel runs (one writer, data seed `seed + rank`). `output_dir` gets `train_config.json`,
+  data-parallel runs (one writer, data seed `spawn_seed(seed, rank)`). `output_dir` gets `train_config.json`,
   `train_log.jsonl`, `checkpoint-<step>/` (weights + `trainer_state.pt` with optimizer, RNG and data position;
   `keep_checkpoints` newest kept) and `final/`. `resume=True|path` reproduces an uninterrupted run.
   `EffTrainer(transformers.Trainer)(model, objective=None, args, ..., lr_backbone, teacher_model, schedule,
@@ -800,7 +801,7 @@ that is skipped when the optional dependency is missing and runs in CI with it i
 
 | Ecosystem piece | Contract |
 |---|---|
-| Install | `pip install economize`: pure Python, hard deps torch>=2.4, transformers>=5.0, safetensors>=0.4, huggingface_hub>=1.0. Extras `[test] [peft] [quant] [kernels] [train] [eval] [bench] [gguf] [llama-cpp] [onnx] [mlx] [vllm] [sglang] [arctic]`, and `[all]` = peft, quant, kernels, train, eval, bench, gguf, onnx, mlx (vLLM, SGLang and Arctic Inference pin their own torch; llama-cpp builds from source). Entry points: `vllm.general_plugins` (`economize`), `economize.quant_backends` (`compressed-tensors`), `economize.prompt_sources`, script `economize-lm-eval`; the group `economize.exporters` is read for exporters of other packages. No upper pins except the `vllm` extra (the `TESTED_VLLM` series); CI matrix over the oldest supported and the latest torch/transformers |
+| Install | `pip install economize`: pure Python, hard deps torch>=2.4,<3, transformers>=5.0,<6, safetensors>=0.4,<1, huggingface_hub>=1.0,<3 (each capped below its next untested major release). Extras `[test] [peft] [quant] [kernels] [train] [eval] [bench] [gguf] [llama-cpp] [onnx] [mlx] [vllm] [sglang] [arctic]`, and `[all]` = peft, quant, kernels, train, eval, bench, gguf, onnx, mlx (vLLM, SGLang and Arctic Inference pin their own torch; llama-cpp builds from source). Entry points: `vllm.general_plugins` (`economize`), `economize.quant_backends` (`compressed-tensors`), `economize.prompt_sources`, script `economize-lm-eval`; the group `economize.exporters` is read for exporters of other packages. The `vllm` and `sglang` extras pin the releases of `economize._compat.ENGINES`; CI matrix over the oldest supported and the latest torch/transformers |
 | `transformers` generate | `EfficientModel.generate(input_ids, generation_config=..., **kwargs)` accepts the usual `GenerationConfig` fields (max_new_tokens, eos lists, do_sample, temperature, top_k, top_p, min_p, repetition_penalty), `LogitsProcessorList`, `StoppingCriteriaList`, streamers (`TextStreamer`, `TextIteratorStreamer`) and `return_dict_in_generate`. Logits processors apply to target and draft distributions alike, so verification stays lossless for the processed target. Unsupported kwargs raise, they are never silently ignored |
 | Hub | `EfficientModel.save_pretrained / push_to_hub / from_pretrained` through `huggingface_hub.ModelHubMixin`: `economize_config.json` (techniques, configs, base model id and revision, teacher fingerprint), `economize_model.safetensors` with technique weights only, and a generated model card with `base_model:` metadata so the Hub links the drafter to its target like a PEFT adapter. `economize.from_pretrained("<drafter-repo>")` loads the base by id |
 | PEFT | A `PeftModel` base works (adapter resolves `get_base_model()`, LoRA merged or not). The LoRA of any technique that implements `core.lora_capable.LoraCapable` (`layer_lora()`; early exit and width pruning) exports to and loads from the PEFT LoRA format (`integrations.peft.save_lora` / `load_lora`, `technique=` when several have one) |

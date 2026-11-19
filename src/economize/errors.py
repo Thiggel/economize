@@ -9,11 +9,15 @@ __all__ = [
     "DuplicateNameError",
     "EconomizeError",
     "IncompatibleTechniquesError",
+    "NonFiniteLossError",
     "SimulatedPathWarning",
     "TeacherMismatchWarning",
+    "UnknownFieldWarning",
     "UnknownNameError",
     "UnregisteredNameError",
+    "UnsupportedEngineVersionError",
     "UnsupportedModelError",
+    "UntestedEngineWarning",
 ]
 
 
@@ -53,6 +57,19 @@ class CheckpointFormatError(EconomizeError, ValueError):
     """A checkpoint could not be recognised or does not match its configuration."""
 
 
+class NonFiniteLossError(EconomizeError, FloatingPointError):
+    """A training step's loss is ``NaN`` or infinite (see ``TrainConfig.nonfinite``)."""
+
+
+class UnsupportedEngineVersionError(EconomizeError, ImportError):
+    """An engine whose private classes economize patches (vLLM, SGLang, TRL) is missing or installed in a release
+    outside the tested range (see ``economize._compat.ENGINES``)."""
+
+
+class UntestedEngineWarning(UserWarning):
+    """An engine release outside the tested range runs because ``economize._compat.ALLOW_UNTESTED_ENV`` allows it."""
+
+
 class SimulatedPathWarning(UserWarning):
     """A technique attached on a path that reproduces its outputs without realizing its saving (fake quantization,
     masked eviction; see :class:`~economize.Simulation`). Quality numbers are valid; memory and speed numbers of the
@@ -65,6 +82,11 @@ class CalibrationMismatchWarning(UserWarning):
     The base model matches the checkpoint's, so the calibration differed: other calibration data, or a device or
     library version that rounds differently. Pass the calibration data the checkpoint was made with.
     """
+
+
+class UnknownFieldWarning(UserWarning):
+    """A saved configuration names fields this version of economize does not know (typically a checkpoint written by
+    a newer release). The fields are ignored and the configuration is built from the fields that are known."""
 
 
 class TeacherMismatchWarning(UserWarning):

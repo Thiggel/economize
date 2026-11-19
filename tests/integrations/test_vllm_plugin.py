@@ -96,7 +96,7 @@ def fake_vllm(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
 
     fakes = SimpleNamespace(registry=_Registry(), proposer=EagleProposer, speculator=EagleSpeculator,
                             updater_calls=calls, algos={"eagle3": update_eagle3})
-    monkeypatch.setitem(sys.modules, "vllm", _module("vllm", ModelRegistry=fakes.registry))
+    monkeypatch.setitem(sys.modules, "vllm", _module("vllm", ModelRegistry=fakes.registry, __version__="0.30.0"))
     monkeypatch.setitem(sys.modules, _EAGLE, _module(_EAGLE, EagleProposer=EagleProposer))
     monkeypatch.setitem(sys.modules, _SPECULATOR, _module(_SPECULATOR, EagleSpeculator=EagleSpeculator))
     monkeypatch.setitem(sys.modules, plugin._SPECULATORS,
@@ -181,13 +181,28 @@ def test_speculators_updater(fake_vllm: SimpleNamespace) -> None:
 
 
 def test_register_never_raises(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
-    for name in ("vllm", _EAGLE, _SPECULATOR, plugin._SPECULATORS):
-        monkeypatch.setitem(sys.modules, name, None)  # "import halted": what a missing or changed vLLM looks like
+    monkeypatch.setitem(sys.modules, "vllm", _module("vllm", __version__="0.30.0"))
+    for name in (_EAGLE, _SPECULATOR, plugin._SPECULATORS):
+        monkeypatch.setitem(sys.modules, name, None)  # "import halted": what a changed vLLM looks like
     with caplog.at_level(logging.WARNING, logger=plugin.__name__):
         economize_vllm.register()
     messages = [record.getMessage() for record in caplog.records]
     steps = len(plugin._steps())  # one per drafter architecture, speculators algorithm and hooked proposer
     assert len(messages) == steps and all(message.startswith("economize: could not install") for message in messages)
+
+
+def test_register_without_vllm_logs_once(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    import importlib.metadata
+
+    def missing(name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setitem(sys.modules, "vllm", None)
+    monkeypatch.setattr(importlib.metadata, "version", missing)
+    with caplog.at_level(logging.WARNING, logger=plugin.__name__):
+        economize_vllm.register()
+    assert [record.getMessage() for record in caplog.records] == [
+        "economize: the vLLM drafter hooks are not installed: vllm is not installed: pip install 'vllm>=0.30,<0.31'"]
 
 
 def test_drafter_of() -> None:
@@ -320,16 +335,28 @@ def test_importing_the_backend_does_not_import_vllm() -> None:
     assert done.returncode == 0, done.stderr[-2000:]
 
 
-@pytest.mark.parametrize(("version", "warns"), [("0.30.2", False), ("0.30.0rc1", False), ("0.31.0", True)])
-def test_vllm_plugin_warns_outside_the_tested_vllm_versions(version: str, warns: bool, monkeypatch: pytest.MonkeyPatch,
-                                                            caplog: pytest.LogCaptureFixture) -> None:
-    """The plugin hooks private vLLM classes, so an untested vLLM release is named in the log (never an error)."""
-    import sys
+@pytest.mark.parametrize(("version", "supported"), [("0.30.2", True), ("0.30.0rc1", True), ("0.31.0", False),
+                                                   ("0.29.9", False)])
+def test_vllm_plugin_skips_its_hooks_outside_the_supported_vllm_releases(
+        version: str, supported: bool, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """The plugin hooks private vLLM classes: on an unsupported release it installs nothing and logs an error, and
+    it never raises, since an exception in a general plugin would take the vLLM process down."""
     import types
 
     from economize.backends.vllm import plugin
 
+    monkeypatch.delenv("ECONOMIZE_ALLOW_UNTESTED_ENGINES", raising=False)
     monkeypatch.setitem(sys.modules, "vllm", types.SimpleNamespace(__version__=version))
-    with caplog.at_level("WARNING", logger=plugin.__name__):
-        plugin.check_vllm_version()
-    assert any("tested" in record.getMessage() for record in caplog.records) is warns
+    with caplog.at_level("ERROR", logger=plugin.__name__):
+        assert plugin.check_vllm_version() is supported
+    assert any("ECONOMIZE_ALLOW_UNTESTED_ENGINES" in record.getMessage() for record in caplog.records) is not supported
+
+
+def test_vllm_plugin_registers_nothing_on_an_unsupported_vllm(monkeypatch: pytest.MonkeyPatch) -> None:
+    from economize.backends.vllm import plugin
+
+    registry = _Registry()
+    monkeypatch.delenv("ECONOMIZE_ALLOW_UNTESTED_ENGINES", raising=False)
+    monkeypatch.setitem(sys.modules, "vllm", _module("vllm", ModelRegistry=registry, __version__="0.31.0"))
+    plugin.register()
+    assert set(registry.archs) == {"Eagle3LlamaForCausalLM"}

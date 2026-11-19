@@ -194,7 +194,8 @@ chat template formats them.
 |---|---|---|
 | `steps`, `batch_size`, `seq_len`, `grad_accum` | 1000, 8, 1024, 1 | optimizer steps, rows per micro-batch, window length of token files, micro-batches per step |
 | `lr`, `lr_backbone`, `weight_decay`, `betas`, `warmup_steps`, `schedule`, `min_lr_ratio`, `grad_clip` | objective's | optimizer and schedule; `lr` applies to drafter (`"head"`) groups, `lr_backbone` to LoRA, layer copies and base weights |
-| `autocast` | `None` | autocast dtype of the objective's forward (`"bfloat16"`); the teacher pass always runs in the model's dtypes |
+| `autocast` | `None` | autocast dtype of the objective's forward (`"bfloat16"`); the teacher pass always runs in the model's dtypes; `"float16"` scales the loss with a `GradScaler` (its state is checkpointed) |
+| `nonfinite` | `"raise"` | what a NaN or infinite loss does: `"raise"` stops with `NonFiniteLossError` before the step is applied, `"skip"` drops the step with a warning, `"warn"` applies it |
 | `log_every`, `eval_every`, `eval_batch_size` | 50, `None`, 8 | logging (always also at the last step), evaluation (`None`: after the last step only) |
 | `output_dir`, `save_every`, `keep_checkpoints` | `None`, `None`, 2 | where to write, how often to checkpoint, how many checkpoints to keep |
 | `resume` | `False` | `True` continues from the latest checkpoint in `output_dir`, a path from that checkpoint |
@@ -218,11 +219,12 @@ weights go to `base_parameters.safetensors` (restored by `economize.train.load_t
 The checkpoint's teacher fingerprint is that of the trained base, so load such a run onto `final/base/`
 (`economize.load(AutoModelForCausalLM.from_pretrained("runs/x/final/base"), "runs/x/final")`), or onto the
 original base with `check_teacher=False` followed by `load_trained`, which avoids the `TeacherMismatchWarning`.
-Resuming restores the weights, the optimizer state, the RNG states and the data position, so that steps after a
+Batches in which no next-token prediction counts (every target masked by `attention_mask` or `loss_mask`) are
+drawn past with a warning (`skipped_batches` in the log), and evaluation leaves them out. Resuming restores the weights, the optimizer state, the RNG states and the data position, so that steps after a
 resume reproduce those of an uninterrupted run (tested to float tolerance for token files and tensors).
 
 Several GPUs: `fit(..., accelerate=True)` under `accelerate launch --num_processes 4 train.py` averages
-gradients over processes, gives each process its own data seed (`seed + rank`) and writes logs and checkpoints
+gradients over processes, gives each process its own data seed (`spawn_seed(seed, rank)`) and writes logs and checkpoints
 from the main process only.
 
 ## EffTrainer
@@ -244,8 +246,8 @@ trainer.train()
 ```
 
 `economize_training_args` fills `TrainingArguments` with the objective's learning rate, weight decay, betas,
-warmup and clipping. The `transformers` cosine schedule decays to zero, so pass `schedule="cosine",
-min_lr_ratio=0.1` to `EffTrainer` for economize's schedule with a floor. `lr_backbone=` sets the rate of LoRA,
+warmup, clipping and schedule (economize's, with the `min_lr_ratio` floor), so `EffTrainer` follows the learning
+rates of `fit`. Pass `lr_scheduler_type=` to it for a `transformers` schedule instead (its cosine decays to zero). `lr_backbone=` sets the rate of LoRA,
 layer copies and base weights. The datasets hold `input_ids` (and optionally `attention_mask`, `labels`), or are
 lists of `Example`s, and `EffCollator` pads them. Logged metrics are the objective's (`kl1`, `acc1`, ... and
 `eval_kl1`, ... in evaluation). Each checkpoint holds the economize weights as in `final/` above next to the

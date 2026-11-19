@@ -33,6 +33,7 @@ import torch
 from ...errors import ConfigError
 from ...validation import check_non_negative, check_number, check_positive
 from ..objective import Batch
+from ..utils import spawn_seed
 from .sources import Example, _Shuffled, collate
 
 __all__ = ["ORDINAL_NUMBERS", "PASSKEY_ALPHABET", "PasskeyRetrieval"]
@@ -206,7 +207,7 @@ class PasskeyRetrieval:
         self._order.load_state_dict(state)
 
     def shard(self, rank: int, world: int) -> None:
-        """Process ``rank`` of ``world`` draws with ``seed + rank`` (independent examples on every process)."""
+        """Process ``rank`` of ``world`` draws with its own seed (independent examples on every process)."""
         self._order.shard(rank, world)
 
     # ---- examples -------------------------------------------------------------------------------------------------
@@ -240,5 +241,4 @@ class PasskeyRetrieval:
         return list(self.encode(" ".join(PASSKEY_ALPHABET[w] for w in words.tolist())))
 
     def _generator(self, epoch: int, position: int) -> torch.Generator:
-        seed = (self._order.seed * 1_000_003 + epoch) * 1_000_003 + position
-        return torch.Generator().manual_seed(seed % (2**63))
+        return torch.Generator().manual_seed(spawn_seed(self._order.seed, epoch, position))

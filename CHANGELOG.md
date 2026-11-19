@@ -1,5 +1,58 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The core dependencies are capped below their next major release (`torch<3`, `transformers<6`, `safetensors<1`,
+  `huggingface_hub<3`), since economize relies on transformers' cache and modeling classes and on torch custom ops
+  that a major release may change.
+- The sdist and wheel ship a `NOTICE` file that names the third-party code and data the distribution contains (the
+  Medusa tree, vLLM's Marlin packing, and the MInference, SmoothQuant, KVCache-Factory and TriForce transcriptions
+  that the tests use as references) with their licenses and copyright notices.
+- Checkpoints record a `schema_version` in `economize_config.json`. Loading upgrades older checkpoints through the
+  registered steps of `economize.core.serialization.MIGRATIONS` (checkpoints without a version, including effkit
+  ones, are version 0) and refuses a newer schema with the release to install.
+- Configuration fields unknown to this release (saved by a newer one) are dropped with an `UnknownFieldWarning`
+  instead of failing the load, and fields an older release did not save take their defaults.
+- Releases are published by `.github/workflows/release.yml` only after the full CI passes on the tagged commit,
+  and CI tests Python 3.10 to 3.13.
+- Training state and result files are read with `torch.load(weights_only=True)`: a file holding code objects raises
+  `CheckpointFormatError` instead of running it. Register trusted custom types with
+  `torch.serialization.add_safe_globals`. Older state files still load.
+- Per-rank, per-epoch and per-position seeds are derived with `economize.train.utils.spawn_seed` (numpy `SeedSequence`)
+  instead of `seed + rank` and `seed + epoch`, so neighbouring seeds no longer share streams. Random sources draw
+  different (equally distributed) batches than in 0.5.0 for the same seed.
+- A `LoaderSource` (what `fit` and `as_source` make of a `DataLoader`) reseeds the loader's shuffling generator from the seed and
+  epoch, so resuming through a shuffling `DataLoader` reproduces the batches of an uninterrupted run.
+- `fit` raises `NonFiniteLossError` when a loss is NaN or infinite, before the optimizer step is applied (it used
+  to apply the step and corrupt the weights). `TrainConfig(nonfinite="skip")` drops such steps with a warning,
+  `"warn"` keeps the old behaviour.
+- `TrainConfig(autocast="float16")` scales the loss with `torch.amp.GradScaler`; the scale is logged as `loss_scale`
+  and checkpointed.
+- `fit` draws past batches in which no next-token prediction counts (logged as `skipped_batches`), and `evaluate`
+  leaves them out instead of averaging a 0/0. A source that only yields such batches raises `ConfigError`.
+- `larger_teacher` keeps the teacher in evaluation mode, so dropout in the larger model no longer perturbs the
+  distillation targets.
+- `economize_training_args` sets the objective's schedule with its `min_lr_ratio` floor as `economize_schedule`,
+  so `EffTrainer` follows the learning rates of `fit` (it used to pick the `transformers` cosine, which decays to
+  zero). Pass `lr_scheduler_type=` for a `transformers` schedule.
+- The vLLM plugin, the SGLang draft model and `sync_drafter` check the installed vLLM, SGLang and TRL release against
+  `economize._compat.ENGINES` before touching private engine classes. `VllmPlan.llm`, `SglangPlan.engine` and
+  `sync_drafter` raise `UnsupportedEngineVersionError` outside the supported range; the engine plugins log an error
+  and install nothing (they used to warn and patch anyway). `ECONOMIZE_ALLOW_UNTESTED_ENGINES=vllm,sglang,trl` turns
+  this into an `UntestedEngineWarning`. The `sglang` extra is capped at `<0.6`.
+- `economize.from_pretrained` loads the base model at the revision the checkpoint records (only the Hub loader did),
+  through `economize.core.serialization.resolve_base_model`, which the Hub and lm-eval loaders share.
+  `trust_remote_code=True` is refused with a `ConfigError` when only the checkpoint names the base repository: name
+  the base model explicitly to run its code.
+- `generate` with `do_sample=True` (the default of `pipeline("text-generation")`) on a drafting model whose
+  verifier is not named verifies by rejection sampling, which keeps the sampled distribution exact. It used to raise
+  `ConfigError` for the implicit greedy verifier. A verifier named explicitly is kept, and a greedy one still raises.
+- `model.half()`, `model.double()` and `model.to(dtype)` on an `EfficientModel` with a `jump` or `early_exit` drafter
+  cast the base model and leave the drafter's float32 parameters in float32
+  (`economize.modules.Float32Parameters`). The drafter used to be cast too and then failed on its float32 inputs.
+
 ## 0.5.0 (2026-11-18)
 
 ### Added
