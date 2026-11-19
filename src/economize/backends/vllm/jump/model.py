@@ -37,7 +37,7 @@ import copy
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 import torch
 from torch import nn
@@ -45,6 +45,10 @@ from torch import nn
 from ....errors import ConfigError
 from ....techniques.jump.export import WEIGHTS_PREFIX, ExportedJumpDrafter, JumpDrafterSpec
 from ..drafters import SYNC_PREFIX
+
+if TYPE_CHECKING:
+    from transformers import PretrainedConfig
+    from vllm.config import VllmConfig
 
 __all__ = ["DRAFTER_ARCHITECTURE", "STACKED_PARAMS", "SYNC_PREFIX", "EconomizeJumpEagle3ForCausalLM", "TargetModules"]
 
@@ -63,6 +67,14 @@ _MLP_LINEARS = ("gate_proj", "up_proj", "down_proj")
 
 _LAYER_INDEX = re.compile(r"(?:^|\.)layers\.(\d+)\.")
 _ADAPTED_HEADS = ("lora.", "blocks.")
+
+
+class _DecoderStack(Protocol):
+    """The language model inside a vLLM causal LM (``target.model``)."""
+
+    layers: nn.ModuleList
+    norm: nn.Module
+    embed_tokens: nn.Module
 
 
 @dataclass
@@ -85,7 +97,7 @@ class TargetModules:
     logits_processor: Callable[..., torch.Tensor] | None = None
 
 
-def _draft_hf_config(vllm_config: Any) -> Any:
+def _draft_hf_config(vllm_config: VllmConfig) -> PretrainedConfig:
     speculative = getattr(vllm_config, "speculative_config", None)
     draft = getattr(speculative, "draft_model_config", None)
     if draft is None:  # built as a target model (e.g. ``vllm serve`` without speculative decoding)
@@ -122,7 +134,7 @@ def _copy_layer(layer: nn.Module) -> nn.Module:
     vLLM attributes. The weight loaders are bound to the target's modules and write into the parameter they are
     given, which works for the copy since its layout is the same.
     """
-    memo: dict[int, Any] = dict(_shared_modules(layer))
+    memo: dict[int, object] = dict(_shared_modules(layer))
     memo.update({id(param): _clone_parameter(param) for param in layer.parameters()})
     return copy.deepcopy(layer, memo=memo).requires_grad_(False)
 
@@ -239,7 +251,7 @@ class EconomizeJumpEagle3ForCausalLM(nn.Module):
     has_own_embed_tokens = False  # tells vLLM's EAGLE loaders not to share or copy an embedding into this module
     has_own_lm_head = False
 
-    def __init__(self, *, vllm_config: Any, prefix: str = "") -> None:
+    def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
         super().__init__()
         self.spec = self.read_spec(_draft_hf_config(vllm_config))
         self.jump = ExportedJumpDrafter(self.spec)
@@ -249,7 +261,7 @@ class EconomizeJumpEagle3ForCausalLM(nn.Module):
         self.refreshes = 0  # jump-path rebuilds after weight syncs (for logs and tests)
 
     @classmethod
-    def read_spec(cls, hf_config: Any) -> JumpDrafterSpec:
+    def read_spec(cls, hf_config: PretrainedConfig) -> JumpDrafterSpec:
         """The jump specification in the draft ``hf_config``; a drafter that nests one in its own block overrides it."""
         return JumpDrafterSpec.from_hf_config(hf_config)
 
@@ -265,7 +277,7 @@ class EconomizeJumpEagle3ForCausalLM(nn.Module):
             ConfigError: The target's depth differs from the export, or an adapted tensor has no place in the
                 target's layer.
         """
-        inner: Any = target.model  # the language model of a vLLM causal LM (an nn.Module attribute)
+        inner = cast(_DecoderStack, target.model)
         layers = list(inner.layers)
         if len(layers) != self.spec.num_layers:
             raise ConfigError(
@@ -337,7 +349,7 @@ class EconomizeJumpEagle3ForCausalLM(nn.Module):
         lora = self.spec.config.adaptation == "lora"
         drafter = self
 
-        def load_weights(weights: Iterable[tuple[str, torch.Tensor]]) -> Any:
+        def load_weights(weights: Iterable[tuple[str, torch.Tensor]]) -> set[str] | None:
             own: list[tuple[str, torch.Tensor]] = []
 
             def to_target() -> Iterable[tuple[str, torch.Tensor]]:
@@ -358,8 +370,10 @@ class EconomizeJumpEagle3ForCausalLM(nn.Module):
                 drafter.mark_stale()
             return set(loaded or ()) | {SYNC_PREFIX + name for name in names}
 
+        # A marker attribute on the function object, and an instance attribute that nn.Module.__setattr__ types as
+        # tensors/modules only (setattr with a constant name would trip ruff B010).
         load_weights.economize_drafter = self  # type: ignore[attr-defined]
-        target.load_weights = load_weights  # type: ignore[assignment]  # nn.Module.__setattr__ types tensors/modules
+        target.load_weights = load_weights  # type: ignore[assignment]
 
     @torch.no_grad()
     def _load_adapted(self) -> None:
@@ -469,7 +483,9 @@ class EconomizeJumpEagle3ForCausalLM(nn.Module):
         processor = self.target.logits_processor
         return processor(self.target.lm_head, normed) if processor is not None else self.target.lm_head(normed)
 
-    def forward(self, input_ids: torch.Tensor, positions: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def forward(
+        self, input_ids: torch.Tensor, positions: torch.Tensor, *args: object, **kwargs: object
+    ) -> torch.Tensor:
         """Not used: the jump proposer calls :meth:`draft_forward` with the jump path's attention metadata."""
         raise NotImplementedError(
             "EconomizeJumpEagle3ForCausalLM is driven by economize's jump proposer, not called directly"

@@ -25,7 +25,7 @@ loop (one CUDA graph per step, since step ``i`` runs ``L - t_i`` layers) lives i
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any, cast
+from typing import TYPE_CHECKING, cast
 
 import torch
 from torch import nn
@@ -34,6 +34,10 @@ from ....errors import ConfigError
 from ....techniques.dynamic_depth.hidden_transfer_export import WEIGHTS_PREFIX, HiddenTransferDrafterSpec
 from ....techniques.jump.export import JumpDrafterSpec
 from ..jump.model import EconomizeJumpEagle3ForCausalLM, _draft_hf_config
+
+if TYPE_CHECKING:
+    from transformers import PretrainedConfig
+    from vllm.config import VllmConfig
 
 __all__ = ["DRAFTER_ARCHITECTURE", "EconomizeHiddenTransferEagle3ForCausalLM"]
 
@@ -60,7 +64,7 @@ class EconomizeHiddenTransferEagle3ForCausalLM(EconomizeJumpEagle3ForCausalLM):
         ConfigError: The configuration holds no valid block.
     """
 
-    def __init__(self, *, vllm_config: Any, prefix: str = "") -> None:
+    def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
         super().__init__(vllm_config=vllm_config, prefix=prefix)
         self.ht_spec = HiddenTransferDrafterSpec.from_hf_config(_draft_hf_config(vllm_config))
         model_config = getattr(vllm_config, "model_config", None)
@@ -69,7 +73,7 @@ class EconomizeHiddenTransferEagle3ForCausalLM(EconomizeJumpEagle3ForCausalLM):
         self.hidden_transfer.to(torch.float32 if self.ht_spec.param_dtype == "float32" else model_dtype)
 
     @classmethod
-    def read_spec(cls, hf_config: Any) -> JumpDrafterSpec:
+    def read_spec(cls, hf_config: PretrainedConfig) -> JumpDrafterSpec:
         return HiddenTransferDrafterSpec.from_hf_config(hf_config).path
 
     # ---- the vLLM model interface ----------------------------------------------------------------------------------
