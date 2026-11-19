@@ -28,12 +28,13 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable, Sequence
-from typing import Any, cast
+from typing import TYPE_CHECKING, cast
 
 import torch
 
 from ..core.metadata import Capability
 from ..decoding.config import DecodeConfig
+from ..decoding.protocols import TokenSelector
 from ..decoding.verifiers import VERIFIERS
 from ..errors import ConfigError
 from ..unwrap import base_model_of  # re-exported: integrations import it from here
@@ -44,6 +45,22 @@ from ._generation_args import (
     left_padding,
     make_selector,
 )
+
+if TYPE_CHECKING:
+    from transformers import (
+        GenerationConfig,
+        GenerationMixin,
+        LogitsProcessorList,
+        PreTrainedModel,
+        PreTrainedTokenizerBase,
+        StoppingCriteriaList,
+    )
+    from transformers.generation.streamers import BaseStreamer
+    from transformers.generation.utils import GenerateDecoderOnlyOutput, GenerateOutput
+
+    from ..core.model import EfficientModel
+    from ..decoding.result import DecodeResult
+    from ._generation_args import Processor
 
 __all__ = ["EconomizeGenerate", "base_model_of", "generate"]
 
@@ -57,11 +74,11 @@ _REJECTED_ARGS = {
 }
 
 
-def _drafts(model: Any, decoding: Any) -> bool:
+def _drafts(model: object, decoding: DecodeConfig | None) -> bool:
     return getattr(model, "drafting_technique", None) is not None and getattr(decoding, "cycle_length", 1) > 1
 
 
-def _sampling_decoding(model: Any, decoding: DecodeConfig | None) -> DecodeConfig | None:
+def _sampling_decoding(model: object, decoding: DecodeConfig | None) -> DecodeConfig | None:
     """The decoding options for ``do_sample=True``.
 
     ``transformers``' ``pipeline("text-generation")`` and many generation configs sample by default. A drafting
@@ -86,14 +103,14 @@ def _sampling_decoding(model: Any, decoding: DecodeConfig | None) -> DecodeConfi
 _SCORED_CAPABILITIES = Capability.WEIGHTS | Capability.DRAFTER
 
 
-def _check_scores(model: Any, decoding: Any, config: Any) -> None:
+def _check_scores(model: object, decoding: DecodeConfig | None, config: GenerationConfig) -> None:
     """``output_scores`` / ``output_logits`` are recomputed by a plain forward of the base model (see
     :func:`_dict_output`). Raise :class:`ConfigError` when that forward is not what chose the tokens."""
     wanted = [name for name in ("output_scores", "output_logits") if getattr(config, name, False)]
     if not wanted:
         return
     problems = []
-    if _drafts(model, decoding) and not VERIFIERS.get(decoding.verifier_name).lossless:
+    if decoding is not None and _drafts(model, decoding) and not VERIFIERS.get(decoding.verifier_name).lossless:
         problems.append(f"the lossy {decoding.verifier_name!r} verifier keeps tokens the model would not choose")
     lossy = getattr(model, "lossy_techniques", None)
     techniques = lossy(_SCORED_CAPABILITIES) if callable(lossy) else []
@@ -124,23 +141,30 @@ class EconomizeGenerate:
     """
 
     def __init__(
-        self, model: Any, decoding: Any = None, streamer: Any = None, row_stopping_criteria: Sequence[Any] | None = None
+        self,
+        model: EfficientModel,
+        decoding: DecodeConfig | None = None,
+        streamer: BaseStreamer | None = None,
+        row_stopping_criteria: Sequence[StoppingCriteriaList | None] | None = None,
     ) -> None:
         self.model, self.decoding, self.streamer = model, decoding, streamer
         self.row_stopping_criteria = row_stopping_criteria
-        self.results: list[Any] = []
+        self.results: list[DecodeResult] = []
 
     def __call__(
         self,
-        model: Any,
+        model: PreTrainedModel,
         input_ids: torch.LongTensor,
-        logits_processor: Any = None,
-        stopping_criteria: Any = None,
-        generation_config: Any = None,
-        decoding: Any = None,
-        **model_kwargs: Any,
-    ) -> Any:
-        config = generation_config
+        logits_processor: LogitsProcessorList | None = None,
+        stopping_criteria: StoppingCriteriaList | None = None,
+        generation_config: GenerationConfig | None = None,
+        decoding: DecodeConfig | None = None,
+        **model_kwargs: object,
+    ) -> torch.Tensor | GenerateDecoderOnlyOutput:
+        # generate always passes its prepared config; None is the signature's default only
+        config = cast("GenerationConfig", generation_config)
+        # LogitsProcessorList declares LongTensor / FloatTensor parameters; it is called with plain tensors
+        processors = cast("Processor | None", logits_processor)
         check_generation_config(config)
         check_model_kwargs(model_kwargs)
         decoding = decoding or self.decoding or getattr(self.model, "decoding", None)
@@ -154,15 +178,17 @@ class EconomizeGenerate:
             if batch != 1:
                 raise ConfigError(f"streamers support batch size 1, got {batch} sequences")
             self.streamer.put(input_ids.cpu())
-        mask = model_kwargs.get("attention_mask")
+        mask = cast("torch.Tensor | None", model_kwargs.get("attention_mask"))
         max_new = int(config.max_length) - width
         criteria = self._criteria(stopping_criteria, batch)
-        prompts, selectors, stops = [], [], []
+        prompts: list[torch.Tensor] = []
+        selectors: list[TokenSelector | None] = []
+        stops: list[StopAndStream] = []
         for b in range(batch):
             pad = left_padding(mask, b, width)
             prefix, prompt = input_ids[b, :pad], input_ids[b, pad:]
             prompts.append(prompt)
-            selectors.append(make_selector(logits_processor, do_sample, prefix, row=b))
+            selectors.append(make_selector(processors, do_sample, prefix, row=b))
             stops.append(StopAndStream(criteria[b], self.streamer, prompt.shape[0], prefix))
         self.results = self._decode(prompts, max_new, decoding, selectors, stops) if max_new > 0 else []
         tokens = [result.tokens.view(-1) for result in self.results] or [prompt[:0] for prompt in prompts]
@@ -172,9 +198,9 @@ class EconomizeGenerate:
         sequences = _stack(input_ids, rows, config)
         if not getattr(config, "return_dict_in_generate", False):
             return sequences
-        return _dict_output(model, sequences, mask, width, logits_processor, config)
+        return _dict_output(model, sequences, mask, width, processors, config)
 
-    def _criteria(self, shared: Any, batch: int) -> list[Any]:
+    def _criteria(self, shared: StoppingCriteriaList | None, batch: int) -> list[StoppingCriteriaList | None]:
         """The stopping criteria of every row: those of all rows followed by the row's own."""
         own = self.row_stopping_criteria
         if own is None:
@@ -185,15 +211,15 @@ class EconomizeGenerate:
 
         return [StoppingCriteriaList([*(shared or []), *(row or [])]) for row in own]
 
-    def _decode(self, prompts: list[torch.Tensor], max_new: int, decoding: Any, selectors: list[Any],
-                stops: list[Any]) -> list[Any]:
+    def _decode(self, prompts: list[torch.Tensor], max_new: int, decoding: DecodeConfig | None,
+                selectors: list[TokenSelector | None], stops: list[StopAndStream]) -> list[DecodeResult]:
         """The single call into economize's core: ``decode_batch`` decodes the unpadded prompts together, row ``b``
         with its own selector and stop predicate (called with all tokens so far after each commit), and returns
         one result per row whose ``tokens`` are the generated ids."""
         return list(self.model.decode_batch(prompts, max_new, decoding=decoding, selectors=selectors, stops=stops))
 
 
-def _stack(input_ids: torch.Tensor, rows: list[torch.Tensor], config: Any) -> torch.Tensor:
+def _stack(input_ids: torch.Tensor, rows: list[torch.Tensor], config: GenerationConfig) -> torch.Tensor:
     """Append each row's tokens to the (padded) prompts, padding finished rows on the right."""
     steps = max((r.shape[0] for r in rows), default=0)
     pad_id = _pad_id(config)
@@ -205,7 +231,7 @@ def _stack(input_ids: torch.Tensor, rows: list[torch.Tensor], config: Any) -> to
     return torch.cat([input_ids, out], dim=1)
 
 
-def _pad_id(config: Any) -> int | None:
+def _pad_id(config: GenerationConfig) -> int | None:
     """The id that pads finished rows: ``pad_token_id``, else the first ``eos_token_id`` (``generate``'s fallback)."""
     for value in (getattr(config, "pad_token_id", None), getattr(config, "eos_token_id", None)):
         ids = torch.as_tensor(value if value is not None else []).view(-1)
@@ -215,7 +241,14 @@ def _pad_id(config: Any) -> int | None:
 
 
 @torch.no_grad()
-def _dict_output(model: Any, sequences: torch.Tensor, mask: Any, width: int, processors: Any, config: Any) -> Any:
+def _dict_output(
+    model: PreTrainedModel,
+    sequences: torch.Tensor,
+    mask: torch.Tensor | None,
+    width: int,
+    processors: Processor | None,
+    config: GenerationConfig,
+) -> GenerateDecoderOnlyOutput:
     """``GenerateDecoderOnlyOutput`` with scores/logits recomputed by one forward pass over ``sequences`` (the LM
     head runs on the generated positions only where the model takes ``logits_to_keep``)."""
     from transformers.generation.utils import GenerateDecoderOnlyOutput
@@ -236,10 +269,15 @@ def _dict_output(model: Any, sequences: torch.Tensor, mask: Any, width: int, pro
                 for k in range(steps)
             )
         logits = logits if getattr(config, "output_logits", False) else None
-    return GenerateDecoderOnlyOutput(sequences=cast(torch.LongTensor, sequences), scores=scores, logits=logits)
+    # transformers annotates the per-step tuples as one-element tuples; they hold one tensor per generated step
+    return GenerateDecoderOnlyOutput(
+        sequences=cast(torch.LongTensor, sequences),
+        scores=cast("tuple[torch.FloatTensor] | None", scores),
+        logits=logits,
+    )
 
 
-def _accepts(model: Any, name: str) -> bool:
+def _accepts(model: torch.nn.Module, name: str) -> bool:
     """Whether ``model``'s forward takes the keyword argument ``name``."""
     import inspect
 
@@ -250,18 +288,21 @@ def _accepts(model: Any, name: str) -> bool:
     return name in parameters
 
 
-def _with_stop_strings(kwargs: dict[str, Any]) -> dict[str, Any]:
+def _with_stop_strings(kwargs: dict[str, object]) -> dict[str, object]:
     """Build ``StopStringCriteria`` here: ``transformers`` drops ``tokenizer`` for ``custom_generate`` callables."""
-    tokenizer = kwargs.pop("tokenizer", None)
-    config = kwargs.get("generation_config")
-    stop_strings = kwargs.pop("stop_strings", None) or getattr(config, "stop_strings", None)
+    tokenizer = cast("PreTrainedTokenizerBase | None", kwargs.pop("tokenizer", None))
+    config = cast("GenerationConfig | None", kwargs.get("generation_config"))
+    stop_strings = cast(
+        "str | list[str] | None", kwargs.pop("stop_strings", None) or getattr(config, "stop_strings", None)
+    )
     if not stop_strings:
         return kwargs
     if tokenizer is None:
         raise ConfigError("stop_strings need the tokenizer: pass tokenizer=... to generate")
     from transformers import StoppingCriteriaList, StopStringCriteria
 
-    criteria = StoppingCriteriaList(list(kwargs.pop("stopping_criteria", None) or []))
+    given = cast("StoppingCriteriaList | None", kwargs.pop("stopping_criteria", None))
+    criteria = StoppingCriteriaList(list(given or []))
     criteria.append(StopStringCriteria(tokenizer=tokenizer, stop_strings=stop_strings))
     kwargs["stopping_criteria"] = criteria
     if config is not None and getattr(config, "stop_strings", None):
@@ -274,16 +315,16 @@ def _with_stop_strings(kwargs: dict[str, Any]) -> dict[str, Any]:
 
 
 def generate(
-    model: Any,
+    model: EfficientModel,
     inputs: torch.Tensor | None = None,
     *,
-    decoding: Any = None,
-    streamer: Any = None,
+    decoding: DecodeConfig | None = None,
+    streamer: BaseStreamer | None = None,
     synced_gpus: bool | None = None,
-    on_results: Callable[[list[Any]], None] | None = None,
-    row_stopping_criteria: Sequence[Any] | None = None,
-    **kwargs: Any,
-) -> Any:
+    on_results: Callable[[list[DecodeResult]], None] | None = None,
+    row_stopping_criteria: Sequence[StoppingCriteriaList | None] | None = None,
+    **kwargs: object,
+) -> torch.LongTensor | GenerateOutput:
     """``PreTrainedModel.generate`` with economize's decoding loop.
 
     Args:
@@ -319,7 +360,10 @@ def generate(
     kwargs = _with_stop_strings(kwargs)
     call = EconomizeGenerate(model, decoding=decoding, streamer=streamer, row_stopping_criteria=row_stopping_criteria)
     # the class's generate: an instance-level ``generate`` (economize.integrations.trl) must not be re-entered
-    output = type(base).generate(base, inputs, custom_generate=call, **kwargs)
+    # causal LMs mix GenerationMixin into their class; generate's keywords are typed one by one and the options
+    # arrive here as one untyped mapping
+    base_generate: Callable[..., torch.LongTensor | GenerateOutput] = cast("type[GenerationMixin]", type(base)).generate
+    output = base_generate(base, inputs, custom_generate=call, **kwargs)
     if on_results is not None:
         on_results(call.results)
     return output

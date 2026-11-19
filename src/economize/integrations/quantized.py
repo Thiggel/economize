@@ -18,7 +18,7 @@ Exporting the weights of economize's own ``quant`` technique for vLLM lives in
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
 
 from torch import nn
 
@@ -32,7 +32,7 @@ def is_quantized(model: nn.Module) -> bool:
     return describe_quantization(model) is not None
 
 
-def same_quantization(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
+def same_quantization(a: Mapping[str, object] | None, b: Mapping[str, object] | None) -> bool:
     """Whether two :func:`describe_quantization` results describe the same quantization (method and config; the
     quantizer class and whether the weights were pre-quantized do not matter)."""
     if a is None or b is None:

@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from transformers import TrainerState
 
 __all__ = ["inject_logs", "is_eval_log"]
 
 
-def is_eval_log(logs: Mapping[str, Any]) -> bool:
+def is_eval_log(logs: Mapping[str, object]) -> bool:
     """Whether a ``Trainer.log`` call reports evaluation (its keys carry the ``eval_`` prefix)."""
     return any(key.startswith("eval_") for key in logs)
 
 
-def inject_logs(state: Any, logs: dict[str, float], metrics: Mapping[str, float]) -> None:
+def inject_logs(state: TrainerState, logs: dict[str, float], metrics: Mapping[str, float]) -> None:
     """Add ``metrics`` to the ``logs`` a callback's ``on_log`` receives and to the matching
     ``state.log_history`` entry.
 

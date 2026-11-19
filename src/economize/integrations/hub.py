@@ -20,13 +20,14 @@ metadata helpers. A class whose instances are :class:`~economize.EfficientModel`
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from torch import nn
 
 from ..core.hub import (
     REPO_PATTERNS,
     EconomizeHubMixin,
+    PushKwargs,
     base_metadata,
     check_base_model,
     download,
@@ -36,13 +37,18 @@ from ..core.hub import (
 from ..core.serialization import CONFIG_FILE, teacher_fingerprint
 
 if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
     from ..core.model import EfficientModel
+    from ..decoding.config import DecodeConfig
 
 __all__ = [
     "CONFIG_FILE",
     "REPO_PATTERNS",
     "EconomizeHubMixin",
     "HubModel",
+    "PushKwargs",
+    "SaveKwargs",
     "base_metadata",
     "check_base_model",
     "download",
@@ -53,6 +59,14 @@ __all__ = [
     "save_pretrained",
     "teacher_fingerprint",
 ]
+
+
+class SaveKwargs(PushKwargs, total=False):
+    """The options of ``ModelHubMixin.save_pretrained``: whether and where to push, plus :class:`PushKwargs`."""
+
+    repo_id: str | None
+    push_to_hub: bool
+
 
 class HubModel(EconomizeHubMixin):
     """Hub view of an existing :class:`~economize.EfficientModel`: ``HubModel(model).push_to_hub(repo_id)``."""
@@ -68,7 +82,7 @@ def _view(model: EfficientModel) -> EconomizeHubMixin:
     return model if isinstance(model, EconomizeHubMixin) else HubModel(model)
 
 
-def save_pretrained(model: EfficientModel, save_directory: str | Path, **kwargs: Any) -> str | None:
+def save_pretrained(model: EfficientModel, save_directory: str | Path, **kwargs: Unpack[SaveKwargs]) -> str | None:
     """Write ``model``'s techniques and a model card to ``save_directory``.
 
     ``kwargs`` are those of ``ModelHubMixin.save_pretrained`` (``push_to_hub``, ``repo_id``, ``model_card_kwargs``,
@@ -77,7 +91,7 @@ def save_pretrained(model: EfficientModel, save_directory: str | Path, **kwargs:
     return _view(model).save_pretrained(save_directory, **kwargs)
 
 
-def push_to_hub(model: EfficientModel, repo_id: str, **kwargs: Any) -> str:
+def push_to_hub(model: EfficientModel, repo_id: str, **kwargs: Unpack[PushKwargs]) -> str:
     """Upload ``model``'s techniques and a model card to the Hub repo ``repo_id`` in one commit.
 
     ``kwargs`` are those of ``ModelHubMixin.push_to_hub`` (``private``, ``token``, ``branch``, ``create_pr``,
@@ -87,7 +101,19 @@ def push_to_hub(model: EfficientModel, repo_id: str, **kwargs: Any) -> str:
 
 
 def from_pretrained(
-    name_or_path: str | Path, base_model: str | nn.Module | None = None, **kwargs: Any
+    name_or_path: str | Path,
+    base_model: str | nn.Module | None = None,
+    *,
+    force_download: bool = False,
+    token: str | bool | None = None,
+    cache_dir: str | Path | None = None,
+    local_files_only: bool = False,
+    revision: str | None = None,
+    base_revision: str | None = None,
+    format: str | None = None,
+    decoding: DecodeConfig | None = None,
+    check_base: bool = True,
+    **kwargs: object,
 ) -> EfficientModel:
     """Load an economize checkpoint from a local folder or a Hub repo and attach it to its base model.
 
@@ -95,9 +121,20 @@ def from_pretrained(
         name_or_path: Checkpoint folder or Hub repo id.
         base_model: The base model, as an ``nn.Module`` or a name for ``AutoModelForCausalLM`` (default: the one
             the checkpoint names, at the revision it records).
-        kwargs: ``revision``, ``token``, ``cache_dir``, ``force_download``, ``local_files_only`` of the
-            checkpoint repo; ``base_revision``; ``format`` and ``decoding`` as in :func:`economize.load`;
-            ``check_base=False`` to skip the weight fingerprint check; everything else goes to
-            ``AutoModelForCausalLM.from_pretrained`` (``dtype``, ``device_map``, ``quantization_config``, ...).
+        force_download: Download the checkpoint repo again even if it is cached.
+        token: Hub token for the checkpoint repo.
+        cache_dir: Hub cache folder for the checkpoint repo.
+        local_files_only: Use only the cached checkpoint repo.
+        revision: Revision of the checkpoint repo.
+        base_revision: Revision of the base model (default: the one the checkpoint records).
+        format: As in :func:`economize.load`.
+        decoding: As in :func:`economize.load`.
+        check_base: Check the base model's weight fingerprint, revision and quantization.
+        kwargs: Go to ``AutoModelForCausalLM.from_pretrained`` (``dtype``, ``device_map``,
+            ``quantization_config``, ...).
     """
-    return EconomizeHubMixin.from_pretrained(name_or_path, base_model=base_model, **kwargs)
+    return EconomizeHubMixin.from_pretrained(
+        name_or_path, force_download=force_download, token=token, cache_dir=cache_dir,
+        local_files_only=local_files_only, revision=revision, base_model=base_model, base_revision=base_revision,
+        format=format, decoding=decoding, check_base=check_base, **kwargs,
+    )
