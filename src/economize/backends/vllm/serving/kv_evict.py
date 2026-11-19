@@ -31,15 +31,17 @@ requests per GPU) and attention time at long context.
 
 from __future__ import annotations
 
-from typing import Any
-
-from torch import nn
+from typing import TYPE_CHECKING, TypedDict, cast
 
 from ....arch.spec import STATELESS_KINDS
+from ....core.technique import Technique
 from ...exporters import UnsupportedBackendError
-from .base import PlanBuilder, Role, Support, VllmTechnique, register_vllm_technique
+from .base import Configured, PlanBuilder, Role, Support, VllmTechnique, register_vllm_technique
 
-__all__ = ["CONFIG_KEY", "STREAMING_ATTENTION", "KVEvictVllm", "streaming_settings"]
+if TYPE_CHECKING:
+    from ....techniques.kv_evict.technique import KVEvictConfig, KVEvictTechnique
+
+__all__ = ["CONFIG_KEY", "STREAMING_ATTENTION", "KVEvictVllm", "StreamingSettings", "streaming_settings"]
 
 #: The ``additional_config`` key the backend reads (:data:`economize.backends.vllm.kv_evict.backend.CONFIG_KEY`).
 CONFIG_KEY = "economize_kv_evict"
@@ -49,10 +51,19 @@ STREAMING_ATTENTION = "CUSTOM"
 _REFUSED_DRAFTERS = {"dflash": "DFlash's drafter attends bidirectionally over its block"}
 
 
-def streaming_settings(technique: nn.Module) -> dict[str, Any]:
+class StreamingSettings(TypedDict):
+    """The ``additional_config`` entry of the StreamingLLM backend."""
+
+    method: str
+    sinks: int
+    recent: int
+    layers: list[int]
+
+
+def streaming_settings(technique: Technique) -> StreamingSettings:
     """The ``additional_config`` entry of a ``kv_evict`` technique with ``method="streaming"``."""
-    config = technique.config
-    sinks = technique.method.sinks
+    config = cast("KVEvictConfig", technique.config)
+    sinks = cast("KVEvictTechnique", technique).method.sinks
     return {"method": "streaming", "sinks": int(sinks), "recent": int(config.recent),
             "layers": sorted(int(layer) for layer in config.layers)}
 
@@ -69,11 +80,11 @@ class KVEvictVllm(VllmTechnique):
               "manager that frees the pages in between; H2O, SnapKV and PyramidKV select entries per KV head from "
               "attention probabilities, which vLLM's per-request pages, masks and kernels cannot express")
 
-    def level(self, technique: nn.Module) -> Support:
-        return Support.PLUGIN if technique.config.method == "streaming" else Support.UNSUPPORTED
+    def level(self, technique: Configured) -> Support:
+        return Support.PLUGIN if cast("KVEvictConfig", technique.config).method == "streaming" else Support.UNSUPPORTED
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        config = technique.config
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
+        config = cast("KVEvictConfig", technique.config)
         if config.method != "streaming":
             raise UnsupportedBackendError(
                 f"vLLM serves kv_evict with method='streaming' only, got {config.method!r}: H2O, SnapKV and PyramidKV "
@@ -81,7 +92,7 @@ class KVEvictVllm(VllmTechnique):
                 "block tables and kernel masks belong to a request as a whole, its kernels never write out "
                 "probabilities, and its KV cache manager keeps no per-head state. Serve this model with economize's "
                 "runtime")
-        if int(technique.method.sinks) < 1:
+        if int(cast("KVEvictTechnique", technique).method.sinks) < 1:
             raise UnsupportedBackendError(
                 "StreamingLLM on vLLM needs sinks >= 1: vLLM 0.30's Triton kernel starts each query's softmax at the "
                 "first key tile and restarts a fully masked tile's running maximum at 0, so with no visible sink a "
@@ -93,10 +104,11 @@ class KVEvictVllm(VllmTechnique):
                                               "the streaming backend is verified with causal drafters only")
         self._check_layers(technique, builder)
 
-    def _check_layers(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def _check_layers(self, technique: Technique, builder: PlanBuilder) -> None:
         adapter = builder.model.adapter
-        covered = technique.config.layers or range(1, int(adapter.num_layers) + 1)
-        window = int(technique.config.recent) + 1
+        config = cast("KVEvictConfig", technique.config)
+        covered = config.layers or range(1, int(adapter.num_layers) + 1)
+        window = int(config.recent) + 1
         for index in covered:
             spec = adapter.attention_spec(index)
             if spec.kind == "full" or spec.kind in STATELESS_KINDS:
@@ -104,6 +116,7 @@ class KVEvictVllm(VllmTechnique):
             if spec.kind == "sliding" and spec.window is not None and spec.window <= window:
                 continue  # the sliding window lies inside the streaming window: the layer reads the same entries
             if spec.kind == "sliding":
+                assert spec.window is not None  # a sliding layer has a window
                 raise UnsupportedBackendError(
                     f"layer {index} attends over a sliding window of {spec.window} tokens, wider than the streaming "
                     f"window of {window} (recent + 1); vLLM serves the streaming mask on full-attention layers. "
@@ -111,7 +124,7 @@ class KVEvictVllm(VllmTechnique):
             raise UnsupportedBackendError(f"layer {index} is a {spec.kind!r} attention layer; vLLM serves the "
                                           "streaming mask on full-attention and narrow sliding layers only")
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         settings = streaming_settings(technique)
         builder.set_additional(CONFIG_KEY, settings, owner=self.technique)
         builder.require_attention(STREAMING_ATTENTION, owner=self.technique)

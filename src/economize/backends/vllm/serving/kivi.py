@@ -24,15 +24,17 @@ more requests fit in the KV cache.
 from __future__ import annotations
 
 import math
-from typing import Any
-
-from torch import nn
+from typing import TYPE_CHECKING, TypedDict, cast
 
 from ....core.metadata import Saving, Simulation
+from ....core.technique import Technique
 from ...exporters import UnsupportedBackendError
 from .base import PlanBuilder, Role, Support, VllmTechnique, register_vllm_technique
 
-__all__ = ["CONFIG_KEY", "KIVI_ATTENTION", "FusedKIVIVllm", "KIVIVllm", "kivi_settings"]
+if TYPE_CHECKING:
+    from ....techniques.kv_quant.kivi import KIVIConfig
+
+__all__ = ["CONFIG_KEY", "KIVI_ATTENTION", "FusedKIVIVllm", "KIVISettings", "KIVIVllm", "kivi_settings"]
 
 #: The ``additional_config`` key the backend reads (:data:`economize.backends.vllm.kivi.CONFIG_KEY`).
 CONFIG_KEY = "economize_kivi"
@@ -49,9 +51,20 @@ _REFUSED = {
 }
 
 
-def kivi_settings(technique: nn.Module, num_layers: int) -> dict[str, Any]:
+class KIVISettings(TypedDict):
+    """The ``additional_config`` entry of the KIVI backend."""
+
+    bits: int
+    group_size: int
+    residual_length: int
+    layers: list[int]
+    num_layers: int
+    fused: bool
+
+
+def kivi_settings(technique: Technique, num_layers: int) -> KIVISettings:
     """The ``additional_config`` entry of a ``kivi`` / ``kivi_fused`` technique on a target of ``num_layers``."""
-    config: Any = technique.config
+    config = cast("KIVIConfig", technique.config)
     return {"bits": int(config.bits), "group_size": int(config.group_size),
             "residual_length": int(config.residual_length), "layers": sorted(int(layer) for layer in config.layers),
             "num_layers": int(num_layers), "fused": config.technique == "kivi_fused"}
@@ -69,11 +82,11 @@ class KIVIVllm(VllmTechnique):
               "the dense entries beside the codes, so it saves no KV memory")
     simulation = Simulation(Saving.KV_MEMORY, "the vLLM cache keeps the dense entries beside the codes")
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
         for name, why in _REFUSED.items():
             if name in builder.techniques:
                 raise UnsupportedBackendError(f"{self.technique} and {name} are not served together on vLLM: {why}")
-        config: Any = technique.config
+        config = cast("KIVIConfig", technique.config)
         group = int(config.group_size)
         if group & (group - 1):
             raise UnsupportedBackendError(
@@ -97,7 +110,7 @@ class KIVIVllm(VllmTechnique):
                 raise UnsupportedBackendError(f"layer {index}: head size {head} is not a multiple of the "
                                               f"{8 // int(config.bits)} codes a byte holds")
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         settings = kivi_settings(technique, int(builder.model.adapter.num_layers))
         builder.set_additional(CONFIG_KEY, settings, owner=self.technique)
         builder.require_attention(KIVI_ATTENTION, owner=self.technique)
