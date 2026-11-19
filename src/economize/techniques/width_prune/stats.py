@@ -11,13 +11,16 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
-from typing import Any
+from typing import TYPE_CHECKING
 
 import torch
 from torch import Tensor, nn
 
 from ...errors import UnsupportedModelError
 from .._structured.layout import DecoderLayout, LayerShape
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
 
 __all__ = ["ChannelMoments", "LayerShape", "SampleNorm", "hooked", "layer_shape", "run_dense"]
 
@@ -118,12 +121,13 @@ def hooked(hooks: Sequence[Hook]) -> Iterator[None]:
     handles = []
     for module, callback, side in hooks:
         if side == "input":
-            def pre(_m: nn.Module, args: tuple[Any, ...], cb: Callable[[Tensor], None] = callback) -> None:
+            def pre(_m: nn.Module, args: tuple[Tensor, ...], cb: Callable[[Tensor], None] = callback) -> None:
                 cb(args[0])
 
             handles.append(module.register_forward_pre_hook(pre))
         else:
-            def post(_m: nn.Module, _a: Any, out: Any, cb: Callable[[Tensor], None] = callback) -> None:
+            def post(_m: nn.Module, _a: tuple[object, ...], out: Tensor | tuple[Tensor, ...],
+                     cb: Callable[[Tensor], None] = callback) -> None:
                 cb(out[0] if isinstance(out, tuple) else out)
 
             handles.append(module.register_forward_hook(post))
@@ -135,7 +139,7 @@ def hooked(hooks: Sequence[Hook]) -> Iterator[None]:
 
 
 @torch.no_grad()
-def run_dense(adapter: Any, batches: Sequence[Tensor], hooks: Sequence[Hook]) -> None:
+def run_dense(adapter: ArchAdapter, batches: Sequence[Tensor], hooks: Sequence[Hook]) -> None:
     """One forward of the whole model over every calibration batch, with ``hooks`` registered."""
     with hooked(hooks):
         for batch in batches:

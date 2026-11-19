@@ -28,9 +28,10 @@ which simulates the saving; positions are never reassigned. Either way the byte 
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import torch
 from torch import nn
@@ -48,7 +49,15 @@ from .storage import EVICTION_STORAGES
 from .tap import AttentionTap
 
 if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
+
     from ...arch import ArchAdapter
+
+#: A decoder layer's forward pre-hook (``with_kwargs``) and forward hook (``with_kwargs``).
+_PreHook = Callable[
+    [nn.Module, tuple[object, ...], dict[str, object]], "tuple[tuple[object, ...], dict[str, object]] | None"
+]
+_PostHook = Callable[[nn.Module, tuple[object, ...], dict[str, object], object], None]
 
 __all__ = ["POOLINGS", "EvictionCache", "KVEvictConfig", "KVEvictTechnique", "PendingScores", "WindowEvictionCache"]
 
@@ -260,7 +269,7 @@ class EvictionCache(CacheWrapper):
         if self.method.needs_scores:
             self._floor = self.method.score_floor(info)
 
-    def pass_scope(self) -> AbstractContextManager[Any]:
+    def pass_scope(self) -> AbstractContextManager[AttentionTap | None]:
         """An :class:`~.tap.AttentionTap` while the pass's ``sdpa`` attention adds to the scores."""
         if self._floor is not None and self.owner.adapter.attn_implementation == "sdpa":
             return AttentionTap(self)
@@ -633,7 +642,7 @@ class KVEvictTechnique(KVCacheTechnique):
         if self.method.positional:
             self.graph_safe = True  # type: ignore[misc]  # per method, see WindowEvictionCache
         self.running: EvictionCache | None = None  # the cache of the decoder layer that is running
-        self._handles: list[Any] = []
+        self._handles: list[RemovableHandle] = []
         self.storage = config.eviction_storage
         self._draft = False  # attached to a draft view: only the draft path's reads are masked
 
@@ -730,7 +739,7 @@ class KVEvictTechnique(KVCacheTechnique):
             if eager and attention is not None:
                 self._handles.append(attention.register_forward_hook(_weights_hook(self)))
 
-    def describe(self) -> dict[str, Any]:
+    def describe(self) -> dict[str, object]:
         """The effective eviction budget."""
         return self.method.describe()
 
@@ -740,11 +749,13 @@ def _capturing(mask: torch.Tensor) -> bool:
     return mask.is_cuda and torch.cuda.is_current_stream_capturing()
 
 
-def _layer_hooks(technique: KVEvictTechnique, index: int, masking: bool = True) -> tuple[Any, Any]:
+def _layer_hooks(technique: KVEvictTechnique, index: int, masking: bool = True) -> tuple[_PreHook, _PostHook]:
     """Pre- and post-hooks of decoder layer ``index``. Closures (not bound methods) so that a deep copy of the layer
     keeps hooks that point at the same technique. Without ``masking`` the hooks only set the running layer."""
 
-    def pre(module: nn.Module, args: tuple, kwargs: dict) -> tuple[tuple, dict] | None:
+    def pre(
+        module: nn.Module, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> tuple[tuple[object, ...], dict[str, object]] | None:
         cache = find_wrapper(kwargs.get("past_key_values"), EvictionCache, owner=technique)
         if cache is None:
             return None
@@ -752,13 +763,13 @@ def _layer_hooks(technique: KVEvictTechnique, index: int, masking: bool = True) 
         technique.running = cache
         if not masking:
             return None
-        mask = kwargs.get("attention_mask")
+        mask = cast("torch.Tensor | None", kwargs.get("attention_mask"))
         masked = cache.attention_mask(cache.layer, mask)
         if masked is mask:
             return None
         return args, {**kwargs, "attention_mask": masked}
 
-    def post(module: nn.Module, args: tuple, kwargs: dict, output: Any) -> None:
+    def post(module: nn.Module, args: tuple[object, ...], kwargs: dict[str, object], output: object) -> None:
         cache = find_wrapper(kwargs.get("past_key_values"), EvictionCache, owner=technique)
         if cache is not None:
             cache.layer = None
@@ -767,10 +778,10 @@ def _layer_hooks(technique: KVEvictTechnique, index: int, masking: bool = True) 
     return pre, post
 
 
-def _weights_hook(technique: KVEvictTechnique) -> Any:
+def _weights_hook(technique: KVEvictTechnique) -> Callable[[nn.Module, tuple[object, ...], object], None]:
     """Forward hook of an eager attention module: its returned weights go to the running layer's cache."""
 
-    def hook(module: nn.Module, args: tuple, output: Any) -> None:
+    def hook(module: nn.Module, args: tuple[object, ...], output: object) -> None:
         weights = output[1] if isinstance(output, tuple) and len(output) > 1 else None
         cache = technique.running
         if weights is not None and cache is not None:

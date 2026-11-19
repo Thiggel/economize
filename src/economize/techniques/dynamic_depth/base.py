@@ -28,9 +28,9 @@ from __future__ import annotations
 
 import dataclasses
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import torch
 from torch import nn
@@ -44,6 +44,8 @@ from ...runtime.policy import Decision, LayerAction, LayerPolicy, Route
 from ...validation import check_choice, check_layers
 
 if TYPE_CHECKING:
+    from ...arch import ArchAdapter
+    from ...decoding import DecodeResult
     from ...runtime import LayerContext
 
 __all__ = [
@@ -62,6 +64,7 @@ __all__ = [
     "real_tokens",
     "runtime_supports_routed_kv",
     "second_half",
+    "summary_number",
     "top_fraction",
     "unit_rms",
     "valid_mask",
@@ -156,7 +159,7 @@ class DepthMeter:
             return torch.zeros(self.num_layers, 3, dtype=torch.long)
         return torch.stack(tables).sum(0)[1:]
 
-    def summary(self, row: int | None = None) -> dict[str, Any]:
+    def summary(self, row: int | None = None) -> dict[str, object]:
         """Totals over all phases, of the whole batch or of row ``row``: layer applications entered, executed and
         skipped, and per-layer executed fractions.
 
@@ -167,7 +170,7 @@ class DepthMeter:
         entered, ran, filled = (int(table[:, c].sum()) for c in (_ENTERED, _RAN, _FILLED))
         per_layer = (table[:, _RAN].double() / table[:, _ENTERED].clamp_min(1).double()).tolist()
         phases = self.counts if row is None else {key: t[row] for key, t in self._rows(row).items()}
-        out: dict[str, Any] = {
+        out: dict[str, object] = {
             "policy_layer_tokens": entered,
             "executed_layer_tokens": ran,
             "skipped_layer_tokens": entered - ran,
@@ -252,7 +255,7 @@ class LayeredDepthConfig(TechniqueConfig):
     def __post_init__(self) -> None:
         check_layers(self.layers)
 
-    def validate(self, adapter: Any) -> None:
+    def validate(self, adapter: ArchAdapter) -> None:
         check_layers(self.layers, adapter)
 
     def default_layers(self, num_layers: int) -> tuple[int, ...]:
@@ -555,7 +558,7 @@ class DepthTechnique(Technique, ABC):
     capabilities: ClassVar[Capability] = Capability.DEPTH
     graph_safe: ClassVar[bool] = False  # decisions read token masks on the host
 
-    def __init__(self, config: Any, adapter: Any) -> None:
+    def __init__(self, config: TechniqueConfig, adapter: ArchAdapter) -> None:
         super().__init__(config, adapter)
         self.last_policy: DepthPolicy | None = None
 
@@ -567,14 +570,14 @@ class DepthTechnique(Technique, ABC):
         self.last_policy = self.make_policy()
         return self.last_policy
 
-    def depth_stats(self, row: int | None = None) -> dict[str, Any]:
+    def depth_stats(self, row: int | None = None) -> dict[str, object]:
         """Layer applications of the last generation, of the whole batch or of row ``row`` (see
         :meth:`DepthMeter.summary`)."""
         if self.last_policy is None:
             return DepthMeter(self.adapter.num_layers).summary()
         return self.last_policy.meter.summary(row)
 
-    def cost_summary(self, result: Any, row: int | None = None) -> dict[str, Any]:
+    def cost_summary(self, result: DecodeResult, row: int | None = None) -> dict[str, object]:
         """``result.cost_summary()`` of a result of the last generation with that row's skipped layer applications
         subtracted: ``effective_layer_tokens`` counts every decoder-layer application that was computed, and
         ``relative_effective_layer_tokens`` relates it to plain decoding of the same output. Layers skipped with
@@ -584,10 +587,12 @@ class DepthTechnique(Technique, ABC):
         result's own :attr:`~economize.decoding.DecodeResult.row`). In a batch a layer counts as skipped for a
         row only when the pass really left it out for that row (see :meth:`DepthPolicy._decision`).
         """
-        summary = dict(result.cost_summary())
+        summary: dict[str, object] = dict(result.cost_summary())
         stats = self.depth_stats(getattr(result, "row", 0) if row is None else row)
-        effective = summary["layer_tokens"] - stats["skipped_layer_tokens"]
-        plain = summary["layer_tokens"] / summary["relative_layer_tokens"] if summary["relative_layer_tokens"] else 0
+        layer_tokens = summary_number(summary, "layer_tokens")
+        relative = summary_number(summary, "relative_layer_tokens")
+        effective = layer_tokens - summary_number(stats, "skipped_layer_tokens")
+        plain = layer_tokens / relative if relative else 0
         summary.update(stats)
         summary["effective_layer_tokens"] = effective
         summary["relative_effective_layer_tokens"] = effective / plain if plain else 0.0
@@ -600,7 +605,12 @@ def unit_rms(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
     return rms_normalize(x.float(), eps)
 
 
-def layer_modules(adapter: Any, layers: Iterable[int], factory: Any) -> nn.ModuleDict:
+def summary_number(summary: Mapping[str, object], key: str) -> float:
+    """The number ``summary[key]`` of a cost summary (an ``int`` stays an ``int``)."""
+    return cast(float, summary[key])  # cost summaries hold numbers under these keys
+
+
+def layer_modules(adapter: ArchAdapter, layers: Iterable[int], factory: Callable[[int], nn.Module]) -> nn.ModuleDict:
     """``{str(layer): factory(layer)}`` with every module on its layer's device, in fp32."""
     modules = nn.ModuleDict()
     for layer in layers:

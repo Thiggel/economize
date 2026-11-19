@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import torch
 import torch.nn.functional as F
@@ -37,6 +37,7 @@ from ...validation import check_positive
 from .base import DepthPolicy, DepthTechnique, LayeredDepthConfig, layer_modules, module_at, valid_mask
 
 if TYPE_CHECKING:
+    from ...arch import ArchAdapter
     from ...runtime import LayerContext
 
 __all__ = ["AnchorStore", "LoRADropConfig", "LoRADropPolicy", "LoRADropTechnique", "LowRankUpdate",
@@ -208,7 +209,7 @@ class LoRADropTechnique(DepthTechnique):
     config: LoRADropConfig
     order: ClassVar[int] = 35
 
-    def __init__(self, config: LoRADropConfig, adapter: Any) -> None:
+    def __init__(self, config: LoRADropConfig, adapter: ArchAdapter) -> None:
         super().__init__(config, adapter)
         self.updates = layer_modules(
             adapter,
@@ -230,7 +231,7 @@ class LoRADropTechnique(DepthTechnique):
 
 @torch.no_grad()
 def redundant_layers(
-    adapter: Any, batches: Sequence[torch.Tensor], count: int, *, exclude_first: int = 1
+    adapter: ArchAdapter, batches: Sequence[torch.Tensor], count: int, *, exclude_first: int = 1
 ) -> tuple[int, ...]:
     """The ``count`` layers whose output is most similar to their input on ``batches`` (mean cosine similarity over
     tokens), in increasing order. The first ``exclude_first`` layers are never chosen."""

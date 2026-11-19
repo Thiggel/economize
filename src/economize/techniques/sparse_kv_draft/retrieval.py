@@ -8,9 +8,9 @@ buffers, which the later draft steps (and their CUDA graphs) read.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Collection, Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 import torch
 import torch.nn.functional as F
@@ -21,7 +21,7 @@ from .views import DraftBudget, GatheredView
 
 if TYPE_CHECKING:
     from ...arch import ArchAdapter
-    from ...runtime import LayerContext
+    from ...runtime import KVCache, LayerCall, LayerContext
 
 __all__ = ["RetrievalPath", "chunk_slots", "retrieval_keep", "tail_width"]
 
@@ -134,27 +134,33 @@ class _AttentionInputs(TorchFunctionMode):
         self.query: torch.Tensor | None = None
         self.key: torch.Tensor | None = None
 
-    def __torch_function__(self, func: Any, types: Any, args: tuple = (), kwargs: dict | None = None) -> Any:
+    def __torch_function__(
+        self,
+        func: Callable[..., object],
+        types: Collection[type],
+        args: tuple[object, ...] = (),
+        kwargs: dict[str, object] | None = None,
+    ) -> object:
         kwargs = kwargs or {}
         if func is _SDPA:
-            self.query = args[0] if args else kwargs["query"]
-            self.key = args[1] if len(args) > 1 else kwargs["key"]
+            self.query = cast(torch.Tensor, args[0] if args else kwargs["query"])
+            self.key = cast(torch.Tensor, args[1] if len(args) > 1 else kwargs["key"])
         return func(*args, **kwargs)
 
 
 class _CacheHeads:
     """The layer's cache, recording the number of heads of the key buffer that ``update`` returns."""
 
-    def __init__(self, cache: Any) -> None:
+    def __init__(self, cache: KVCache) -> None:
         self._cache, self.heads = cache, 0
 
-    def update(self, key_states: torch.Tensor, value_states: torch.Tensor, *args: Any,
-               **kwargs: Any) -> tuple[torch.Tensor, torch.Tensor]:
-        keys, values = self._cache.update(key_states, value_states, *args, **kwargs)
+    def update(self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: object,
+               **kwargs: object) -> tuple[torch.Tensor, torch.Tensor]:
+        keys, values = self._cache.update(key_states, value_states, layer_idx, *args, **kwargs)
         self.heads = keys.shape[1]
         return keys, values
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: str) -> object:
         return getattr(self._cache, name)
 
 
@@ -285,18 +291,19 @@ class RetrievalPath(SparseKVPath):
             tail = tail[:, 0]
         return DraftBudget(torch.cat([chunks, tail[:, None].expand(-1, chunks.shape[1], -1)], dim=-1))
 
-    def call_dense(self, index: int, layer: Any, hidden: torch.Tensor, args: tuple[Any, ...],
-                   kwargs: dict[str, Any], ctx: LayerContext) -> Any:
+    def call_dense(self, index: int, layer: LayerCall, hidden: torch.Tensor, args: tuple[object, ...],
+                   kwargs: dict[str, object], ctx: LayerContext) -> torch.Tensor:
         if self._selecting is None:
             return layer(hidden, *args, **kwargs)
-        tap, cache = _AttentionInputs(), _CacheHeads(kwargs.get("past_key_values", ctx.cache))
+        layer_cache = cast("KVCache", kwargs.get("past_key_values", ctx.cache))  # the step's cache or a wrapper of it
+        tap, cache = _AttentionInputs(), _CacheHeads(layer_cache)
         kwargs["past_key_values"] = cache
         with tap:
             out = layer(hidden, *args, **kwargs)
         if tap.query is None or tap.key is None:
             return out
         positions, valid = self._selecting
-        width = kwargs["attention_mask"].shape[-1]
+        width = cast(torch.Tensor, kwargs["attention_mask"]).shape[-1]
         query, key, groups = tap.query.detach(), tap.key.detach(), self.group_size(index)
         chosen, region = _choose(query, key, positions, chunk_size=self.chunk_size, select_sets=self.select_sets,
                                  groups=groups)

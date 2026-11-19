@@ -24,15 +24,21 @@ The jump block is nested (and never written at the top level) so that an engine 
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import pairwise
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 
 from ...errors import ConfigError
 from ..jump.config import JumpConfig
 from ..jump.export import JumpDrafterSpec
+
+if TYPE_CHECKING:
+    from torch import nn
+
+    from .hidden_transfer import HiddenTransferTechnique
 
 __all__ = ["CONFIG_KEY", "FORMAT_VERSION", "WEIGHTS_PREFIX", "HiddenTransferDrafterSpec", "drafter_state"]
 
@@ -101,7 +107,7 @@ class HiddenTransferDrafterSpec:
             raise ConfigError(f"draft step {step} is outside 1..{self.num_steps}")
         return self.transfer_layers[step - 1] + 1
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "format_version": FORMAT_VERSION,
             "jump": self.path.to_dict(),
@@ -110,7 +116,7 @@ class HiddenTransferDrafterSpec:
         }
 
     @classmethod
-    def from_dict(cls, block: dict[str, Any]) -> HiddenTransferDrafterSpec:
+    def from_dict(cls, block: Mapping[str, Any]) -> HiddenTransferDrafterSpec:  # Any: decoded JSON, untyped values
         version = int(block.get("format_version", 1))
         if version > FORMAT_VERSION:
             raise ConfigError(f"the {CONFIG_KEY!r} block has format version {version}; this economize reads up to "
@@ -125,7 +131,7 @@ class HiddenTransferDrafterSpec:
         return spec
 
     @classmethod
-    def from_hf_config(cls, config: Any) -> HiddenTransferDrafterSpec:
+    def from_hf_config(cls, config: object) -> HiddenTransferDrafterSpec:
         """Read the block from a configuration object or dict (top level, or in ``transformer_layer_config``)."""
         data = config if isinstance(config, dict) else getattr(config, "__dict__", {})
         nested = data.get("transformer_layer_config") or {}
@@ -135,13 +141,14 @@ class HiddenTransferDrafterSpec:
         return cls.from_dict(block)
 
     @classmethod
-    def of(cls, technique: Any) -> HiddenTransferDrafterSpec:
+    def of(cls, technique: nn.Module) -> HiddenTransferDrafterSpec:
         """The spec of an attached :class:`~economize.techniques.dynamic_depth.HiddenTransferTechnique`."""
-        adapter = technique.adapter
+        transfer = cast("HiddenTransferTechnique", technique)  # the exporters hand over the attached technique
+        adapter = transfer.adapter
         return cls(num_layers=adapter.num_layers, hidden_size=adapter.hidden_size,
-                   transfer_layers=tuple(technique.transfer_layers), param_dtype=technique.config.param_dtype)
+                   transfer_layers=tuple(transfer.transfer_layers), param_dtype=transfer.config.param_dtype)
 
 
-def drafter_state(technique: Any) -> dict[str, torch.Tensor]:
+def drafter_state(technique: nn.Module) -> dict[str, torch.Tensor]:
     """The maps' tensors (detached), keyed as in the technique's ``state_dict`` (``transfers.{i}.weight``)."""
     return {name: tensor.detach() for name, tensor in technique.state_dict().items()}

@@ -34,9 +34,9 @@ from __future__ import annotations
 
 import inspect as _inspect
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 from torch import Tensor, nn
@@ -167,8 +167,8 @@ class _Trace:
         self.output_ids: dict[str, int] = {}
 
     def run(self, step: CalibrationStep) -> Tensor:
-        def pre(name: str) -> Any:
-            def hook(module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+        def pre(name: str) -> Callable[[nn.Module, tuple[object, ...], dict[str, object]], None]:
+            def hook(module: nn.Module, args: tuple[object, ...], kwargs: dict[str, object]) -> None:
                 x = args[0] if args else next(iter(kwargs.values()), None)
                 if isinstance(x, Tensor):
                     self.input_ids.setdefault(name, id(x))
@@ -177,8 +177,8 @@ class _Trace:
 
             return hook
 
-        def post(name: str) -> Any:
-            def hook(_module: nn.Module, _args: Any, out: Any) -> None:
+        def post(name: str) -> Callable[[nn.Module, tuple[object, ...], object], None]:
+            def hook(_module: nn.Module, _args: tuple[object, ...], out: object) -> None:
                 if isinstance(out, Tensor):
                     self.output_ids.setdefault(name, id(out))
 
@@ -468,7 +468,7 @@ def awq_scale_layer(
     n_grid: int = 20,
     clip: bool = True,
     offload: bool = False,
-) -> dict[str, Any]:
+) -> dict[str, list[str]]:
     """Search and apply the AWQ scales and clipping thresholds of one decoder layer (weights stay in float).
 
     Runs the layer once on the calibration batch, caching the inputs of every linear map. Scale groups whose linear

@@ -43,12 +43,17 @@ from .marlin import MarlinLayout, MarlinWeight
 __all__ = ["TRITON_FORMATS", "TritonBackend", "TritonWeight", "triton_available", "triton_weight"]
 
 _GROUPS = (None, 32, 64, 128, 256)
-_GPUS = dict(dtypes=(torch.bfloat16, torch.float16), min_capability=(8, 0))
+_DTYPES = (torch.bfloat16, torch.float16)
+_CAPABILITY = (8, 0)
 
 #: What the Triton weight-only GEMM accepts, by format; a format missing here is not stored by this backend.
 TRITON_FORMATS: Registry[KernelConstraints] = Registry("Triton weight-only GEMM format")
-TRITON_FORMATS.register("int8", KernelConstraints("Triton int8", group_sizes=_GROUPS, **_GPUS))  # type: ignore[arg-type]
-TRITON_FORMATS.register("fp8", KernelConstraints("Triton fp8", group_sizes=_GROUPS, **_GPUS))  # type: ignore[arg-type]
+TRITON_FORMATS.register(
+    "int8", KernelConstraints("Triton int8", group_sizes=_GROUPS, dtypes=_DTYPES, min_capability=_CAPABILITY)
+)
+TRITON_FORMATS.register(
+    "fp8", KernelConstraints("Triton fp8", group_sizes=_GROUPS, dtypes=_DTYPES, min_capability=_CAPABILITY)
+)
 
 #: Inputs with more rows than this dequantize the weight and call the dense GEMM (the kernel reads the codes once
 #: per 16 rows, which pays off only while the weight read dominates).
@@ -141,6 +146,13 @@ class TritonWeight(MarlinWeight):
         return self._dense(self.dtype).contiguous()
 
 
+def _zero_points(q: QuantizedWeight) -> Tensor:
+    """The zero points of integer codes (every integer grid stores them, 128 when symmetric)."""
+    if q.zero is None:
+        raise ConfigError("the triton backend needs the zero points of integer codes")
+    return q.zero
+
+
 @torch.no_grad()
 def triton_weight(q: QuantizedWeight, dtype: torch.dtype, device: torch.device | None = None) -> TritonWeight:
     """Convert int8 or fp8 codes to a :class:`TritonWeight` reporting ``dtype``.
@@ -161,7 +173,7 @@ def triton_weight(q: QuantizedWeight, dtype: torch.dtype, device: torch.device |
     per_channel = q.group_size >= size_k
     compute = dtype if dtype in (torch.bfloat16, torch.float16) else torch.bfloat16
     fp8 = q.codes.dtype == torch.float8_e4m3fn
-    symmetric = not fp8 and bool((q.zero == 128).all())  # type: ignore[union-attr]
+    symmetric = not fp8 and bool((_zero_points(q) == 128).all())
     type_name = "float8_e4m3fn" if fp8 else "int8" if symmetric else "uint8"
     layout = MarlinLayout(size_n, size_k, size_n, size_k, type_name, 8, -1 if per_channel else q.group_size, compute)
     codes = q.codes.to(device)
@@ -172,7 +184,7 @@ def triton_weight(q: QuantizedWeight, dtype: torch.dtype, device: torch.device |
     scales = q.scale.to(device=device, dtype=torch.float32) * (_FP8_SCALE if fp8 else 1.0)
     zeros = None
     if not fp8 and not symmetric:
-        zero = q.zero.to(device=device, dtype=torch.float32)  # type: ignore[union-attr]
+        zero = _zero_points(q).to(device=device, dtype=torch.float32)
         if not bool((zero == zero.round()).all()):
             raise ConfigError("the triton backend stores integer zero points only (not HQQ's real-valued ones)")
         zeros = zero.to(torch.int16).contiguous()

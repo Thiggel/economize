@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import torch
 import torch.nn.functional as F
@@ -63,6 +63,10 @@ __all__ = [
 FLEXI_ROUTERS: Registry[Callable[[int, int, float], nn.Module]] = Registry(
     "FlexiDepth router", "economize.flexi_routers"
 )
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
+
 
 
 class _InputNorm(RMSNorm):
@@ -195,7 +199,7 @@ class FlexiDepthPolicy(RoutedDepthPolicy):
         return x + ((1 - score)[..., None] * self.technique.adapt(index, x)).to(x.dtype)
 
 
-def _ffn_width(adapter: Any, index: int) -> int:
+def _ffn_width(adapter: ArchAdapter, index: int) -> int:
     width = getattr(adapter.layer_config(index), "intermediate_size", None)
     return width if isinstance(width, int) and width > 0 else adapter.hidden_size
 
@@ -217,7 +221,7 @@ class FlexiDepthTechnique(DepthTechnique):
     config: FlexiDepthConfig
     order: ClassVar[int] = 32
 
-    def __init__(self, config: FlexiDepthConfig, adapter: Any) -> None:
+    def __init__(self, config: FlexiDepthConfig, adapter: ArchAdapter) -> None:
         super().__init__(config, adapter)
         layers = config.layer_set(adapter.num_layers)
         d = adapter.hidden_size

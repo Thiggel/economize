@@ -24,7 +24,7 @@ which the compressed-tensors export reads to declare ``input_activations``. A ne
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import cast
 
 import torch
 from torch import Tensor, nn
@@ -71,7 +71,7 @@ class ActivationScheme:
         """
         raise NotImplementedError
 
-    def ct_args(self) -> dict[str, Any]:
+    def ct_args(self) -> dict[str, object]:
         """Keyword arguments of the compressed-tensors ``QuantizationArgs`` that declare the scheme as
         ``input_activations``."""
         raise NotImplementedError
@@ -93,7 +93,7 @@ class DynamicIntPerToken(ActivationScheme):
         codes = torch.round(x.float() / scale).clamp(-qmax - 1, qmax)
         return (codes * scale).to(x.dtype)
 
-    def ct_args(self) -> dict[str, Any]:
+    def ct_args(self) -> dict[str, object]:
         return {"num_bits": self.bits, "type": "int", "strategy": "token", "dynamic": True, "symmetric": True,
                 "observer": None}
 
@@ -110,7 +110,7 @@ class DynamicFp8PerToken(ActivationScheme):
         codes = (x.float() / scale).clamp(finfo.min, finfo.max).to(torch.float8_e4m3fn)
         return (codes.float() * scale).to(x.dtype)
 
-    def ct_args(self) -> dict[str, Any]:
+    def ct_args(self) -> dict[str, object]:
         return {"num_bits": 8, "type": "float", "strategy": "token", "dynamic": True, "symmetric": True,
                 "observer": None}
 
@@ -143,8 +143,8 @@ def install(module: nn.Module, name: str) -> None:
     uninstall(module)
     scheme = ACTIVATION_SCHEMES.get(name)
 
-    def hook(_module: nn.Module, args: tuple[Any, ...]) -> tuple[Any, ...]:
-        return (scheme.fake(args[0]), *args[1:])
+    def hook(_module: nn.Module, args: tuple[object, ...]) -> tuple[object, ...]:
+        return (scheme.fake(cast(Tensor, args[0])), *args[1:])
 
     setattr(module, _HOOK_ATTR, module.register_forward_pre_hook(hook))
     mark(module, name)

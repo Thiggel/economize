@@ -13,17 +13,17 @@ cache, which keeps decoding lossless.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 
 from ...arch.spec import StateKind
-from .views import DRAFT_VIEWS, DraftBudget, DraftView, restrict
+from .views import DRAFT_VIEWS, DraftBudget, DraftView, StepMemo, restrict
 
 if TYPE_CHECKING:
     from ...arch import ArchAdapter
     from ...decoding.cost import LayerFootprint
-    from ...runtime import LayerContext, LayerRunner
+    from ...runtime import LayerCall, LayerContext, LayerRunner
 
 __all__ = ["SparseKVPath", "restrict", "sparse_layers", "streaming_budget", "streaming_keep"]
 
@@ -90,10 +90,10 @@ def streaming_budget(ctx: LayerContext, sinks: int, window: int, device: torch.d
 class _SparseLayer:
     """Decoder layer ``index`` called on the path's budget through the path's view."""
 
-    def __init__(self, path: SparseKVPath, index: int, ctx: LayerContext, shared: dict[Any, Any]) -> None:
+    def __init__(self, path: SparseKVPath, index: int, ctx: LayerContext, shared: StepMemo) -> None:
         self.path, self.index, self.ctx, self.shared = path, index, ctx, shared
 
-    def __call__(self, hidden: torch.Tensor, *args: Any, **kwargs: Any) -> Any:
+    def __call__(self, hidden: torch.Tensor, *args: object, **kwargs: object) -> torch.Tensor:
         layer = self.path.adapter.layer(self.index)
         return self.path.view.call(self.path, self.index, layer, hidden, args, kwargs, self.ctx, self.shared)
 
@@ -153,14 +153,14 @@ class SparseKVPath(ABC):
             groups = self._groups[index] = value if isinstance(value, int) and value > 0 else 1
         return groups
 
-    def call_dense(self, index: int, layer: Any, hidden: torch.Tensor, args: tuple[Any, ...],
-                   kwargs: dict[str, Any], ctx: LayerContext) -> Any:
+    def call_dense(self, index: int, layer: LayerCall, hidden: torch.Tensor, args: tuple[object, ...],
+                   kwargs: dict[str, object], ctx: LayerContext) -> torch.Tensor:
         """Run full-attention layer ``index`` on its whole visible cache (when :meth:`keep` returns ``None``)."""
         return layer(hidden, *args, **kwargs)
 
     def run(self, runner: LayerRunner, embedding: torch.Tensor, ctx: LayerContext) -> torch.Tensor:
         """Output of the last layer for token embeddings ``[B, S, d]``, full-attention layers on the sparse view."""
-        shared: dict[Any, Any] = {}
+        shared: StepMemo = {}
         overrides = {i: _SparseLayer(self, i, ctx, shared) for i in self.layers}
         hidden, _ = runner.run(embedding, ctx, 1, self._adapter.num_layers, overrides=overrides)
         return hidden

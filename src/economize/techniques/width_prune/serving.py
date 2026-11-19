@@ -12,11 +12,14 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, cast
 
 from torch import Tensor, nn
 
 from ...arch.config import config_value, text_config
+
+if TYPE_CHECKING:
+    from .technique import WidthPruneTechnique
 
 __all__ = ["EngineArchitectures", "merged_lora_state", "serving_obstacle"]
 
@@ -40,7 +43,11 @@ class EngineArchitectures:
     mlp_bias: Collection[str] = field(default_factory=frozenset)
 
 
-def serving_obstacle(technique: Any, base: nn.Module, engine: EngineArchitectures) -> str | None:
+def _width_prune(technique: nn.Module) -> WidthPruneTechnique:
+    return cast("WidthPruneTechnique", technique)  # the serving exporter hands over the attached technique
+
+
+def serving_obstacle(technique: nn.Module, base: nn.Module, engine: EngineArchitectures) -> str | None:
     """Why ``engine`` cannot load the width-pruned ``base`` as a plain checkpoint, or ``None``.
 
     Args:
@@ -48,6 +55,7 @@ def serving_obstacle(technique: Any, base: nn.Module, engine: EngineArchitecture
         base: The pruned Hugging Face model.
         engine: The engine's architecture facts.
     """
+    technique = _width_prune(technique)
     config, summary = technique.config, getattr(technique, "summary", {}) or {}
     model_type = str(getattr(base.config, "model_type", ""))
     if not config.uniform_widths or not summary.get("uniform", False):
@@ -75,10 +83,10 @@ def serving_obstacle(technique: Any, base: nn.Module, engine: EngineArchitecture
     return None
 
 
-def merged_lora_state(technique: Any, base: nn.Module) -> dict[str, dict[str, Tensor]]:
+def merged_lora_state(technique: nn.Module, base: nn.Module) -> dict[str, dict[str, Tensor]]:
     """The recovery LoRA multiplied into the weights it adapts, as ``{module name: {"weight": merged}}`` (empty
     without a LoRA)."""
-    lora = getattr(technique, "lora", None)
+    lora = _width_prune(technique).lora
     if lora is None:
         return {}
     names = {id(module): name for name, module in base.named_modules()}

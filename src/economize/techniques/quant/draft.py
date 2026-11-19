@@ -18,7 +18,6 @@ from __future__ import annotations
 import copy
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any
 
 import torch
 from torch import Tensor, nn
@@ -89,7 +88,7 @@ class DraftSnapshot:
 
     modules: dict[str, nn.Linear]
     params: ParameterSnapshot = field(default_factory=ParameterSnapshot)
-    summary: dict[str, Any] = field(default_factory=dict)
+    summary: dict[str, object] = field(default_factory=dict)
 
 
 @torch.no_grad()
@@ -122,7 +121,7 @@ def restore_draft(snapshot: DraftSnapshot) -> None:
 
 
 @torch.no_grad()
-def quantized_copy(module: nn.Module, config: DraftQuantConfig) -> tuple[nn.Module, dict[str, Any]]:
+def quantized_copy(module: nn.Module, config: DraftQuantConfig) -> tuple[nn.Module, dict[str, object]]:
     """A deep copy of ``module`` with its linear maps quantized (for shared layers on a drafter's path)."""
     clone = copy.deepcopy(module).requires_grad_(False)
     linears = {name: m for name, m in clone.named_modules() if isinstance(m, nn.Linear)}

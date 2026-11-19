@@ -11,7 +11,7 @@ model types.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, cast
 
 import torch
 from torch import Tensor, nn
@@ -19,6 +19,10 @@ from torch import Tensor, nn
 from .._structured.layout import DecoderLayout
 from .._structured.surgery import keep_input_channels, keep_output_channels, set_linear
 from .stats import LayerShape, layer_shape
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
+    from ...arch.config import HFConfig
 
 __all__ = [
     "add_config_biases",
@@ -93,15 +97,16 @@ def _keep_norm(norm: nn.Module, index: Tensor) -> None:
             setattr(norm, name, nn.Parameter(value[index.to(value.device)].contiguous(),
                                              requires_grad=value.requires_grad))
     if isinstance(getattr(norm, "normalized_shape", None), tuple):
-        norm.normalized_shape = (int(index.numel()),)  # type: ignore[assignment]
+        setattr(norm, "normalized_shape", (int(index.numel()),))  # noqa: B010 (mypy types Module attributes as tensors)
 
 
 @torch.no_grad()
-def prune_hidden(adapter: Any, layout: DecoderLayout, index: Tensor) -> None:
+def prune_hidden(adapter: ArchAdapter, layout: DecoderLayout, index: Tensor) -> None:
     """Keep the residual channels ``index`` everywhere: the embedding columns, every norm, the input columns of the
     maps that read the stream, the output rows of the maps that write it and the input columns of the head (a tied
     head stays tied)."""
-    embed, head = adapter.embed_tokens, adapter.lm_head
+    embed = cast(nn.Embedding, adapter.embed_tokens)  # ArchAdapter types its modules as nn.Module
+    head = cast("nn.Linear | None", adapter.lm_head)
     tied = head is not None and head.weight is embed.weight
     weight = embed.weight
     embed.weight = nn.Parameter(weight[:, index.to(weight.device)].contiguous(), requires_grad=weight.requires_grad)
@@ -115,24 +120,24 @@ def prune_hidden(adapter: Any, layout: DecoderLayout, index: Tensor) -> None:
         for name in (layout.attn_output, layout.mlp_output):
             keep_output_channels(layout.linear(layer, name), index)
     _keep_norm(adapter.final_norm, index)
-    if tied:
+    if tied and head is not None:
         head.weight = embed.weight
         head.in_features = int(index.numel())
     elif head is not None:
         keep_input_channels(head, index)
 
 
-def realized_shapes(adapter: Any, layout: DecoderLayout) -> list[LayerShape]:
+def realized_shapes(adapter: ArchAdapter, layout: DecoderLayout) -> list[LayerShape]:
     """The shape of every decoder layer, in order."""
     return [layer_shape(layout, adapter.layer(i)) for i in range(1, adapter.num_layers + 1)]
 
 
-def _configs(adapter: Any) -> list[Any]:
+def _configs(adapter: ArchAdapter) -> list[HFConfig]:
     found = {id(c): c for c in (adapter.config, getattr(adapter.model, "config", None)) if c is not None}
     return list(found.values())
 
 
-def rewrite_config(adapter: Any, layout: DecoderLayout, compensated: tuple[bool, bool]) -> bool:
+def rewrite_config(adapter: ArchAdapter, layout: DecoderLayout, compensated: tuple[bool, bool]) -> bool:
     """Write the realized widths into the config(s) of the model.
 
     ``hidden_size`` is always written, the head and FFN widths by the layout (:meth:`DecoderLayout.write_widths`:
@@ -148,7 +153,7 @@ def rewrite_config(adapter: Any, layout: DecoderLayout, compensated: tuple[bool,
         Whether the config gives every layer its realized widths.
     """
     shapes = realized_shapes(adapter, layout)
-    hidden = int(adapter.embed_tokens.weight.shape[1])
+    hidden = int(cast(nn.Embedding, adapter.embed_tokens).weight.shape[1])
     uniform = True
     for config in _configs(adapter):
         config.hidden_size = hidden
@@ -159,7 +164,7 @@ def rewrite_config(adapter: Any, layout: DecoderLayout, compensated: tuple[bool,
     return uniform
 
 
-def _fresh_layer(layer: nn.Module, config: Any, index: int) -> nn.Module | None:
+def _fresh_layer(layer: nn.Module, config: HFConfig, index: int) -> nn.Module | None:
     """A layer of the same class built from ``config`` on the meta device (``None`` if it cannot be built)."""
     try:
         with torch.device("meta"):
@@ -169,7 +174,7 @@ def _fresh_layer(layer: nn.Module, config: Any, index: int) -> nn.Module | None:
 
 
 @torch.no_grad()
-def add_config_biases(adapter: Any, copies: Mapping[int, Sequence[nn.Module]] | None = None) -> None:
+def add_config_biases(adapter: ArchAdapter, copies: Mapping[int, Sequence[nn.Module]] | None = None) -> None:
     """Give every map that a layer built from the config has a bias for, but the model lacks, a zero bias (the
     query, key and value maps once ``attention_bias`` is set for the output map's compensation). ``copies`` are
     other techniques' copies of base layers (by 1-indexed layer), which are rebuilt from the same config."""
@@ -188,11 +193,11 @@ def add_config_biases(adapter: Any, copies: Mapping[int, Sequence[nn.Module]] | 
                     set_linear(real, real.weight, torch.zeros(real.out_features, dtype=real.weight.dtype))
 
 
-def describes(adapter: Any) -> bool:
+def describes(adapter: ArchAdapter) -> bool:
     """Whether a model built from the config has exactly the parameter shapes of the pruned model (so it saves
     and loads, and serves, as a plain checkpoint)."""
     config = adapter.config
-    if int(adapter.embed_tokens.weight.shape[1]) != int(config.hidden_size):
+    if int(cast(nn.Embedding, adapter.embed_tokens).weight.shape[1]) != int(config.hidden_size):
         return False
     for i in range(1, adapter.num_layers + 1):
         layer = adapter.layer(i)

@@ -43,7 +43,7 @@ class TriForceDrafter(SelfDrafter):
 
     def __init__(self, path: RetrievalPath, runner: LayerRunner) -> None:
         super().__init__(path, runner)
-        self._sparse_fn: Callable[..., Any] | None = None
+        self._sparse_fn: Callable[..., torch.Tensor] | None = None
         self._rows: tuple[int, torch.device] = (0, torch.device("cpu"))
 
     @property
@@ -55,7 +55,9 @@ class TriForceDrafter(SelfDrafter):
         super().begin(runner, cache, batch_size)
         self.technique.reset()
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(  # Any: the signature of SelfDrafter.enable_graphs (early_exit), which this overrides
+        self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]
+    ) -> bool:
         enabled = super().enable_graphs(wrap)
         self._sparse_fn = self._step_fn.graph(self._sparse_step)
         return enabled

@@ -30,7 +30,7 @@ Three paths write a covered layer:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -205,7 +205,7 @@ class CompactWindowCache(WindowEvictionCache):
 
     # ---- writes -------------------------------------------------------------------------------------------------
     def update(
-        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: Any, **kwargs: Any
+        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: object, **kwargs: object
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if not self._owns(layer_idx):
             return super().update(key_states, value_states, layer_idx, *args, **kwargs)

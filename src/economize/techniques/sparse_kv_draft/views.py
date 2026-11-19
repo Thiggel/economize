@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import torch
 
@@ -30,7 +30,7 @@ from ...errors import UnsupportedModelError
 from ...registry import Registry
 
 if TYPE_CHECKING:
-    from ...runtime import LayerContext
+    from ...runtime import KVCache, LayerCall, LayerContext
     from .path import SparseKVPath
 
 __all__ = [
@@ -93,22 +93,26 @@ def gather_entries(buffer: torch.Tensor, slots: torch.Tensor) -> torch.Tensor:
     return buffer.gather(2, index)
 
 
+#: Per-step scratch a view shares across layers: its memos of the step's masks, by kind.
+StepMemo = dict[str, IdentityMap[torch.Tensor, object]]
+
+
 class _GatheringCache:
     """The layer's cache seen through a budget: ``update`` writes as usual and returns the budget's entries."""
 
-    def __init__(self, cache: Any, slots: torch.Tensor) -> None:
+    def __init__(self, cache: KVCache, slots: torch.Tensor) -> None:
         self._cache, self._slots = cache, slots
 
-    def update(self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: Any,
-               **kwargs: Any) -> tuple[torch.Tensor, torch.Tensor]:
+    def update(self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: object,
+               **kwargs: object) -> tuple[torch.Tensor, torch.Tensor]:
         keys, values = self._cache.update(key_states, value_states, layer_idx, *args, **kwargs)
         return gather_entries(keys, self._slots), gather_entries(values, self._slots)
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: str) -> object:
         return getattr(self._cache, name)
 
 
-def _mask_memo(shared: dict[Any, Any], kind: str) -> IdentityMap[torch.Tensor, Any]:
+def _mask_memo(shared: StepMemo, kind: str) -> IdentityMap[torch.Tensor, object]:
     """The step's ``kind`` entries keyed by the mask object: a layer whose mask was built after an earlier layer's
     mask was freed may get that mask's ``id``, never its entry."""
     memo = shared.get(kind)
@@ -124,8 +128,8 @@ class DraftView(ABC):
     simulation: ClassVar[Simulation | None] = None
 
     @abstractmethod
-    def call(self, path: SparseKVPath, index: int, layer: Any, hidden: torch.Tensor, args: tuple[Any, ...],
-             kwargs: dict[str, Any], ctx: LayerContext, shared: dict[Any, Any]) -> Any:
+    def call(self, path: SparseKVPath, index: int, layer: LayerCall, hidden: torch.Tensor,
+             args: tuple[object, ...], kwargs: dict[str, object], ctx: LayerContext, shared: StepMemo) -> torch.Tensor:
         """Run decoder layer ``index`` (``layer``) of a draft step on its budget.
 
         Args:
@@ -141,7 +145,7 @@ class DraftView(ABC):
         """
 
     @staticmethod
-    def mask_of(path: SparseKVPath, index: int, kwargs: dict[str, Any]) -> torch.Tensor:
+    def mask_of(path: SparseKVPath, index: int, kwargs: dict[str, object]) -> torch.Tensor:
         """The layer's attention mask, which must be a tensor."""
         mask = kwargs.get("attention_mask")
         if not isinstance(mask, torch.Tensor):
@@ -155,11 +159,11 @@ class MaskedView(DraftView):
 
     simulation = MASKED_READS
 
-    def call(self, path: SparseKVPath, index: int, layer: Any, hidden: torch.Tensor, args: tuple[Any, ...],
-             kwargs: dict[str, Any], ctx: LayerContext, shared: dict[Any, Any]) -> Any:
+    def call(self, path: SparseKVPath, index: int, layer: LayerCall, hidden: torch.Tensor,
+             args: tuple[object, ...], kwargs: dict[str, object], ctx: LayerContext, shared: StepMemo) -> torch.Tensor:
         mask = self.mask_of(path, index, kwargs)
         memo = _mask_memo(shared, "masked")
-        restricted = memo.get(mask) if path.layer_independent else None
+        restricted = cast("torch.Tensor | None", memo.get(mask)) if path.layer_independent else None
         if restricted is None:
             keep = path.keep(index, mask, ctx)
             if keep is None:
@@ -190,11 +194,11 @@ class GatheredView(DraftView):
     def __init__(self) -> None:
         self._fallback = MaskedView()
 
-    def call(self, path: SparseKVPath, index: int, layer: Any, hidden: torch.Tensor, args: tuple[Any, ...],
-             kwargs: dict[str, Any], ctx: LayerContext, shared: dict[Any, Any]) -> Any:
+    def call(self, path: SparseKVPath, index: int, layer: LayerCall, hidden: torch.Tensor,
+             args: tuple[object, ...], kwargs: dict[str, object], ctx: LayerContext, shared: StepMemo) -> torch.Tensor:
         mask = self.mask_of(path, index, kwargs)
         memo = _mask_memo(shared, "gathered")
-        entry = memo.get(mask) if path.layer_independent else None
+        entry = cast("tuple[torch.Tensor, torch.Tensor] | None", memo.get(mask)) if path.layer_independent else None
         if entry is None:
             budget = path.budget(index, mask, ctx)
             num_slots = ctx.cache.num_slots
@@ -205,7 +209,8 @@ class GatheredView(DraftView):
                 memo[mask] = entry
         slots, gathered = entry
         kwargs["attention_mask"] = gathered
-        kwargs["past_key_values"] = _GatheringCache(kwargs.get("past_key_values", ctx.cache), slots)
+        cache = cast("KVCache", kwargs.get("past_key_values", ctx.cache))  # the step's cache or a wrapper of it
+        kwargs["past_key_values"] = _GatheringCache(cache, slots)
         states = kwargs.get("shared_kv_states")
         if isinstance(states, dict):
             kwargs["shared_kv_states"] = {

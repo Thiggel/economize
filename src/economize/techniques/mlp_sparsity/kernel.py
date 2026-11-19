@@ -57,7 +57,7 @@ def default_row_config(m: int) -> RowGemvConfig:
 
 
 @functools.cache
-def _kernel() -> Any:
+def _kernel() -> Any:  # Any: a triton JITFunction (triton is imported lazily and untyped)
     """The Triton kernel, compiled on first use (Triton is imported lazily)."""
     import triton
     import triton.language as tl

@@ -36,13 +36,14 @@ from __future__ import annotations
 import functools
 import importlib.util
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
+from torch._ops import OpOverload
 
 from ...errors import ConfigError, UnsupportedModelError
 from ...registry import Registry
@@ -277,7 +278,7 @@ class MarlinWeight(Tensor):
     workspace: Tensor
     packing: MarlinLayout  # not ``layout``: ``Tensor.layout`` is a read-only attribute of every tensor
 
-    _SHARE_OPS: ClassVar[set[Any]] = {torch.ops.aten.detach.default, torch.ops.aten.alias.default}
+    _SHARE_OPS: ClassVar[set[OpOverload]] = {torch.ops.aten.detach.default, torch.ops.aten.alias.default}
 
     @staticmethod
     def __new__(
@@ -310,13 +311,13 @@ class MarlinWeight(Tensor):
         return f"MarlinWeight({lay.type_name}, shape={tuple(self.shape)}, group={group}, dtype={self.dtype})"
 
     def _rewrap(self, dtype: torch.dtype | None = None, clone: bool = False) -> MarlinWeight:
-        def copy(t: Tensor | None) -> Tensor | None:
-            return t.clone() if clone and t is not None else t
+        def copy(t: Tensor) -> Tensor:
+            return t.clone() if clone else t
 
         return type(self)(  # a subclass (MacheteWeight) keeps its own linear
-            copy(self.qweight),  # type: ignore[arg-type]
-            copy(self.scales),  # type: ignore[arg-type]
-            copy(self.zeros),
+            copy(self.qweight),
+            copy(self.scales),
+            None if self.zeros is None else copy(self.zeros),
             torch.zeros_like(self.workspace) if clone else self.workspace,
             self.packing,
             dtype or self.dtype,
@@ -369,29 +370,39 @@ class MarlinWeight(Tensor):
         return torch.cat(rows).T.contiguous().to(self.dtype)
 
     @classmethod
-    def __torch_function__(cls, func: Any, types: Any, args: tuple = (), kwargs: dict | None = None) -> Any:
+    def __torch_function__(
+        cls,
+        func: Callable[..., object],
+        types: Collection[type],
+        args: tuple[object, ...] = (),
+        kwargs: dict[str, object] | None = None,
+    ) -> object:
         kwargs = kwargs or {}
         if func is F.linear:
             x, weight = args[0], args[1]
-            bias = args[2] if len(args) > 2 else kwargs.get("bias")
+            bias = cast("Tensor | None", args[2] if len(args) > 2 else kwargs.get("bias"))
             if isinstance(weight, MarlinWeight) and not isinstance(x, MarlinWeight):
-                return weight.linear(x, bias)
+                return weight.linear(cast(Tensor, x), bias)
         with torch._C.DisableTorchFunctionSubclass():
             return func(*args, **kwargs)
 
     @classmethod
     def __torch_dispatch__(  # type: ignore[override]  # torch types the disabled default, not the subclass protocol
-        cls, func: Any, types: Any, args: tuple = (), kwargs: dict | None = None
-    ) -> Any:
+        cls,
+        func: OpOverload,
+        types: Collection[type],
+        args: tuple[object, ...] = (),
+        kwargs: dict[str, object] | None = None,
+    ) -> MarlinWeight:
         kwargs = kwargs or {}
-        self = args[0]
+        self = cast(MarlinWeight, args[0])  # aten passes the subclass instance first
         if func in cls._SHARE_OPS:
             return self._rewrap()
         if func is torch.ops.aten.clone.default:
             return self._rewrap(clone=True)
         if func is torch.ops.aten._to_copy.default:
-            dtype = kwargs.get("dtype", self.dtype)
-            device = kwargs.get("device")
+            dtype = cast(torch.dtype, kwargs.get("dtype", self.dtype))
+            device = cast("torch.device | str | int | None", kwargs.get("device"))
             same_device = device is None or _same_device(torch.device(device), self.device)
             if same_device and dtype.is_floating_point:
                 return self._rewrap(dtype)

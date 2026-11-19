@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 from torch import Tensor, nn
@@ -98,7 +98,7 @@ class _Summary:
         self.weights += q.codes.numel()
         self.bits += q.bits_per_weight * q.codes.numel()
 
-    def as_dict(self, config: QuantConfig | DraftQuantConfig, method: str, kernel: str) -> dict[str, Any]:
+    def as_dict(self, config: QuantConfig | DraftQuantConfig, method: str, kernel: str) -> dict[str, object]:
         candidates = self.weights + sum(self.skipped.values())
         return {
             "method": method,
@@ -119,7 +119,7 @@ class _Summary:
 @torch.no_grad()
 def quantize_model(
     adapter: ArchAdapter, config: QuantConfig, batches: Sequence[Tensor] | None = None
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Quantize the selected linear maps of every selected decoder layer in place and return a summary.
 
     Calibrated methods run layer by layer (GPTQ on the quantized model's activations, AWQ on the original model's).
@@ -182,7 +182,7 @@ def quantize_model(
 @torch.no_grad()
 def quantize_modules(
     modules: Mapping[str, nn.Linear], config: DraftQuantConfig, skipped: Mapping[str, nn.Module] | None = None
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Round-to-nearest quantization of the given linear maps (used for drafter-only quantization); ``skipped``
     holds the candidates that were left out, which the summary lists and counts against its ``coverage``."""
     backend = QUANT_BACKENDS.get(config.backend)()

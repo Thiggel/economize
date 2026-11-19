@@ -8,7 +8,7 @@ a weight transform that replaces a map (quantization, a LoRA wrapper) is picked 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 import torch
 from torch import Tensor, nn
@@ -148,7 +148,7 @@ class MlpPatch:
         self._had_forward = "forward" in module.__dict__
         original = module.__dict__.get("forward") or type(module).forward.__get__(module)
 
-        def forward(x: Tensor, *args: Any, **kwargs: Any) -> Tensor:
+        def forward(x: Tensor, *args: object, **kwargs: object) -> Tensor:
             mode = call_mode(x, policy)
             if mode == "dense":
                 return original(x, *args, **kwargs)
@@ -160,7 +160,7 @@ class MlpPatch:
     def remove(self) -> None:
         module = self.module
         if self._had_forward:
-            module.forward = self._previous  # type: ignore[assignment]
+            module.forward = cast("Callable[..., Tensor]", self._previous)  # set whenever _had_forward
         else:
             module.__dict__.pop("forward", None)
         self.ops.remove()
