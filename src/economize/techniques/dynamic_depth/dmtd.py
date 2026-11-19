@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import torch
 
@@ -42,6 +42,7 @@ if TYPE_CHECKING:
 
     from ...arch import ArchAdapter
     from ...core.model import EfficientModel
+    from ...decoding import DecodeResult
 
 __all__ = ["DmtdConfig", "DmtdRollout", "DmtdTechnique", "EmbeddingPredictor", "percentage_layers_per_token"]
 
@@ -141,13 +142,16 @@ class DmtdTechnique(CrossLayerTechnique):
         return percentage_layers_per_token(self.adapter.num_layers, self.config.decoding_layers,
                                            self.config.cycle_length)
 
-    def decode_config(self, cycle_length: int | None = None, **options: Any) -> DecodeConfig:
+    def decode_config(
+        self, cycle_length: int | None = None,
+        **options: Any,  # Any: DecodeConfig fields of mixed types (no DecodeOptions TypedDict yet)
+    ) -> DecodeConfig:
         """DMTD's decoding: cycles of ``cycle_length`` tokens (default :attr:`DmtdConfig.cycle_length`), every draft
         kept. ``options`` are further :class:`~economize.DecodeConfig` fields."""
         tau = self.config.cycle_length if cycle_length is None else cycle_length
         return DecodeConfig(cycle_length=tau, lossless=False, **options)
 
-    def cost_summary(self, result: Any) -> dict[str, Any]:
+    def cost_summary(self, result: DecodeResult) -> dict[str, object]:
         """:func:`~.drafted.drafted_cost_summary` of one generation: the drafted tokens keep the late K/V of their
         draft steps. ``relative_sequential_layers`` is the PLT of the generation."""
         return drafted_cost_summary(result, continue_wasted=False)
@@ -171,6 +175,9 @@ class DmtdRollout(CrossLayerRollout):
     @classmethod
     def technique_type(cls) -> type[DmtdTechnique]:
         return DmtdTechnique
+
+    def trained(self, model: EfficientModel) -> DmtdTechnique:
+        return cast(DmtdTechnique, super().trained(model))  # super() checks it is a technique_type()
 
     def setup(self, model: EfficientModel) -> None:
         self._resolve(model)

@@ -12,22 +12,25 @@ not run. The tensors keep the jump technique's names (``blocks.*``, ``lora.layer
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import TYPE_CHECKING
 
 from ..jump.config import JumpConfig
 from ..jump.export import JumpDrafterSpec
 
+if TYPE_CHECKING:
+    from .dmtd import DmtdTechnique
+
 __all__ = ["jump_config", "jump_spec"]
 
 
-def jump_config(config: Any) -> JumpConfig:
+def jump_config(config: JumpConfig) -> JumpConfig:
     """The jump configuration that drafts like the resolved :class:`~economize.techniques.dynamic_depth.DmtdConfig`
     ``config`` (its :class:`~economize.techniques.jump.JumpConfig` fields)."""
     return JumpConfig(**{field.name: getattr(config, field.name) for field in dataclasses.fields(JumpConfig)
                          if field.init})
 
 
-def jump_spec(technique: Any) -> JumpDrafterSpec:
+def jump_spec(technique: DmtdTechnique) -> JumpDrafterSpec:
     """The exported specification of an attached :class:`~economize.techniques.dynamic_depth.DmtdTechnique`."""
     adapter = technique.adapter
     return JumpDrafterSpec(jump_config(technique.config), adapter.num_layers, adapter.hidden_size)

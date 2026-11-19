@@ -19,7 +19,7 @@ cache slots without K/V that later queries mask out, and the same mask in the tr
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import torch
 import torch.nn.functional as F
@@ -46,6 +46,11 @@ __all__ = ["MOD_KV_MODES", "MOD_ROUTER_INPUTS", "MoDConfig", "MoDPolicy", "MoDTe
 MOD_ROUTER_INPUTS = ("raw", "rms")
 #: K/V of routed-around tokens: written from their state (``"fill"``) or not at all (``"routed"``, the paper).
 MOD_KV_MODES = ("fill", "routed")
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
+    from ...runtime import LayerContext
+
 
 
 @dataclass(frozen=True)
@@ -80,7 +85,7 @@ class MoDConfig(LayeredDepthConfig):
         check_choice("kv", self.kv, MOD_KV_MODES)
         check_number("threshold", self.threshold)
 
-    def validate(self, adapter: Any) -> None:
+    def validate(self, adapter: ArchAdapter) -> None:
         super().validate(adapter)
         if self.kv == "routed" and not runtime_supports_routed_kv():
             raise ConfigError("MoD kv='routed' needs runtime support for routes without K/V (Route.fill_kv and a "
@@ -117,7 +122,7 @@ class MoDPolicy(RoutedDepthPolicy):
         """The router logits of the current pass."""
         return self.scores
 
-    def begin_pass(self, hidden: torch.Tensor, ctx: Any) -> None:
+    def begin_pass(self, hidden: torch.Tensor, ctx: LayerContext) -> None:
         super().begin_pass(hidden, ctx)
         self.aux_losses = []
         self.routed_fraction = []
@@ -155,7 +160,7 @@ class MoDTechnique(DepthTechnique):
     config: MoDConfig
     order: ClassVar[int] = 31
 
-    def __init__(self, config: MoDConfig, adapter: Any) -> None:
+    def __init__(self, config: MoDConfig, adapter: ArchAdapter) -> None:
         super().__init__(config, adapter)
         normalize = config.router_input == "rms"
         self.routers = layer_modules(

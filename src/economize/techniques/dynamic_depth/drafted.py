@@ -15,14 +15,18 @@ method's own.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 from ...decoding.cost import CostKind
+from .base import summary_number
+
+if TYPE_CHECKING:
+    from ...decoding import DecodeResult
 
 __all__ = ["drafted_cost_summary"]
 
 
-def drafted_cost_summary(result: Any, *, continue_wasted: bool) -> dict[str, Any]:
+def drafted_cost_summary(result: DecodeResult, *, continue_wasted: bool) -> dict[str, object]:
     """``result.cost_summary()`` with the layer applications the method reuses subtracted.
 
     Every exact pass reuses the decoded model's layers that the draft steps since the previous exact pass ran on its
@@ -38,7 +42,7 @@ def drafted_cost_summary(result: Any, *, continue_wasted: bool) -> dict[str, Any
         ``relative_sequential_layers``: ``sequential_layers / ((n - 1) * L)`` for ``n`` generated tokens, the
             sequential depth relative to plain decoding.
     """
-    summary = dict(result.cost_summary())
+    summary: dict[str, object] = dict(result.cost_summary())
     events = result.cost.events
     reused = 0
     sequential = 0
@@ -57,9 +61,10 @@ def drafted_cost_summary(result: Any, *, continue_wasted: bool) -> dict[str, Any
             last_wasted = len(event.layer_indices) if event.kind == CostKind.DRAFT_WASTED else 0
         if index > 0:
             sequential += len(event.layer_indices)
-    effective = summary["layer_tokens"] - reused
-    relative = summary["relative_layer_tokens"]
-    plain = summary["layer_tokens"] / relative if relative else 0
+    layer_tokens = summary_number(summary, "layer_tokens")
+    effective = layer_tokens - reused
+    relative = summary_number(summary, "relative_layer_tokens")
+    plain = layer_tokens / relative if relative else 0
     generated = result.tokens.numel()
     summary["reused_layer_tokens"] = reused
     summary["effective_layer_tokens"] = effective

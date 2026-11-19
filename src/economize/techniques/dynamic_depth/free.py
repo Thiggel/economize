@@ -27,9 +27,9 @@ mapping ``m`` (KD-dyna) or the fixed mappings KD-last and KD-unif. The deep side
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import torch
 
@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
 
     from ...core.model import EfficientModel
+    from ...decoding import DecodeResult
 
 __all__ = [
     "KD_MAPPINGS",
@@ -132,7 +133,10 @@ class FreeTechnique(EarlyExitTechnique):
     info = TechniqueInfo(family=Family.DRAFTING, saves=Saving.LATENCY, lossless=False, trainable=("readout",))
     config: FreeConfig
 
-    def decode_config(self, threshold: float | None = None, **options: Any) -> DecodeConfig:
+    def decode_config(
+        self, threshold: float | None = None,
+        **options: Any,  # Any: DecodeConfig fields of mixed types (no DecodeOptions TypedDict yet)
+    ) -> DecodeConfig:
         """FREE's decoding: up to :attr:`FreeConfig.max_exits` kept shallow exits per deep pass, ending at the first
         token below ``threshold`` (default :attr:`FreeConfig.threshold`). ``options`` are further
         :class:`~economize.DecodeConfig` fields."""
@@ -140,7 +144,7 @@ class FreeTechnique(EarlyExitTechnique):
         return DecodeConfig(cycle_length=self.config.max_exits + 1, lossless=False, min_confidence=threshold,
                             draft_policy="softmax_gap", **options)
 
-    def cost_summary(self, result: Any) -> dict[str, Any]:
+    def cost_summary(self, result: DecodeResult) -> dict[str, object]:
         """:func:`~.drafted.drafted_cost_summary` of one generation: the deep pass reuses the shallow layers of its
         tokens, and a token that does not exit continues from its shallow state."""
         return drafted_cost_summary(result, continue_wasted=True)
@@ -209,10 +213,12 @@ def free_calibration_pairs(model: EfficientModel, input_ids: torch.Tensor, techn
     pass), the inputs of :func:`bmm_threshold`. Feed sequences the model generated itself to match the paper, which
     collects the pairs while decoding."""
     free = model.techniques[technique]
+    if not isinstance(free, FreeTechnique):
+        raise ConfigError(f"{technique!r} is a {type(free).__name__}, not a FreeTechnique")
     captured: dict[str, torch.Tensor] = {}
 
-    def hook(module: torch.nn.Module, args: tuple, output: Any) -> None:
-        captured["h"] = output[0] if isinstance(output, tuple) else output
+    def hook(module: torch.nn.Module, args: tuple[object, ...], output: object) -> None:
+        captured["h"] = cast(torch.Tensor, output[0] if isinstance(output, tuple) else output)
 
     handle = model.adapter.layer(free.exit_layer).register_forward_hook(hook)
     try:
@@ -312,7 +318,9 @@ class FreeObjective(TechniqueObjective[FreeTechnique]):
                 self._remove()
 
     @torch.no_grad()
-    def evaluate(self, model: EfficientModel, batch: Batch, teacher: TeacherOutputs | None) -> dict[str, Any]:
+    def evaluate(
+        self, model: EfficientModel, batch: Batch, teacher: TeacherOutputs | None
+    ) -> dict[str, torch.Tensor | float]:
         output = self.loss(model, batch, teacher)
         return {"loss": output.loss, **output.metrics}
 
@@ -333,9 +341,9 @@ class FreeObjective(TechniqueObjective[FreeTechnique]):
         self._handles.clear()
         self._captured.clear()
 
-    def _hook(self, layer: int) -> Any:
-        def hook(module: torch.nn.Module, args: tuple, output: Any) -> None:
-            self._captured[layer] = output[0] if isinstance(output, tuple) else output
+    def _hook(self, layer: int) -> Callable[[torch.nn.Module, tuple[object, ...], object], None]:
+        def hook(module: torch.nn.Module, args: tuple[object, ...], output: object) -> None:
+            self._captured[layer] = cast(torch.Tensor, output[0] if isinstance(output, tuple) else output)
 
         return hook
 

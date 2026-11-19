@@ -15,7 +15,7 @@ branch-level decision, see :mod:`economize.techniques.layer_skip` for the same r
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import torch
 
@@ -33,6 +33,9 @@ from .base import (
     module_at,
     top_fraction,
 )
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
 
 __all__ = ["GATESKIP_RULES", "GateSkipConfig", "GateSkipPolicy", "GateSkipTechnique", "ResidualGate", "top_fraction"]
 
@@ -129,7 +132,7 @@ class GateSkipTechnique(DepthTechnique):
     config: GateSkipConfig
     order: ClassVar[int] = 30
 
-    def __init__(self, config: GateSkipConfig, adapter: Any) -> None:
+    def __init__(self, config: GateSkipConfig, adapter: ArchAdapter) -> None:
         super().__init__(config, adapter)
         self.gates = layer_modules(
             adapter,

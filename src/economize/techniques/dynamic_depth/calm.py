@@ -30,7 +30,7 @@ import math
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import torch
 import torch.nn.functional as F
@@ -45,6 +45,8 @@ from ...validation import check_number, check_positive, check_registered, check_
 from .base import GENERATION_PHASES, DepthPolicy, DepthTechnique, ScalarScore, valid_mask
 
 if TYPE_CHECKING:
+    from ...arch import ArchAdapter
+    from ...core.model import EfficientModel
     from ...runtime import LayerContext
 
 __all__ = [
@@ -91,7 +93,7 @@ class CalmConfig(TechniqueConfig):
         check_number("decay_temperature", self.decay_temperature, low=0)
         check_positive("decay_horizon", self.decay_horizon)
 
-    def validate(self, adapter: Any) -> None:
+    def validate(self, adapter: ArchAdapter) -> None:
         if self.min_layer >= adapter.num_layers:
             raise ConfigError(f"min_layer must be below the number of layers ({adapter.num_layers})")
 
@@ -252,7 +254,7 @@ class CalmTechnique(DepthTechnique):
     order: ClassVar[int] = 34
     classifier: ExitClassifier  # only with confidence="classifier" (added by ClassifierConfidence.modules)
 
-    def __init__(self, config: CalmConfig, adapter: Any) -> None:
+    def __init__(self, config: CalmConfig, adapter: ArchAdapter) -> None:
         super().__init__(config, adapter)
         measure = CONFIDENCE_MEASURES.get(config.confidence)
         for name, module in measure.modules(self).items():
@@ -336,7 +338,7 @@ _CANDIDATES = tuple(i / 20 for i in range(1, 20))
 
 
 def calibrate_threshold(
-    model: Any,
+    model: EfficientModel,
     prompts: Sequence[torch.Tensor],
     max_new_tokens: int,
     *,
@@ -353,6 +355,8 @@ def calibrate_threshold(
     ``dataclasses.replace(config, threshold=...)``. The technique's configuration is restored afterwards.
     """
     calm = model.techniques[technique]
+    if not isinstance(calm, CalmTechnique):
+        raise ConfigError(f"{technique!r} is a {type(calm).__name__}, not a CalmTechnique")
     original = calm.config
     rows: list[list[float]] = []
     try:

@@ -173,7 +173,10 @@ class HiddenTransferTechnique(StepDrafterDefaults, Technique):
     def drafter(self, runner: LayerRunner) -> HiddenTransferDrafter:
         return HiddenTransferDrafter(self, runner)
 
-    def decode_config(self, cycle_length: int | None = None, lossless: bool = True, **options: Any) -> DecodeConfig:
+    def decode_config(
+        self, cycle_length: int | None = None, lossless: bool = True,
+        **options: Any,  # Any: DecodeConfig fields of mixed types (no DecodeOptions TypedDict yet)
+    ) -> DecodeConfig:
         """Cycles of ``cycle_length`` tokens (default ``k + 1``: one exact token and ``k`` drafts), verified
         (``lossless=True``, the paper's) or kept. ``options`` are further :class:`~economize.DecodeConfig`
         fields."""

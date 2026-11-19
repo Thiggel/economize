@@ -22,7 +22,7 @@ objective that trains the base model works with the policy in place).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import torch
 
@@ -34,6 +34,7 @@ from ...validation import check_choice, check_non_negative, check_positive
 from .base import GENERATION_PHASES, DepthPolicy, DepthTechnique, valid_mask
 
 if TYPE_CHECKING:
+    from ...arch import ArchAdapter
     from ...runtime import LayerContext
 
 __all__ = ["SKIPDECODE_SIDES", "SkipDecodeConfig", "SkipDecodePolicy", "SkipDecodeTechnique"]
@@ -73,7 +74,7 @@ class SkipDecodeConfig(TechniqueConfig):
             check_non_negative(name, getattr(self, name))
         check_positive("decay", self.decay)
 
-    def validate(self, adapter: Any) -> None:
+    def validate(self, adapter: ArchAdapter) -> None:
         top, bottom = self.budget(adapter.num_layers)
         if not 1 <= bottom <= top <= adapter.num_layers:
             raise ConfigError(

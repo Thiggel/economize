@@ -20,7 +20,7 @@ plus the technique's own regularizer:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
+from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
 
 import torch
 import torch.nn.functional as F
@@ -42,10 +42,10 @@ from ...train.objectives.weights import target_weights
 from ...validation import check_registered, check_unit_interval
 from .base import DepthPolicy, DepthTechnique, real_tokens
 from .calm import CalmTechnique
-from .flexidepth import FlexiDepthTechnique
-from .gateskip import GateSkipTechnique
+from .flexidepth import FlexiDepthPolicy, FlexiDepthTechnique
+from .gateskip import GateSkipPolicy, GateSkipTechnique
 from .loradrop import LoRADropTechnique
-from .mod import MoDTechnique
+from .mod import MoDPolicy, MoDTechnique
 
 if TYPE_CHECKING:
     from ...core.model import EfficientModel
@@ -173,12 +173,12 @@ class DepthLMObjective(TechniqueObjective[_D]):
             metrics[self.divergence] = div.detach()
         return sum(terms[1:], terms[0]), metrics
 
-    def regularizer(self, model: EfficientModel, batch: Batch, policy: Any
+    def regularizer(self, model: EfficientModel, batch: Batch, policy: DepthPolicy
                     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
         """The technique's own loss term after the student pass (``None``: none)."""
         return None, {}
 
-    def configure(self, policy: Any) -> None:
+    def configure(self, policy: DepthPolicy) -> None:
         """Adjust a fresh training policy (budgets, schedules) before the student pass."""
 
     def loss(self, model: EfficientModel, batch: Batch, teacher: TeacherOutputs | None) -> ObjectiveOutput:
@@ -214,11 +214,12 @@ class GateSkipObjective(DepthLMObjective[GateSkipTechnique]):
         ramp = max(0.0, (progress - self.anneal_start) / (1.0 - self.anneal_start))
         self._budget = 1.0 - (1.0 - self.final_budget) * min(1.0, ramp)
 
-    def configure(self, policy: Any) -> None:
-        policy.train_budget = self._budget
+    def configure(self, policy: DepthPolicy) -> None:
+        cast(GateSkipPolicy, policy).train_budget = self._budget
 
-    def regularizer(self, model: EfficientModel, batch: Batch, policy: Any
+    def regularizer(self, model: EfficientModel, batch: Batch, policy: DepthPolicy
                     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
+        policy = cast(GateSkipPolicy, policy)  # make_policy() of the trained technique
         if not policy.gates:
             return None, {}
         gates = torch.stack([g.to(model.adapter.device) for g in policy.gates.values()])  # [G, B, T]
@@ -235,8 +236,9 @@ class MoDObjective(DepthLMObjective[MoDTechnique]):
 
     aux_weight: float = 0.1
 
-    def regularizer(self, model: EfficientModel, batch: Batch, policy: Any
+    def regularizer(self, model: EfficientModel, batch: Batch, policy: DepthPolicy
                     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
+        policy = cast(MoDPolicy, policy)  # make_policy() of the trained technique
         if not policy.aux_losses:
             return None, {}
         device = model.adapter.device
@@ -252,8 +254,9 @@ class FlexiDepthObjective(DepthLMObjective[FlexiDepthTechnique]):
 
     layer_penalty: float = 1e-3
 
-    def regularizer(self, model: EfficientModel, batch: Batch, policy: Any
+    def regularizer(self, model: EfficientModel, batch: Batch, policy: DepthPolicy
                     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
+        policy = cast(FlexiDepthPolicy, policy)  # make_policy() of the trained technique
         if not policy.scores:
             return None, {}
         scores = torch.stack([s.to(model.adapter.device) for s in policy.scores.values()])  # [F, B, T]
