@@ -13,8 +13,6 @@ the last run layer goes straight into the final norm, as in the technique.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import torch
 from torch import nn
 
@@ -22,9 +20,6 @@ from ...modules import ReadoutAdapter
 from .._export import technique_as
 from ..jump.config import JumpConfig
 from ..jump.export import JumpDrafterSpec
-
-if TYPE_CHECKING:
-    pass
 
 __all__ = ["jump_config", "jump_spec", "jump_state_dict"]
 
@@ -55,9 +50,9 @@ def jump_state_dict(technique: nn.Module) -> dict[str, torch.Tensor]:
     from ..knapspec.technique import KnapSpecTechnique
     from .technique import LayerSkipTechnique
 
-    if not isinstance(technique, (LayerSkipTechnique, KnapSpecTechnique)):
-        raise TypeError(f"expected a LayerSkipTechnique or KnapSpecTechnique technique, got {type(technique).__name__}")
     skipping = technique
+    # the exporter is registered for these two classes only
+    assert isinstance(skipping, (LayerSkipTechnique, KnapSpecTechnique)), f"got {type(skipping)}"
     if max(skipping.run_layers) == skipping.adapter.num_layers:
         return {}
     identity = ReadoutAdapter(skipping.adapter.hidden_size)

@@ -13,12 +13,7 @@ T = TypeVar("T", bound=nn.Module)
 
 
 def technique_as(technique: nn.Module, *classes: type[T]) -> T:
-    """``technique``, which must be an instance of one of ``classes``.
-
-    Raises:
-        TypeError: It is none of them (the exporter was registered for another technique).
-    """
-    if not isinstance(technique, classes):
-        names = " or ".join(cls.__name__ for cls in classes)
-        raise TypeError(f"expected a {names} technique, got {type(technique).__name__}")
+    """``technique``, narrowed to ``classes``: each exporter is registered for its own technique classes, so any
+    other technique is a registration bug (asserted)."""
+    assert isinstance(technique, classes), f"expected one of {[c.__name__ for c in classes]}, got {type(technique)}"
     return technique
