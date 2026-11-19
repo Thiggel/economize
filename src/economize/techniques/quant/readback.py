@@ -133,9 +133,7 @@ _KERNEL_TYPES = {
 
 def _zero_points(weight: MarlinWeight) -> Tensor:
     """The stored zero points of an affine layout."""
-    if weight.zeros is None:
-        raise TypeError(f"{type(weight).__name__} of an affine layout stores no zero points")
-    return weight.zeros
+    return cast(Tensor, weight.zeros)  # affine layouts always store them
 
 
 def _marlin_grouping(weight: MarlinWeight) -> tuple[int, int]:

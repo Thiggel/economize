@@ -30,7 +30,7 @@ import dataclasses
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import torch
 from torch import nn
@@ -606,15 +606,8 @@ def unit_rms(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
 
 
 def summary_number(summary: Mapping[str, object], key: str) -> float:
-    """The number ``summary[key]`` of a cost summary (an ``int`` stays an ``int``).
-
-    Raises:
-        TypeError: The value is no number.
-    """
-    value = summary[key]
-    if not isinstance(value, (int, float)):
-        raise TypeError(f"cost summary entry {key!r} is no number: {value!r}")
-    return value
+    """The number ``summary[key]`` of a cost summary (an ``int`` stays an ``int``)."""
+    return cast(float, summary[key])  # cost summaries hold numbers under these keys
 
 
 def layer_modules(adapter: ArchAdapter, layers: Iterable[int], factory: Callable[[int], nn.Module]) -> nn.ModuleDict:

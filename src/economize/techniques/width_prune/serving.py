@@ -12,11 +12,14 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, cast
 
 from torch import Tensor, nn
 
 from ...arch.config import config_value, text_config
-from .technique import WidthPruneTechnique
+
+if TYPE_CHECKING:
+    from .technique import WidthPruneTechnique
 
 __all__ = ["EngineArchitectures", "merged_lora_state", "serving_obstacle"]
 
@@ -41,9 +44,7 @@ class EngineArchitectures:
 
 
 def _width_prune(technique: nn.Module) -> WidthPruneTechnique:
-    if not isinstance(technique, WidthPruneTechnique):
-        raise TypeError(f"expected an attached WidthPruneTechnique, got {type(technique).__name__}")
-    return technique
+    return cast("WidthPruneTechnique", technique)  # the serving exporter hands over the attached technique
 
 
 def serving_obstacle(technique: nn.Module, base: nn.Module, engine: EngineArchitectures) -> str | None:
