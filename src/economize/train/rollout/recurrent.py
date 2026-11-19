@@ -6,7 +6,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import torch
 import torch.utils.checkpoint
@@ -109,7 +109,7 @@ def recurrent_start_states(
 _ONE_TOKEN_RULES = ("torch_recurrent_gated_delta_rule",)  # one-token updates that a fast kernel may replace
 
 
-def _torch_rule(fn: Any) -> Callable[..., Any] | None:
+def _torch_rule(fn: object) -> Callable[..., object] | None:
     """The torch implementation behind a ``transformers`` kernel dispatcher ``fn`` (``None``: there is none).
 
     ``use_kernel_func_from_hub_with_fallback`` wraps the torch function with ``functools.wraps`` (``__wrapped__``),
@@ -118,7 +118,7 @@ def _torch_rule(fn: Any) -> Callable[..., Any] | None:
     for _ in range(4):
         inner = getattr(fn, "__wrapped__", None)
         if inner is not None:
-            return cast(Callable[..., Any], inner)
+            return cast("Callable[..., object]", inner)  # a functools.wraps target
         cells = getattr(getattr(type(fn), "forward", None), "__closure__", None) or ()
         fn = next((c.cell_contents for c in cells if callable(c.cell_contents)), None)
         if fn is None:
@@ -151,7 +151,7 @@ def _differentiable_one_token_rules() -> Iterator[None]:
             setattr(module, name, fn)
 
 
-def _per_start(value: Any, rows: int, starts: int) -> Any:
+def _per_start(value: object, rows: int, starts: int) -> object:
     """``value`` with every ``[B, S, ...]`` tensor reshaped to ``[B * S, 1, ...]``."""
     if isinstance(value, torch.Tensor) and value.dim() >= 2 and tuple(value.shape[:2]) == (rows, starts):
         return value.reshape(rows * starts, 1, *value.shape[2:])
@@ -187,7 +187,7 @@ class PerStartLayer:
     def _put(self, conv: torch.Tensor | None, state: torch.Tensor | None) -> None:
         self.states.put_recurrent_state(self.layer_idx, conv, state)
 
-    def __call__(self, hidden: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def __call__(self, hidden: torch.Tensor, *args: object, **kwargs: object) -> torch.Tensor:
         rows, starts, width = hidden.shape
         args = tuple(_per_start(a, rows, starts) for a in args)
         kwargs = {key: _per_start(value, rows, starts) for key, value in kwargs.items()}

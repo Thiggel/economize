@@ -29,7 +29,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import torch
 from transformers import Trainer, TrainerCallback, TrainingArguments
@@ -40,7 +40,7 @@ from .checkpoint import load_trained, save_trained
 from .data import Example, collate
 from .data.masks import loss_mask_from_labels
 from .evaluate import MetricMeans, evaluate_batch
-from .module import ObjectiveModule
+from .module import ObjectiveModule, ObjectiveModuleOutput
 from .objective import Batch, Objective, OptimDefaults, build_objective, default_objective
 from .optim import build_optimizer, build_scheduler
 from .schedule import SCHEDULES
@@ -48,9 +48,52 @@ from .teacher import TeacherHead, make_teacher_head
 from .utils import jsonable
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    import datasets
     from torch import nn
+    from torch.utils.data import Dataset, IterableDataset
+    from transformers import (
+        BaseImageProcessor,
+        EvalPrediction,
+        FeatureExtractionMixin,
+        PreTrainedModel,
+        PreTrainedTokenizerBase,
+        ProcessorMixin,
+        TrainerControl,
+        TrainerState,
+    )
+    from transformers.data.data_collator import DataCollator
+    from typing_extensions import Unpack
 
     from ..core.model import EfficientModel
+
+
+class _OptimChanges(TypedDict, total=False):
+    """Fields of :class:`~economize.train.OptimDefaults` that :meth:`EffTrainer.optimizer_settings` replaces."""
+
+    lr: float
+    lr_backbone: float | None
+    weight_decay: float
+    betas: tuple[float, float]
+    warmup_steps: int
+    schedule: str
+    min_lr_ratio: float
+    grad_clip: float | None
+
+
+class _TrainerOptions(TypedDict, total=False):
+    """The further keyword arguments of ``transformers.Trainer.__init__`` (its own annotations)."""
+
+    train_dataset: Dataset[Any] | IterableDataset[Any] | datasets.Dataset | None  # Any: HF's annotation
+    eval_dataset: Dataset[Any] | dict[str, Dataset[Any]] | datasets.Dataset | None  # Any: HF's annotation
+    processing_class: PreTrainedTokenizerBase | BaseImageProcessor | FeatureExtractionMixin | ProcessorMixin | None
+    model_init: Callable[..., PreTrainedModel] | None
+    compute_loss_func: Callable[..., object] | None
+    compute_metrics: Callable[[EvalPrediction], dict[str, object]] | None
+    optimizers: tuple[torch.optim.Optimizer | None, torch.optim.lr_scheduler.LambdaLR | None]
+    optimizer_cls_and_kwargs: tuple[type[torch.optim.Optimizer], dict[str, Any]] | None  # Any: HF's annotation
+    preprocess_logits_for_metrics: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None
 
 __all__ = ["EffCollator", "EffTrainer", "EffTrainingArguments", "economize_training_args"]
 
@@ -100,7 +143,7 @@ class EffCollator:
         self.pad_token_id = pad_token_id
         self.max_length = max_length
 
-    def __call__(self, features: Sequence[Mapping[str, Any] | Example]) -> dict[str, torch.Tensor]:
+    def __call__(self, features: Sequence[Mapping[str, object] | Example]) -> dict[str, torch.Tensor]:
         examples = [self._example(feature) for feature in features]
         batch = collate(examples, self.pad_token_id)
         out = {"input_ids": batch.input_ids}
@@ -110,7 +153,7 @@ class EffCollator:
             out["loss_mask"] = batch.loss_mask
         return out
 
-    def _example(self, feature: Mapping[str, Any] | Example) -> Example:
+    def _example(self, feature: Mapping[str, object] | Example) -> Example:
         if isinstance(feature, Example):
             ids, loss = feature.input_ids, feature.loss_mask
         else:
@@ -121,8 +164,8 @@ class EffCollator:
                 if not bool(attention[: int(attention.sum())].all()):
                     raise ConfigError("EffCollator supports right padding only")
                 ids = ids[: int(attention.sum())]
-            loss = feature.get("loss_mask")
-            loss = None if loss is None else torch.as_tensor(loss, dtype=torch.long)[: len(ids)]
+            given = feature.get("loss_mask")
+            loss = None if given is None else torch.as_tensor(given, dtype=torch.long)[: len(ids)]
             labels = feature.get("labels")
             if loss is None and labels is not None:
                 loss = loss_mask_from_labels(torch.as_tensor(labels)[: len(ids)])
@@ -132,7 +175,7 @@ class EffCollator:
         return Example(ids, loss)
 
 
-def economize_training_args(objective: str | Objective, output_dir: str, **overrides: Any) -> EffTrainingArguments:
+def economize_training_args(objective: str | Objective, output_dir: str, **overrides: object) -> EffTrainingArguments:
     """:class:`EffTrainingArguments` with the optimizer and schedule settings the objective recommends.
 
     Learning rate, backbone rate, weight decay, AdamW betas, warmup steps and gradient clipping come from the
@@ -142,7 +185,7 @@ def economize_training_args(objective: str | Objective, output_dir: str, **overr
     ``lr_scheduler_type`` without ``economize_schedule`` selects that ``transformers`` schedule instead.
     """
     defaults = (objective if isinstance(objective, Objective) else build_objective(objective)).defaults
-    settings: dict[str, Any] = {
+    settings: dict[str, Any] = {  # Any: TrainingArguments types each of its ~100 fields
         "learning_rate": defaults.lr,
         "lr_backbone": defaults.lr_backbone,
         "weight_decay": defaults.weight_decay,
@@ -163,7 +206,9 @@ class _BeginStep(TrainerCallback):
     def __init__(self, objective: Objective) -> None:
         self.objective = objective
 
-    def on_step_begin(self, args: TrainingArguments, state: Any, control: Any, **kwargs: Any) -> None:
+    def on_step_begin(
+        self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs: object
+    ) -> None:
         self.objective.begin_step(state.global_step, max(state.max_steps, 1))
 
 
@@ -223,8 +268,9 @@ class EffTrainer(Trainer):
         min_lr_ratio: float | None = None,
         offload_optimizer: bool | None = None,
         eval_with_objective: bool = False,
-        data_collator: Any = None,
-        **trainer_kwargs: Any,
+        data_collator: DataCollator | None = None,
+        callbacks: list[TrainerCallback] | None = None,
+        **trainer_kwargs: Unpack[_TrainerOptions],
     ) -> None:
         built = default_objective(model) if objective is None else build_objective(objective)
         if args is None:
@@ -254,8 +300,8 @@ class EffTrainer(Trainer):
         self.objective_module = ObjectiveModule(model, built, self.teacher_head)
         self._metrics: dict[str, MetricMeans] = {"train": MetricMeans(), "eval": MetricMeans()}
         self._protocol = MetricMeans()
-        callbacks = [*(trainer_kwargs.pop("callbacks", None) or []), _BeginStep(built)]
-        super().__init__(model=self.objective_module, args=args, data_collator=data_collator, callbacks=callbacks,
+        super().__init__(model=self.objective_module, args=args, data_collator=data_collator,
+                         callbacks=[*(callbacks or []), _BeginStep(built)],
                          **trainer_kwargs)
         self.model_accepts_loss_kwargs = False  # the objective's loss is a mean: Trainer divides by accumulation
         # One device per process (class docstring). transformers.TrainingArguments.n_gpu is a read-only property over
@@ -271,7 +317,7 @@ class EffTrainer(Trainer):
         """The objective's :class:`~economize.train.OptimDefaults` with the settings of ``args`` and of this trainer
         applied (the counterpart of :meth:`TrainConfig.optimizer_settings <economize.train.TrainConfig>`)."""
         args = self.args
-        changes: dict[str, Any] = {
+        changes: _OptimChanges = {
             "lr": args.learning_rate,
             "lr_backbone": self.lr_backbone,
             "weight_decay": args.weight_decay,
@@ -309,18 +355,18 @@ class EffTrainer(Trainer):
     def compute_loss(
         self,
         model: nn.Module,
-        inputs: dict[str, Any],
+        inputs: dict[str, torch.Tensor],
         return_outputs: bool = False,
-        num_items_in_batch: Any = None,
-    ) -> torch.Tensor | tuple[torch.Tensor, dict[str, Any]]:
-        outputs = model(**inputs)
+        num_items_in_batch: torch.Tensor | int | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, ObjectiveModuleOutput]:
+        outputs: ObjectiveModuleOutput = model(**inputs)
         self._record("train", outputs["metrics"])
         return (outputs["loss"], outputs) if return_outputs else outputs["loss"]
 
     def prediction_step(
         self,
         model: nn.Module,
-        inputs: dict[str, Any],
+        inputs: dict[str, torch.Tensor],
         prediction_loss_only: bool,
         ignore_keys: list[str] | None = None,
     ) -> tuple[torch.Tensor | None, None, None]:
@@ -337,7 +383,7 @@ class EffTrainer(Trainer):
         """
         inputs = self._prepare_inputs(inputs)
         with torch.no_grad(), self.compute_loss_context_manager():
-            outputs = model(**inputs)
+            outputs: ObjectiveModuleOutput = model(**inputs)
         self._record("eval", outputs["metrics"])
         if self.eval_with_objective:
             batch = Batch(inputs["input_ids"], inputs.get("attention_mask"), inputs.get("loss_mask"))
@@ -356,14 +402,14 @@ class EffTrainer(Trainer):
     def _autocast_dtype(self) -> torch.dtype | None:
         return torch.bfloat16 if self.args.bf16 else torch.float16 if self.args.fp16 else None
 
-    def _record(self, split: str, metrics: Mapping[str, Any]) -> None:
+    def _record(self, split: str, metrics: Mapping[str, torch.Tensor | float]) -> None:
         self._metrics[split].add({k: v for k, v in metrics.items() if torch.as_tensor(v).dim() == 0})
 
     def _drain(self, split: str) -> dict[str, float]:
         totals, self._metrics[split] = self._metrics[split], MetricMeans()
         if self.args.world_size > 1:  # every process logs (the loss is gathered there as well)
             totals.all_reduce(self._sum_over_processes, self.args.device)
-        return {name: float(value) for name, value in totals.means().items()}  # type: ignore[arg-type]
+        return {name: float(cast(float, value)) for name, value in totals.means().items()}  # scalars only (_record)
 
     def _drain_protocol(self) -> dict[str, float]:
         """The :meth:`Objective.evaluate` means of the evaluation that just ended, as loggable scalars."""
@@ -393,7 +439,7 @@ class EffTrainer(Trainer):
         super().log(logs, start_time)
 
     # ---- checkpoints ---------------------------------------------------------------------------------------------
-    def _save(self, output_dir: str | None = None, state_dict: dict[str, Any] | None = None) -> None:
+    def _save(self, output_dir: str | None = None, state_dict: dict[str, torch.Tensor] | None = None) -> None:
         """Write the techniques in economize's format, the trained base parameters (and ``base/`` via the base
         model's ``save_pretrained``), the tokenizer and the training arguments."""
         output_dir = output_dir if output_dir is not None else self.args.output_dir

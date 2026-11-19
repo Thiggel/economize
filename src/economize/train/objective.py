@@ -60,6 +60,8 @@ from ..errors import ConfigError
 from ..registry import Registry
 
 if TYPE_CHECKING:
+    from _typeshed import DataclassInstance
+
     from ..core.model import EfficientModel
     from ..core.technique import Technique
     from ..runtime import KVCache
@@ -353,11 +355,12 @@ class Objective(ABC):
     # ---- helpers -----------------------------------------------------------------------------------------------
     def hyperparameters(self) -> dict[str, object]:
         """The dataclass fields of the objective (its constructor arguments) and their values."""
-        return {f.name: getattr(self, f.name) for f in fields(self) if f.init}  # type: ignore[arg-type]
+        dataclass_fields = fields(cast("DataclassInstance", self))  # subclasses are dataclasses
+        return {f.name: getattr(self, f.name) for f in dataclass_fields if f.init}
 
     def with_options(self: _O, **changes: object) -> _O:
         """A copy with some hyperparameters changed."""
-        return replace(self, **changes)  # type: ignore[type-var]
+        return cast(_O, replace(cast("DataclassInstance", self), **changes))  # subclasses are dataclasses
 
 
 class TechniqueObjective(Objective, Generic[_TT]):
@@ -522,7 +525,9 @@ def default_objective(model: EfficientModel) -> Objective:
         for cls in type(technique).__mro__:
             name = cls.__dict__.get("name")
             if isinstance(name, str) and name in DEFAULT_OBJECTIVES:
-                return OBJECTIVES.get(DEFAULT_OBJECTIVES.get(name))(technique=attached)  # type: ignore[call-arg]
+                # default objectives are TechniqueObjective dataclasses (field ``technique``)
+                objective = cast("Callable[..., Objective]", OBJECTIVES.get(DEFAULT_OBJECTIVES.get(name)))
+                return objective(technique=attached)
     raise ConfigError(
         f"no default objective for the attached techniques {list(model.techniques)}; name one of "
         f"{OBJECTIVES.names()}"

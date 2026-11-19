@@ -11,7 +11,7 @@ A new state loss is added by registration::
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
+from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 import torch
 from torch.utils.checkpoint import checkpoint
@@ -192,7 +192,7 @@ def checkpointed_chunks(
 
 
 def find_drafter(
-    model: EfficientModel, name: str | None, kind: type[Any], objective: str, requirement: str
+    model: EfficientModel, name: str | None, kind: type, objective: str, requirement: str
 ) -> Technique:
     """The technique an objective trains: the one attached as ``name``, else the only attached ``kind``.
 

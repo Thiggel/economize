@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 import torch.utils.checkpoint
@@ -38,7 +38,7 @@ class RolloutCache(KVCache):
         self._replay: dict[int, int] | None = None
 
     def update(
-        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: Any, **kwargs: Any
+        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: object, **kwargs: object
     ) -> tuple[torch.Tensor, torch.Tensor]:
         prefix_keys, prefix_values = self.prefix.read(layer_idx)
         keys, values = self.blocks.setdefault(layer_idx, ([], []))
@@ -161,7 +161,7 @@ class CheckpointedLayer:
         self.cache = cache
         self.context = context
 
-    def __call__(self, hidden: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def __call__(self, hidden: torch.Tensor, *args: object, **kwargs: object) -> torch.Tensor:
         if not torch.is_grad_enabled():
             out = self.layer(hidden, *args, **kwargs)
             return out[0] if isinstance(out, tuple) else out
