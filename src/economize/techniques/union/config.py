@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar, Literal
 
+from ..._typing import JSONDict
 from ...core.config import TechniqueConfig, nested_config, nested_dict
 from ...errors import ConfigError
 from ...validation import check_positive
@@ -103,7 +104,7 @@ class UnionConfig(WrappingConfig):
         """Most tokens member ``index`` drafts per row and cycle (``None``: the cycle's budget)."""
         return None if self.max_drafts is None else self.max_drafts[index]
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> JSONDict:
         data = TechniqueConfig.to_dict(self)
         data["members"] = [nested_dict(member) for member in self.members]
         return data

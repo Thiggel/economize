@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, TypeVar
 
 import numpy as np
 
+from ...._typing import JSONDict, JSONValue
 from ....core.config import TechniqueConfig, nested_config, nested_dict
 from ....errors import ConfigError
 from ....registry import Registry
@@ -105,7 +106,7 @@ def proposer_for(config: TechniqueConfig, vocab_size: int) -> TokenProposer:
     return PROPOSERS.get(config.technique)(config, vocab_size)
 
 
-def proposer_entry(config: TechniqueConfig) -> dict[str, object]:
+def proposer_entry(config: TechniqueConfig) -> JSONDict:
     """The JSON entry of ``config`` for ``additional_config[CONFIG_KEY]`` (``{"technique", "config"}``).
 
     Raises:
@@ -116,9 +117,9 @@ def proposer_entry(config: TechniqueConfig) -> dict[str, object]:
     return nested_dict(config)
 
 
-def build_proposer(entry: Mapping[str, object], vocab_size: int) -> TokenProposer:
+def build_proposer(entry: Mapping[str, JSONValue], vocab_size: int) -> TokenProposer:
     """The proposer an entry written by :func:`proposer_entry` describes."""
-    return proposer_for(nested_config(dict(entry)), vocab_size)
+    return proposer_for(nested_config(entry), vocab_size)
 
 
 def trailing(context: np.ndarray | None, length: int | None) -> np.ndarray | None:

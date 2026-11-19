@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, ClassVar, Protocol, TypeVar, runtime_checkable
+from typing import TYPE_CHECKING, ClassVar, Protocol, runtime_checkable
 
 import torch
 from torch import nn
 
+from ..._typing import JSONDict
 from ...core.cache_wrapping import NestedCacheWrapping
 from ...core.config import TechniqueConfig, nested_config, nested_dict
 from ...core.technique import TECHNIQUES, AttachContext, Capability, Technique
@@ -31,9 +32,9 @@ from .drafters import DraftModules
 if TYPE_CHECKING:
     from ...arch import ArchAdapter
     from ...decoding.cost import LayerFootprint
+    from ...decoding.graphs import GraphWrap
     from ...decoding.request import DraftRequest
     from ...runtime import ExactPass, KVCache, LayerRunner
-    from .drafters import StepWrap
 
 __all__ = [
     "DelegatingDrafter",
@@ -78,7 +79,6 @@ def drafting_class(config: TechniqueConfig, owner: str, role: str, *, wrappable:
     return cls
 
 
-W = TypeVar("W", bound="WrappingConfig")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -115,20 +115,11 @@ class WrappingConfig(TechniqueConfig):
         for config in self.nested().values():
             config.validate(adapter)
 
-    def to_dict(self) -> dict[str, object]:
-        data: dict[str, object] = super().to_dict()
+    def to_dict(self) -> JSONDict:
+        data = super().to_dict()
         for name, config in self.nested().items():
             data[name] = nested_dict(config)
         return data
-
-    @classmethod
-    def from_dict(cls: type[W], data: dict[str, object]) -> W:
-        data = dict(data)
-        for name in cls.nested_fields:
-            value = data.get(name)
-            if isinstance(value, dict):
-                data[name] = nested_config(value)
-        return super().from_dict(data)
 
 
 class WrappingTechnique(Technique):
@@ -275,7 +266,7 @@ class DelegatingDrafter(Drafter):
     def draft_capacity(self, cycle_length: int) -> int:
         return self.inner.draft_capacity(cycle_length)
 
-    def enable_graphs(self, wrap: StepWrap) -> bool:
+    def enable_graphs(self, wrap: GraphWrap) -> bool:
         return self.inner.enable_graphs(wrap)
 
     def drafts_trees(self, verifier: Verifier) -> bool:

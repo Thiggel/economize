@@ -301,7 +301,7 @@ class PlanBuilder:
     @property
     def base(self) -> PreTrainedModel:
         """The Hugging Face model inside :attr:`model`."""
-        return cast("PreTrainedModel", base_model_of(self.model))
+        return base_model_of(self.model)
 
     @property
     def techniques(self) -> Mapping[str, Technique]:

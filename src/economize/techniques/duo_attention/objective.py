@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from typing_extensions import Unpack
 
     from ...core.model import EfficientModel
+    from ...train.data.sources import TrainData
     from ...train.loop import TrainConfig, TrainResult
 
 __all__ = ["DuoAttentionGates", "TrainedPattern", "train_pattern"]
@@ -211,7 +212,7 @@ class TrainedPattern:
 
 def train_pattern(
     model: EfficientModel | nn.Module,
-    data: object,
+    data: TrainData,
     out_dir: str | Path | None = None,
     *,
     objective: DuoAttentionGates | None = None,

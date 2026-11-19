@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, ClassVar, TypeVar
+from typing import TYPE_CHECKING, ClassVar
 
+from ..._typing import JSONDict
 from ...core.config import TechniqueConfig, nested_config, nested_dict
 from ...errors import ConfigError
 
@@ -15,7 +16,6 @@ if TYPE_CHECKING:
 __all__ = ["DraftWith", "DraftWithConfig"]
 
 
-D = TypeVar("D", bound="DraftWithConfig")
 
 @dataclasses.dataclass(frozen=True)
 class DraftWithConfig(TechniqueConfig):
@@ -58,16 +58,8 @@ class DraftWithConfig(TechniqueConfig):
         for config in self.techniques:
             config.validate(adapter)
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> JSONDict:
         return {"techniques": [nested_dict(config) for config in self.techniques]}
-
-    @classmethod
-    def from_dict(cls: type[D], data: dict[str, object]) -> D:
-        data = dict(data)
-        entries = data.get("techniques")
-        if isinstance(entries, list):
-            data["techniques"] = tuple(nested_config(entry) for entry in entries)
-        return super().from_dict(data)
 
 
 def DraftWith(*techniques: TechniqueConfig) -> DraftWithConfig:

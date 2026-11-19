@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 
+from ..._typing import JSONDict
 from ...core.config import TechniqueConfig
 from ...validation import (
     check_choice,
@@ -100,7 +101,7 @@ class TealConfig(TechniqueConfig):
     def validate(self, adapter: ArchAdapter) -> None:
         check_layers(self.layers, adapter)
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> JSONDict:
         data = super().to_dict()
         if not isinstance(self.prefill, str):
             data["prefill"] = self.policy.to_dict()
