@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 
 from ...decoding.cost import CostKind, LayerFootprint
 from ...decoding.protocols import Draft, Drafter
-from .._drafting import take_rows
+from .._drafting import graphed, take_rows
 from .technique import LOG_0
 
 if TYPE_CHECKING:
@@ -80,8 +80,13 @@ class RedrafterDrafter(Drafter):
     def __init__(self, technique: RedrafterTechnique) -> None:
         self.technique = technique
         self.source_layers = (technique.adapter.num_layers,)
-        self._chain_step: Callable[..., Any] = technique.draft_step
-        self._beam_step: Callable[..., Any] = technique.beam_step
+        self._chain_step: Callable[
+            [torch.Tensor, torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]
+        ] = technique.draft_step
+        self._beam_step: Callable[
+            [torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+        ] = technique.beam_step
         self._context: torch.Tensor | None = None  # h_t of every row
 
     @property
@@ -92,8 +97,8 @@ class RedrafterDrafter(Drafter):
         self._context = None
 
     def enable_graphs(self, wrap: StepWrap) -> bool:
-        self._chain_step = wrap(self.technique.draft_step)
-        self._beam_step = wrap(self.technique.beam_step)
+        self._chain_step = graphed(wrap, self.technique.draft_step)
+        self._beam_step = graphed(wrap, self.technique.beam_step)
         return True
 
     def observe(self, exact: ExactPass, columns: torch.Tensor) -> None:

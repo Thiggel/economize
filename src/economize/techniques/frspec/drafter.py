@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 import torch
 
@@ -13,6 +13,7 @@ from .._drafting import DelegatingDrafter
 
 if TYPE_CHECKING:
     from ...decoding.request import DraftRequest
+    from ...decoding.tree_search import TreeStepDrafter
 
 __all__ = ["FRSpecDrafter", "restrict_logits", "widen_logits"]
 
@@ -73,7 +74,7 @@ class _RestrictedRequest:
         return [b for b, (n, start, through) in enumerate(zip(lengths, self.initial, self.extended))
                 if n - start != through or draft.lengths[b] > n]
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: str) -> object:
         return getattr(self._request, name)
 
 
@@ -129,14 +130,14 @@ class FRSpecDrafter(DelegatingDrafter):
         return callable(supports) and bool(supports())
 
     def tree_begin(self, request: DraftRequest) -> None:
-        self.inner.tree_begin(request)  # type: ignore[attr-defined]
+        cast("TreeStepDrafter", self.inner).tree_begin(request)  # called after supports_tree_steps()
 
     def tree_state(self) -> tuple[torch.Tensor, ...]:
-        return self.inner.tree_state()  # type: ignore[attr-defined, no-any-return]
+        return cast("TreeStepDrafter", self.inner).tree_state()
 
     def tree_step(self, tokens: torch.Tensor, parents: torch.Tensor, base: torch.Tensor,
                   *states: torch.Tensor) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]]:
-        logits, out = self.inner.tree_step(tokens, parents, base, *states)  # type: ignore[attr-defined]
+        logits, out = cast("TreeStepDrafter", self.inner).tree_step(tokens, parents, base, *states)
         return self.restrict(logits), out
 
     def propose(self, request: DraftRequest) -> Draft:
@@ -145,7 +146,7 @@ class FRSpecDrafter(DelegatingDrafter):
             raise ConfigError(f"frspec restricts chain drafts only; {name} drafts trees for verifier "
                               f"{type(request.verifier).__name__}")
         restricted = _RestrictedRequest(request, self.restrict, self.sliced)
-        draft = self.inner.propose(restricted)  # type: ignore[arg-type]
+        draft = self.inner.propose(cast("DraftRequest", restricted))  # a view that forwards everything else
         if draft.is_tree:
             raise ConfigError(f"frspec restricts chain drafts only; {name} drafted a tree")
         if rows := restricted.bypassed(draft):

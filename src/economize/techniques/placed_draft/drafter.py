@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -41,7 +41,7 @@ class PlacedDraftModelDrafter(DraftModelDrafter):
         super().__init__(runner, vocab_size)
         self.home = torch.device(home)
         self.draft_device = runner.adapter.device
-        self._pool: Any = None
+        self._pool: tuple[int, int] | None = None  # torch.cuda.graph_pool_handle()
 
     @contextlib.contextmanager
     def _on_draft(self) -> Iterator[None]:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import weakref
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -48,7 +48,7 @@ class PardDrafter(DraftModelDrafter):
         super().__init__(runner, vocab_size)
         self.mask_token_id = mask_token_id
         self.max_parallel = max_parallel
-        self._parallel_graph: Callable[..., Any] | None = None
+        self._parallel_graph: Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor] | None = None
 
     def begin(self, runner: LayerRunner, cache: KVCache, batch_size: int) -> None:
         previous = self._cache
@@ -81,7 +81,13 @@ class PardDrafter(DraftModelDrafter):
         if graphed:
             if self._parallel_graph is None:
                 run = weakref.WeakMethod(self._run)  # as GraphedStep holds the step: no reference cycle
-                self._parallel_graph = self._step_fn.graph(lambda *inputs: run()(*inputs))  # type: ignore[misc]
+
+                def parallel(tokens: torch.Tensor, positions: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
+                    step = run()
+                    assert step is not None  # the graph lives on the drafter, so the drafter is alive
+                    return step(tokens, positions, valid)
+
+                self._parallel_graph = self._step_fn.graph(parallel)
             logits = self._parallel_graph(tokens, positions, valid)
             logits = logits.gather(1, index.to(logits.device)[..., None].expand(-1, -1, logits.shape[-1]))
         else:  # e.g. the prompt: the logits of the last committed token and of the masks only

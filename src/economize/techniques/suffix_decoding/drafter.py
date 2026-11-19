@@ -58,6 +58,7 @@ class SuffixDecodingDrafter(RetrievalDrafter):
         out: list[Proposal | None] = [None] * len(contexts)
         for b in rows:
             seq, budget = contexts[b], budgets[b]
+            assert seq is not None  # rows hold the rows with a context
             cap = budget if c.max_spec_tokens is None else c.max_spec_tokens
             if not tree:
                 cap = min(cap, budget)
@@ -74,13 +75,18 @@ class SuffixDecodingDrafter(RetrievalDrafter):
     def _global_matches(self, contexts: Sequence[np.ndarray | None], rows: list[int]
                         ) -> dict[int, tuple[np.ndarray, np.ndarray]]:
         """The suffix ranges of every match length ``1..`` of every row's context (cut at the first miss)."""
-        patterns, owners = [], []
+        index = self.index
+        assert index is not None  # called only with a global datastore
+        patterns: list[np.ndarray] = []
+        owners: list[int] = []
         for b in rows:
-            ctx = contexts[b][-self.global_depth :]
+            context = contexts[b]
+            assert context is not None  # rows hold the rows with a context
+            ctx = context[-self.global_depth :]
             for m in range(1, len(ctx)):
                 patterns.append(ctx[-m:])
                 owners.append(b)
-        lo, hi = self.index.find(patterns)
+        lo, hi = index.find(patterns)
         owners_array = np.asarray(owners)
         out = {}
         for b in rows:
@@ -95,6 +101,8 @@ class SuffixDecodingDrafter(RetrievalDrafter):
         return out
 
     def _global(self, lo: np.ndarray, hi: np.ndarray, cap: int, budget: int, tree: bool) -> Speculation:
+        index = self.index
+        assert index is not None  # called only with a global datastore
         counts = hi - lo
         widths = _widths(counts, self.global_depth, budget)
         tables: dict[int, TableNodes] = {}
@@ -102,11 +110,11 @@ class SuffixDecodingDrafter(RetrievalDrafter):
         def expand(m: int, n: int, d: int) -> Speculation:
             count, start = int(counts[m - 1]), int(lo[m - 1])
             if count > suffix_index.GATHER_LIMIT:
-                return speculate(IndexNodes(self.index, m), start, start + count, n, d, self.config.min_token_prob,
+                return speculate(IndexNodes(index, m), start, start + count, n, d, self.config.min_token_prob,
                                  tree)
             if count not in tables:
-                continuations = self.index.positions(start, start + count) + m
-                tables[count] = TableNodes.of(self.index.windows(continuations, widths[count]))
+                continuations = index.positions(start, start + count) + m
+                tables[count] = TableNodes.of(index.windows(continuations, widths[count]))
             return speculate(tables[count], 0, count, n, d, self.config.min_token_prob, tree)
 
         return self._best(counts, cap, budget, self.global_depth, expand)

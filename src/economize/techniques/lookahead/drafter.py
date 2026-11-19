@@ -135,14 +135,14 @@ class LookaheadDrafter(Drafter):
             rows.append((guess_tokens + window_tokens, guess_parents + window_parents))
             candidates.append(len(guess_tokens))
             outputs.append(last)
-        lengths = [len(tokens) for tokens, _ in rows]
+        lengths = [len(row) for row, _ in rows]
         width = max(lengths, default=0)
         if self.graphed:
             width = -(-width // WIDTH_STEP) * WIDTH_STEP
-        tokens = device_tensor([t + [-1] * (width - len(t)) for t, _ in rows], request.device)
+        drafted = device_tensor([t + [-1] * (width - len(t)) for t, _ in rows], request.device)
         parents = device_tensor([p + [-1] * (width - len(p)) for _, p in rows], request.device)
         self._outputs = outputs
-        return Draft(tokens, lengths, parents, None, candidates=candidates)
+        return Draft(drafted, lengths, parents, None, candidates=candidates)
 
     def _read(self, request: DraftRequest) -> list[tuple[list[int], int]]:
         """Every row's committed tokens that :meth:`propose` needs, with the position of the first one, in one host
