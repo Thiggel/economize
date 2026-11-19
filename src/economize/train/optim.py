@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import Any
 
 import torch
 
@@ -27,7 +26,7 @@ def build_optimizer(
     group is stored as ``"initial_lr"``. ``offload`` keeps the optimizer state in CPU memory
     with float32 master weights (:class:`~economize.train.OffloadedAdamW`), which parameters stored in a low
     precision (``copy_dtype="model"``) need."""
-    param_groups: list[dict[str, Any]] = []
+    param_groups: list[dict[str, object]] = []
     for group in groups:
         if group.kind == "backbone":
             lr = settings.lr_backbone if settings.lr_backbone is not None else group.lr
@@ -40,8 +39,7 @@ def build_optimizer(
         )
     if offload:
         return OffloadedAdamW(param_groups, betas=settings.betas)
-    low = sorted({str(p.dtype) for g in param_groups for p in g["params"] if p.is_floating_point()
-                  and p.dtype.itemsize < 4})
+    low = sorted({str(p.dtype) for g in groups for p in g.params if p.is_floating_point() and p.dtype.itemsize < 4})
     if low:
         logger.warning("training %s parameters without float32 master weights loses small updates to rounding: "
                        "set offload_optimizer=True", "/".join(low))

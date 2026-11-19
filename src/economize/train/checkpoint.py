@@ -36,7 +36,7 @@ import re
 import shutil
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import torch
@@ -45,6 +45,8 @@ from torch import nn
 from ..errors import CheckpointFormatError, ConfigError
 
 if TYPE_CHECKING:
+    from transformers import PreTrainedModel
+
     from ..core.model import EfficientModel
 
 __all__ = [
@@ -90,7 +92,7 @@ def save_trained(
     params: Iterable[nn.Parameter],
     path: str | Path,
     *,
-    meta: Mapping[str, Any] | None = None,
+    meta: Mapping[str, object] | None = None,
     save_base: bool = False,
     owned: nn.Module | None = None,
 ) -> Path:
@@ -116,7 +118,7 @@ def save_trained(
     if base:
         save_file(base, str(path / BASE_FILE))
         if save_base and hasattr(model.base_model, "save_pretrained"):
-            cast(Any, model.base_model).save_pretrained(path / "base")  # an HF PreTrainedModel
+            cast("PreTrainedModel", model.base_model).save_pretrained(path / "base")  # an HF or PEFT model
             _save_tokenizer(getattr(model.base_model, "name_or_path", ""), path / "base")
     state = {} if owned is None else owned.state_dict()
     if state:
@@ -224,8 +226,8 @@ class RunCheckpointer:
         step: int,
         *,
         save_weights: Callable[[Path], None],
-        shared_state: Callable[[], Mapping[str, Any]],
-        own_state: Mapping[str, Any],
+        shared_state: Callable[[], Mapping[str, object]],
+        own_state: Mapping[str, object],
     ) -> Path | None:
         """Write ``checkpoint-<step>``: the weights and the shared state (process 0, the state file last, so that its
         presence marks a complete checkpoint) and, in a multi-process run, every process's ``own_state``; then delete
@@ -266,7 +268,7 @@ class RunCheckpointer:
         for _, path in found[: max(len(found) - self.keep, 0)]:
             shutil.rmtree(path, ignore_errors=True)
 
-    def save_result(self, result: Mapping[str, Any]) -> None:
+    def save_result(self, result: Mapping[str, object]) -> None:
         """Write the result of the finished run (process 0), after the final weights."""
         if self.output_dir is not None and self.main:
             save_atomic(dict(result), self.output_dir / RESULT_FILE)
@@ -290,7 +292,7 @@ class RunCheckpointer:
             logger.info("no checkpoint in %s, starting from scratch", self.output_dir)
         return path
 
-    def load_state(self, path: str | Path) -> dict[str, Any]:
+    def load_state(self, path: str | Path) -> dict[str, object]:
         """The trainer state of checkpoint ``path``, with this process's own random and data state where the
         checkpoint has one."""
         path = Path(path)
@@ -313,7 +315,7 @@ class RunCheckpointer:
         trained = json.loads((final / CONFIG_FILE).read_text()).get("train", {})
         return isinstance(trained.get("step"), int) and trained["step"] >= steps
 
-    def load_result(self) -> dict[str, Any]:
+    def load_result(self) -> dict[str, object]:
         """The result of the finished run (empty for a run finished by an economize version that wrote none)."""
         if self.output_dir is None or not (self.output_dir / RESULT_FILE).is_file():
             return {}
@@ -326,7 +328,7 @@ def _numpy_array_globals() -> tuple[Callable[..., object], ...]:
     return (reconstruct, np.ndarray, np.dtype, type(np.dtype(np.uint32)))
 
 
-def load_safe(path: Path) -> dict[str, Any]:
+def load_safe(path: Path) -> dict[str, object]:
     """A state file of :func:`save_atomic`, read with ``weights_only=True`` (tensors, plain values and numpy arrays).
 
     Raises:
@@ -346,7 +348,7 @@ def load_safe(path: Path) -> dict[str, Any]:
     return state
 
 
-def save_atomic(obj: Any, path: Path) -> None:
+def save_atomic(obj: object, path: Path) -> None:
     """``torch.save`` to a temporary file renamed into place, so that an interrupted write leaves no partial file
     (:func:`latest_checkpoint` takes any checkpoint with a state file as complete)."""
     partial = path.with_name(path.name + ".tmp")

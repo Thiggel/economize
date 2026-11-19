@@ -4,9 +4,12 @@ GPU for the moments."""
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from typing import Any
+from typing import TYPE_CHECKING, overload
 
 import torch
+
+if TYPE_CHECKING:
+    from torch.optim.optimizer import ParamsT, StateDict
 
 __all__ = ["OffloadedAdamW"]
 
@@ -29,7 +32,7 @@ class OffloadedAdamW(torch.optim.Optimizer):
     first).
     """
 
-    def __init__(self, params: Iterable[Any], *, betas: tuple[float, float] = (0.9, 0.999), **defaults: Any) -> None:
+    def __init__(self, params: ParamsT, *, betas: tuple[float, float] = (0.9, 0.999), **defaults: float) -> None:
         super().__init__(params, {"betas": betas, "lr": 1e-3, "weight_decay": 1e-2, "eps": 1e-8, **defaults})
         pin = torch.cuda.is_available()
         cpu_groups = []
@@ -49,8 +52,14 @@ class OffloadedAdamW(torch.optim.Optimizer):
         for param, master in self._pairs():
             master.copy_(param.detach())
 
+    @overload
+    def step(self, closure: None = None) -> None: ...
+
+    @overload
+    def step(self, closure: Callable[[], float]) -> float: ...
+
     @torch.no_grad()
-    def step(self, closure: Callable[[], Any] | None = None) -> Any:
+    def step(self, closure: Callable[[], float] | None = None) -> float | None:
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -75,10 +84,10 @@ class OffloadedAdamW(torch.optim.Optimizer):
                 param.copy_(master, non_blocking=True)
         return loss
 
-    def state_dict(self) -> dict[str, Any]:
+    def state_dict(self) -> StateDict:
         return {"adamw": self.inner.state_dict(), "master": [master.detach().clone() for _, master in self._pairs()]}
 
-    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: StateDict) -> None:
         self.inner.load_state_dict(state_dict["adamw"])
         for group, inner in zip(self.param_groups, self.inner.param_groups):
             group.update({key: inner[key] for key in _SYNCED if key in inner})

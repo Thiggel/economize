@@ -3,7 +3,8 @@ wrappers such as DDP) call."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, TypedDict, cast
 
 import torch
 from torch import nn
@@ -15,9 +16,29 @@ from .objective import Batch, Objective, ParamGroup, trainable
 from .teacher import TeacherHead, teacher_pass
 
 if TYPE_CHECKING:
+    from transformers import PreTrainedModel
+    from typing_extensions import Unpack
+
     from ..core.model import EfficientModel
 
-__all__ = ["ObjectiveModule"]
+__all__ = ["ObjectiveModule", "ObjectiveModuleOutput"]
+
+
+class _CheckpointingOptions(TypedDict, total=False):
+    """The keywords of ``PreTrainedModel.gradient_checkpointing_enable``."""
+
+    gradient_checkpointing_kwargs: dict[str, object] | None
+    every_n_layers: int
+    offload: bool
+
+
+class ObjectiveModuleOutput(TypedDict):
+    """What :meth:`ObjectiveModule.forward` returns."""
+
+    #: The loss of the batch (with gradients).
+    loss: torch.Tensor
+    #: The objective's metrics (:attr:`~economize.train.ObjectiveOutput.metrics`).
+    metrics: Mapping[str, torch.Tensor | float]
 
 
 class ObjectiveModule(nn.Module):
@@ -87,7 +108,7 @@ class ObjectiveModule(nn.Module):
         loss_mask: torch.Tensor | None = None,
         labels: torch.Tensor | None = None,
         return_loss: bool = True,
-    ) -> dict[str, Any]:
+    ) -> ObjectiveModuleOutput:
         """Teacher pass and loss of one batch. ``labels`` (``-100`` = ignored, Hugging Face convention) stand in
         for ``loss_mask`` when it is not given; their values are otherwise unused (the targets are the inputs)."""
         if loss_mask is None and labels is not None:
@@ -102,7 +123,7 @@ class ObjectiveModule(nn.Module):
         return {"loss": output.loss, "metrics": output.metrics}
 
     @property
-    def hf_device_map(self) -> dict[str, Any]:
+    def hf_device_map(self) -> dict[str, int | str | torch.device]:
         """The base model's ``hf_device_map`` (``transformers.Trainer`` leaves models spread over devices in place).
         Absent, as on the base model, when the model was loaded without a device map: ``accelerate`` tests it with
         ``hasattr``."""
@@ -111,9 +132,10 @@ class ObjectiveModule(nn.Module):
             raise AttributeError("hf_device_map")
         return device_map
 
-    def gradient_checkpointing_enable(self, **kwargs: Any) -> None:
+    def gradient_checkpointing_enable(self, **kwargs: Unpack[_CheckpointingOptions]) -> None:
         """Enable gradient checkpointing in the base model (``TrainingArguments(gradient_checkpointing=True)``)."""
-        cast(Any, self.model.base_model).gradient_checkpointing_enable(**kwargs)  # an HF PreTrainedModel
+        base = cast("PreTrainedModel", self.model.base_model)  # the Trainer enables it on HF causal LMs only
+        base.gradient_checkpointing_enable(**kwargs)
 
     def close(self) -> None:
         """Call :meth:`Objective.teardown`, restore the parameters' ``requires_grad`` flags and the model's modes."""
