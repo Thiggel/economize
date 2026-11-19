@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from ...core.metadata import Saving
 from ...core.technique import Capability, Technique
 from ...errors import ConfigError, UnsupportedModelError
 from ...runtime import KVCache
 from .wrapper import CacheWrapper, KVStats
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
+    from ...core.config import TechniqueConfig
+    from ...decoding import DecodeResult
 
 __all__ = ["KVCacheTechnique", "check_positional", "layer_indices"]
 
@@ -32,7 +37,7 @@ class KVCacheTechnique(Technique, ABC):
     #: tensor carries one attachment, so a technique that attaches its own (``quest``) refuses the others.
     packed_format: ClassVar[str | None] = None
 
-    def __init__(self, config: Any, adapter: Any) -> None:
+    def __init__(self, config: TechniqueConfig, adapter: ArchAdapter) -> None:
         super().__init__(config, adapter)
         self.last_stats = KVStats()
 
@@ -66,19 +71,19 @@ class KVCacheTechnique(Technique, ABC):
             "kv_bytes_simulated": float(simulated),
         }
 
-    def cost_summary(self, result: Any, row: int | None = None) -> dict[str, Any]:
+    def cost_summary(self, result: DecodeResult, row: int | None = None) -> dict[str, object]:
         """``result.cost_summary()`` of a :class:`~economize.decoding.DecodeResult` of the last generation together
         with this technique's memory statistics of row ``row`` of its batch (default: the result's own row)."""
         return {**result.cost_summary(), **self.kv_stats(getattr(result, "row", 0) if row is None else row)}
 
 
-def check_positional(adapter: Any, technique: str) -> None:
+def check_positional(adapter: ArchAdapter | None, technique: str) -> None:
     """Raise :class:`~economize.UnsupportedModelError` for models with recurrent layers (hybrid caches)."""
     if adapter is not None and getattr(adapter, "cache_kind", "positional") != "positional":
         raise UnsupportedModelError(f"{technique} needs attention layers only; this model keeps recurrent states")
 
 
-def layer_indices(layers: tuple[int, ...], adapter: Any) -> frozenset[int] | None:
+def layer_indices(layers: tuple[int, ...], adapter: ArchAdapter | None) -> frozenset[int] | None:
     """Cache indices (0-based ``layer_idx``) of the 1-indexed ``layers``, or ``None`` for every layer."""
     if not layers:
         return None

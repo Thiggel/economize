@@ -27,11 +27,15 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING
 
 from ...arch.config import config_value, layer_overrides, set_layer_overrides, text_config
 from ...errors import UnsupportedModelError
 from .layout import DECODER_LAYOUTS, DecoderLayout, LayerShape
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
+    from ...arch.config import HFConfig
 
 __all__ = ["Gemma4Layout"]
 
@@ -51,7 +55,7 @@ class Gemma4Layout(DecoderLayout):
     optional_maps: frozenset[str] = frozenset({"self_attn.v_proj"})
     residual_refusal: str | None = _RESIDUAL_REFUSAL
 
-    def check(self, adapter: Any, technique: str) -> None:
+    def check(self, adapter: ArchAdapter, technique: str) -> None:
         """Refuse models with KV-sharing layers.
 
         Raises:
@@ -65,7 +69,7 @@ class Gemma4Layout(DecoderLayout):
                 "to remove"
             )
 
-    def write_widths(self, config: Any, shapes: Sequence[LayerShape]) -> bool:
+    def write_widths(self, config: HFConfig, shapes: Sequence[LayerShape]) -> bool:
         """Write the per-layer widths into the text config of ``config``, where it can describe them.
 
         ``num_attention_heads`` and ``intermediate_size`` are global, so the config is changed only when all layers

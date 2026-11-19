@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, ClassVar, Protocol, TypeVar, runtime_checkable
 
 import torch
 from torch import nn
@@ -78,6 +78,9 @@ def drafting_class(config: TechniqueConfig, owner: str, role: str, *, wrappable:
     return cls
 
 
+W = TypeVar("W", bound="WrappingConfig")
+
+
 @dataclasses.dataclass(frozen=True)
 class WrappingConfig(TechniqueConfig):
     """A technique configuration with fields that hold other technique configurations.
@@ -112,18 +115,19 @@ class WrappingConfig(TechniqueConfig):
         for config in self.nested().values():
             config.validate(adapter)
 
-    def to_dict(self) -> dict[str, Any]:
-        data = super().to_dict()
+    def to_dict(self) -> dict[str, object]:
+        data: dict[str, object] = super().to_dict()
         for name, config in self.nested().items():
             data[name] = nested_dict(config)
         return data
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Any:
+    def from_dict(cls: type[W], data: dict[str, object]) -> W:
         data = dict(data)
         for name in cls.nested_fields:
-            if isinstance(data.get(name), dict):
-                data[name] = nested_config(data[name])
+            value = data.get(name)
+            if isinstance(value, dict):
+                data[name] = nested_config(value)
         return super().from_dict(data)
 
 

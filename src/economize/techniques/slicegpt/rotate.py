@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Hashable, Sequence
-from typing import Any, cast
+from typing import TYPE_CHECKING, cast
 
 import torch
 from torch import Tensor, nn
@@ -28,6 +28,10 @@ from .._structured.layout import DecoderLayout
 from .._structured.surgery import fold_rotate_inputs, rotate_embedding, rotate_outputs, unit_norm
 from .pca import CovarianceAccumulator
 from .shortcut import install_shortcuts, set_shortcuts
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
+    from ...arch.config import HFConfig
 
 __all__ = ["RotationStore", "rotate_global", "rotate_per_block"]
 
@@ -73,17 +77,17 @@ def _fold(layer: nn.Module, layout: DecoderLayout, norm: str, inputs: Sequence[s
     unit_norm(module, width, original, scale_eps=scale_eps)
 
 
-def _fold_head(adapter: Any, q: Tensor, original: int, *, scale_eps: bool) -> None:
+def _fold_head(adapter: ArchAdapter, q: Tensor, original: int, *, scale_eps: bool) -> None:
     """Fold the final norm into the LM head with rotation ``q`` and untie the head from the embedding."""
-    norm, head = adapter.final_norm, adapter.lm_head
+    norm, head = adapter.final_norm, cast(nn.Linear, adapter.lm_head)
     width = int(q.shape[1])
-    fold_rotate_inputs(head, norm.weight.detach(), q, math.sqrt(original / width))
+    fold_rotate_inputs(head, cast(Tensor, norm.weight).detach(), q, math.sqrt(original / width))
     unit_norm(norm, width, original, scale_eps=scale_eps)
     for config in _configs(adapter):
         config.tie_word_embeddings = False
 
 
-def _configs(adapter: Any) -> list[Any]:
+def _configs(adapter: ArchAdapter) -> list[HFConfig]:
     """The adapter's config and the model's config, each once (they are usually the same object)."""
     found = {id(c): c for c in (adapter.config, getattr(adapter.model, "config", None)) if c is not None}
     return list(found.values())
@@ -92,7 +96,7 @@ def _configs(adapter: Any) -> list[Any]:
 class _Layers:
     """Runs single decoder layers on calibration states, each on its own device (``device_map``)."""
 
-    def __init__(self, adapter: Any, batches: Sequence[Tensor], offload: bool) -> None:
+    def __init__(self, adapter: ArchAdapter, batches: Sequence[Tensor], offload: bool) -> None:
         self.adapter, self.offload = adapter, offload
         self.inputs, self._calls = capture_inputs(adapter, batches, offload=offload)
         self._types = layer_types(adapter)
@@ -118,7 +122,7 @@ def _rotated(states: Sequence[Tensor], q: Tensor) -> list[Tensor]:
 
 
 @torch.no_grad()
-def rotate_per_block(adapter: Any, layout: DecoderLayout, store: RotationStore, width: int, *, slice_head: bool,
+def rotate_per_block(adapter: ArchAdapter, layout: DecoderLayout, store: RotationStore, width: int, *, slice_head: bool,
                      batches: Sequence[Tensor] | None = None, offload: bool = False) -> None:
     """Rotate and slice every residual point with its own basis (the paper's method).
 
@@ -139,7 +143,7 @@ def rotate_per_block(adapter: Any, layout: DecoderLayout, store: RotationStore, 
     layers = _Layers(adapter, batches, offload) if store.fitting and batches is not None else None
     states: list[Tensor] = layers.inputs if layers is not None else []
     q_in = store.basis(0, lambda: _covariance(states, original))
-    rotate_embedding(adapter.embed_tokens, q_in)
+    rotate_embedding(cast(nn.Embedding, adapter.embed_tokens), q_in)
     states = _rotated(states, q_in)
     for index in range(1, num_layers + 1):
         layer = adapter.layer(index)
@@ -180,7 +184,7 @@ def rotate_per_block(adapter: Any, layout: DecoderLayout, store: RotationStore, 
 
 
 @torch.no_grad()
-def rotate_global(adapter: Any, layout: DecoderLayout, store: RotationStore, *,
+def rotate_global(adapter: ArchAdapter, layout: DecoderLayout, store: RotationStore, *,
                   batches: Sequence[Tensor] | None = None) -> None:
     """Rotate and slice the whole residual stream with one basis (no shortcut matrices).
 
@@ -203,8 +207,8 @@ def rotate_global(adapter: Any, layout: DecoderLayout, store: RotationStore, *,
         assert batches is not None
         accumulator = CovarianceAccumulator(original, normalize=True)
 
-        def hook(_module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
-            accumulator.update(args[0] if args else kwargs["hidden_states"])
+        def hook(_module: nn.Module, args: tuple[object, ...], kwargs: dict[str, object]) -> None:
+            accumulator.update(cast(Tensor, args[0] if args else kwargs["hidden_states"]))
 
         modules = [adapter.final_norm]
         for layer in adapter.layers:
@@ -219,7 +223,7 @@ def rotate_global(adapter: Any, layout: DecoderLayout, store: RotationStore, *,
         return accumulator.basis()
 
     q = store.basis(0, fit)
-    rotate_embedding(adapter.embed_tokens, q)
+    rotate_embedding(cast(nn.Embedding, adapter.embed_tokens), q)
     for layer in adapter.layers:
         _fold(layer, layout, layout.attn_norm, layout.attn_inputs, q, original, scale_eps=False)
         rotate_outputs(layout.linear(layer, layout.attn_output), q)

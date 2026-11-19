@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from torch import Tensor, nn
 
@@ -16,7 +16,7 @@ from .._weights.technique import CalibratedWeightTransform
 from ..layer_skip.policy import SkipLayers
 from .config import DepthPruneConfig, PruneConfig
 from .depth import remove_layers
-from .methods import PRUNE_METHODS
+from .methods import PRUNE_METHODS, Pruner
 from .model import prune_model, select_depth_layers
 from .semi_kernels import SEMI_STRUCTURED_KERNELS
 from .semi_structured import storage_reason
@@ -40,10 +40,10 @@ class PruneTechnique(CalibratedWeightTransform):
     capabilities: ClassVar[Capability] = Capability.WEIGHTS
     order: ClassVar[int] = 10
     draft_copies: ClassVar[DraftCopies | None] = DraftCopies.OWNED
-    methods: ClassVar[Registry[Any]] = PRUNE_METHODS
+    methods: ClassVar[Registry[type[Pruner]]] = PRUNE_METHODS
     config: PruneConfig
 
-    def transform(self, adapter: Any, batches: Sequence[Tensor] | None) -> dict[str, Any]:
+    def transform(self, adapter: ArchAdapter, batches: Sequence[Tensor] | None) -> dict[str, object]:
         return prune_model(adapter, self.config, batches)
 
     @classmethod
@@ -113,7 +113,7 @@ class DepthPruneTechnique(CalibratedWeightTransform):
         """The criterion reads calibration data unless the config names the layers to remove."""
         return not self.config.layers
 
-    def transform(self, adapter: Any, batches: Sequence[Tensor] | None) -> dict[str, Any]:
+    def transform(self, adapter: ArchAdapter, batches: Sequence[Tensor] | None) -> dict[str, object]:
         removed = self._choose(adapter, batches)
         remove_layers(adapter, removed)
         return {"method": self.config.method, "removed_layers": removed, "num_layers": adapter.num_layers}
@@ -134,7 +134,7 @@ class DepthPruneTechnique(CalibratedWeightTransform):
     def draft_skips(self) -> frozenset[int]:
         return frozenset(self.config.layers) if self._draft_skip is not None else frozenset()
 
-    def _choose(self, adapter: Any, batches: Sequence[Tensor] | None) -> list[int]:
+    def _choose(self, adapter: ArchAdapter, batches: Sequence[Tensor] | None) -> list[int]:
         """The configured layers, else the criterion's choice on ``batches``, which is recorded in the config so that
         a saved checkpoint drops the same layers without calibration."""
         if not self.config.layers:

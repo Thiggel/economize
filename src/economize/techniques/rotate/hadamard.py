@@ -13,7 +13,7 @@ Hugging Face path runs ``x @ H`` with.
 from __future__ import annotations
 
 import math
-from typing import Any, ClassVar
+from typing import ClassVar, Protocol
 
 import torch
 from torch import Tensor
@@ -117,10 +117,22 @@ class TorchHadamardKernel(HadamardKernel):
         return (work * (1.0 / math.sqrt(block))).view(shape).to(x.dtype)
 
 
+class _DaoModule(Protocol):
+    """The ``fast_hadamard_transform`` package, as far as :class:`DaoHadamardKernel` calls it."""
+
+    def hadamard_transform(self, x: Tensor, scale: float = 1.0) -> Tensor: ...
+
+
+class _HadacoreOps(Protocol):
+    """vLLM's ``_custom_ops`` module, as far as :class:`HadacoreHadamardKernel` calls it."""
+
+    def hadacore_transform(self, x: Tensor, inplace: bool = True) -> Tensor: ...
+
+
 class DaoHadamardKernel(HadamardKernel):
     """Dao AI Lab's CUDA kernel (``pip install fast-hadamard-transform``), imported on first use."""
 
-    module: ClassVar[Any] = None
+    module: ClassVar[_DaoModule | None] = None
 
     def available(self, x: Tensor, block: int) -> bool:
         if not x.is_cuda:
@@ -138,6 +150,7 @@ class DaoHadamardKernel(HadamardKernel):
             raise ConfigError("the fast_hadamard_transform kernel needs a CUDA tensor and the fast-hadamard-transform "
                               "package")
         shape = x.shape
+        assert DaoHadamardKernel.module is not None  # set by available()
         out = DaoHadamardKernel.module.hadamard_transform(x.reshape(-1, block), scale=1.0 / math.sqrt(block))
         return out.view(shape)
 
@@ -150,7 +163,7 @@ class HadacoreHadamardKernel(HadamardKernel):
     32768 are refused (vLLM 0.30), and ``inplace=False`` returns garbage, so the kernel runs in place on a copy.
     """
 
-    module: ClassVar[Any] = None
+    module: ClassVar[_HadacoreOps | None] = None
     blocks: ClassVar[tuple[int, int]] = (64, 32768)
 
     def available(self, x: Tensor, block: int) -> bool:
@@ -172,6 +185,7 @@ class HadacoreHadamardKernel(HadamardKernel):
             raise ConfigError(f"the hadacore kernel needs a CUDA fp16 / bf16 tensor, a block in {self.blocks} and "
                               "vLLM's compiled ops")
         out = x.reshape(-1, block).clone()
+        assert HadacoreHadamardKernel.module is not None  # set by available()
         HadacoreHadamardKernel.module.hadacore_transform(out, inplace=True)
         return out.view(x.shape)
 

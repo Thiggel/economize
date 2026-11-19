@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 from torch import Tensor, nn
@@ -30,7 +30,7 @@ _BUFFERS = ("v_bits", "u_bits", "g", "l", "h")
 @torch.no_grad()
 def littlebit_model(
     adapter: ArchAdapter, config: LittleBitConfig, batches: Sequence[Tensor] | None = None
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Replace the selected linear maps by :class:`LittleBitLinear` in place and return a summary.
 
     The rank of each map is the largest that fits ``config.bpw`` (signs and scales counted, Appendix D of the
@@ -46,7 +46,7 @@ def littlebit_model(
     layers = resolve_layers(config.layers, adapter.num_layers)
     counts = {"modules": 0, "kept_dense": 0, "weights": 0, "bits": 0}
     ranks: dict[str, int] = {}
-    losses: dict[int, dict[str, Any]] = {}
+    losses: dict[int, Mapping[str, object]] = {}
     transaction = WeightTransaction()
 
     def compress(index: int, layer: nn.Module, step: CalibrationStep | None) -> None:
@@ -128,7 +128,7 @@ def load_factors(path: str | Path) -> dict[str, tuple[list[int], dict[str, Tenso
         }
 
 
-def _load_model(adapter: ArchAdapter, config: LittleBitConfig) -> dict[str, Any]:
+def _load_model(adapter: ArchAdapter, config: LittleBitConfig) -> dict[str, object]:
     stored = load_factors(config.factors)
     counts = {"modules": 0, "kept_dense": 0, "weights": 0, "bits": 0}
     ranks: dict[str, int] = {}
@@ -147,6 +147,7 @@ def _load_model(adapter: ArchAdapter, config: LittleBitConfig) -> dict[str, Any]
             for buf, value in buffers.items():
                 getattr(module, buf).copy_(value)
             if original.bias is not None:
+                assert module.bias is not None  # built with a bias above
                 module.bias.copy_(original.bias)
             transaction.replace_module(layer, name, module)
             ranks[key] = rank

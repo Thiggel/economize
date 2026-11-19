@@ -28,7 +28,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import TypeVar
 
 import torch
 from torch import nn
@@ -36,7 +36,7 @@ from torch import nn
 from ...errors import IncompatibleTechniquesError
 from ...modules.kv_cache import write_slots  # re-exported: KV techniques import it from the package
 from ...modules.slot_gather import gather_slots
-from ...runtime import KVCache, StaticKVCache, current_phase
+from ...runtime import CacheSpec, KVCache, StaticKVCache, current_phase
 
 #: ``(layer_idx, key buffer, committed [B]) -> (stored bytes [B], uncompressed bytes [B])`` of one covered layer.
 LayerBytes = Callable[[int, torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]]
@@ -173,7 +173,7 @@ class CacheWrapper(KVCache):
 
     # ---- delegated state ---------------------------------------------------------------------------------------
     @property
-    def spec(self) -> Any:  # type: ignore[override]
+    def spec(self) -> CacheSpec:  # type: ignore[override]
         return self.inner.spec
 
     @property
@@ -274,11 +274,11 @@ class CacheWrapper(KVCache):
                 self._external = self._in_pass = False
                 self.pass_end()
 
-    def graph_state(self) -> tuple[Any, ...]:
+    def graph_state(self) -> tuple[object, ...]:
         """The inner cache's state followed by :meth:`own_graph_state`."""
         return (*self.inner.graph_state(), self.own_graph_state())
 
-    def own_graph_state(self) -> Any:
+    def own_graph_state(self) -> object:
         """What the tensors this wrapper hands to layers depend on beyond fixed addresses (default: nothing). It may
         change only in :meth:`pass_begin` and :meth:`restart`, so a graph recorded under another state is dropped."""
         return None
@@ -301,7 +301,7 @@ class CacheWrapper(KVCache):
         """An exact pass starts; ``frontier[b]`` is row ``b``'s first slot written by the pass (``None`` when the
         row only writes padding). Every slot below it holds committed exact K/V."""
 
-    def pass_scope(self) -> AbstractContextManager[Any]:
+    def pass_scope(self) -> AbstractContextManager[object]:
         """A context entered after :meth:`pass_begin` and exited before :meth:`pass_end`, around the exact pass's
         forward (default: none). It sees an exception raised by the pass."""
         return nullcontext()
@@ -311,7 +311,7 @@ class CacheWrapper(KVCache):
 
     # ---- K/V traffic -------------------------------------------------------------------------------------------
     def update(
-        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: Any, **kwargs: Any
+        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: object, **kwargs: object
     ) -> tuple[torch.Tensor, torch.Tensor]:
         key_states, value_states = self.transform_update(key_states, value_states, layer_idx)
         keys, values = self.inner.update(key_states, value_states, layer_idx, *args, **kwargs)

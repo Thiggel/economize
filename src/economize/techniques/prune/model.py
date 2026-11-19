@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 from torch import Tensor, nn
@@ -29,7 +29,9 @@ __all__ = ["depth_prune_model", "prune_model", "select_depth_layers"]
 
 
 @torch.no_grad()
-def prune_model(adapter: ArchAdapter, config: PruneConfig, batches: Sequence[Tensor] | None = None) -> dict[str, Any]:
+def prune_model(
+    adapter: ArchAdapter, config: PruneConfig, batches: Sequence[Tensor] | None = None
+) -> dict[str, object]:
     """Prune the selected linear maps of every selected layer in place and return a summary.
 
     Calibrated criteria run layer by layer: the dense inputs of a layer's linear maps are observed in one pass

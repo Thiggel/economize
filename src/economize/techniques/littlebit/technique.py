@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from torch import Tensor
 
@@ -12,8 +12,11 @@ from ...core.technique import Capability, register_technique
 from ...registry import Registry
 from .._weights.technique import CalibratedWeightTransform
 from .config import LittleBitConfig
-from .methods import LITTLEBIT_METHODS
+from .methods import LITTLEBIT_METHODS, LittleBitMethod
 from .model import littlebit_model
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
 
 __all__ = ["LittleBitTechnique"]
 
@@ -31,11 +34,11 @@ class LittleBitTechnique(CalibratedWeightTransform):
     info = TechniqueInfo(family=Family.WEIGHT_COMPRESSION, saves=Saving.WEIGHT_MEMORY, lossless=False)
     capabilities: ClassVar[Capability] = Capability.WEIGHTS
     order: ClassVar[int] = 25
-    methods: ClassVar[Registry[Any]] = LITTLEBIT_METHODS
+    methods: ClassVar[Registry[type[LittleBitMethod]]] = LITTLEBIT_METHODS
     config: LittleBitConfig
 
     def needs_calibration(self) -> bool:
         return not self.config.factors and super().needs_calibration()
 
-    def transform(self, adapter: Any, batches: Sequence[Tensor] | None) -> dict[str, Any]:
+    def transform(self, adapter: ArchAdapter, batches: Sequence[Tensor] | None) -> dict[str, object]:
         return littlebit_model(adapter, self.config, batches)
