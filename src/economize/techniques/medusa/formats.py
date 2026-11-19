@@ -18,13 +18,12 @@ import json
 import re
 import warnings
 from pathlib import Path
-from typing import Any
 
 import torch
 
 from ...core.serialization import FORMATS, Checkpoint, CheckpointFormat
 from ...errors import CheckpointFormatError
-from .._drafting import detect_config_dir, load_state_file, require_weights
+from .._drafting import JSONObject, detect_config_dir, load_state_file, require_weights
 from .config import MedusaConfig
 
 __all__ = ["MedusaFormat", "config_from_medusa", "head_layout", "keep_heads", "state_from_medusa"]
@@ -33,7 +32,7 @@ _HEAD_FILES = ("medusa_lm_head.safetensors", "medusa_lm_head.pt")
 _KEY = re.compile(r"^(?:medusa_head\.)?(\d+)\.(\d+)\.(linear\.weight|linear\.bias|weight)$")
 
 
-def config_from_medusa(config: dict[str, Any]) -> MedusaConfig:
+def config_from_medusa(config: JSONObject) -> MedusaConfig:
     """The :class:`MedusaConfig` of a FasterDecoding/Medusa ``config.json``."""
     if "medusa_num_heads" not in config:
         raise CheckpointFormatError("a Medusa config.json needs 'medusa_num_heads'")

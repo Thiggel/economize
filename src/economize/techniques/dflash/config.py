@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from ...core.config import TechniqueConfig
 from ...errors import ConfigError
@@ -18,6 +17,7 @@ from ...validation import (
     check_positive,
     check_unit_interval,
 )
+from .._drafting.formats import JSONObject
 
 if TYPE_CHECKING:
     from ...arch import ArchAdapter
@@ -98,7 +98,7 @@ class DFlashConfig(TechniqueConfig):
     sliding_window: int = 2048
     sliding_causal: bool = True
     rope_theta: float = 1_000_000.0
-    rope_scaling: Mapping[str, Any] | None = None
+    rope_scaling: JSONObject | None = None
     partial_rotary_factor: float = 1.0
     max_position_embeddings: int | None = None
     rms_norm_eps: float = 1e-6

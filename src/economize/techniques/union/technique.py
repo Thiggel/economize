@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar, TypedDict
 
+import torch
 from torch import nn
 
 from ...core.config import TechniqueConfig
@@ -18,6 +19,8 @@ from .config import UnionConfig, UnionMode
 from .drafter import UnionStats
 
 if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
     from ...arch import ArchAdapter
     from ...runtime import LayerRunner
     from .drafter import UnionDrafter
@@ -86,7 +89,16 @@ class UnionTechnique(NotWrappable, WrappingTechnique):
         return text
 
 
-def union_checkpoint(paths: Sequence[str | Path], mode: UnionMode = "union", **fields: Any) -> Checkpoint:
+class _UnionFields(TypedDict, total=False):
+    """The fields of :class:`UnionConfig` that :func:`union_checkpoint` passes through."""
+
+    max_drafts: tuple[int | None, ...] | None
+    max_siblings: int
+    extend: int
+
+
+def union_checkpoint(paths: Sequence[str | Path], mode: UnionMode = "union", **fields: Unpack[_UnionFields]
+                     ) -> Checkpoint:
     """A checkpoint of a union whose members are the drafters saved at ``paths`` (one technique each), in order.
 
     Example::
@@ -104,7 +116,7 @@ def union_checkpoint(paths: Sequence[str | Path], mode: UnionMode = "union", **f
         ConfigError: A checkpoint holds no technique or several.
     """
     members: list[TechniqueConfig] = []
-    state: dict[str, Any] = {}
+    state: dict[str, torch.Tensor] = {}
     base_model = None
     for i, path in enumerate(paths):
         checkpoint = read_checkpoint(path)

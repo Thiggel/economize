@@ -24,12 +24,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 import torch
 
 from ...core.serialization import FORMATS, Checkpoint, CheckpointFormat
 from ...errors import CheckpointFormatError
+from .._draft_layer.formats import RopeFields
 from .._drafting import JSONObject, detect_config_dir, load_state_file, require_weights
 from ..eagle3.formats import _rope, base_model_of, flat_config
 from .config import DFLASH_LAYER_TYPES, DFlashConfig
@@ -46,7 +46,21 @@ _LAYER_LEAVES = frozenset({
 })
 
 
-def _layer_fields(config: JSONObject, layers: int) -> dict[str, Any]:
+class _LayerFields(RopeFields):
+    """The draft layers' fields of :class:`DFlashConfig`."""
+
+    num_layers: int
+    intermediate_size: int
+    num_heads: int
+    num_kv_heads: int
+    head_dim: int
+    layer_types: tuple[str, ...] | None
+    sliding_window: int
+    attention_bias: bool
+    rms_norm_eps: float
+
+
+def _layer_fields(config: JSONObject, layers: int) -> _LayerFields:
     """The draft layers' fields of :class:`DFlashConfig` from a flat ``config.json``."""
     hidden = int(config["hidden_size"])
     heads = int(config["num_attention_heads"])

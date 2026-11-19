@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar, TypeVar
 
 from ...core.config import TechniqueConfig, nested_config, nested_dict
 from ...errors import ConfigError
@@ -14,6 +14,8 @@ if TYPE_CHECKING:
 
 __all__ = ["DraftWith", "DraftWithConfig"]
 
+
+D = TypeVar("D", bound="DraftWithConfig")
 
 @dataclasses.dataclass(frozen=True)
 class DraftWithConfig(TechniqueConfig):
@@ -35,7 +37,7 @@ class DraftWithConfig(TechniqueConfig):
     techniques: tuple[TechniqueConfig, ...] = ()
 
     def __post_init__(self) -> None:
-        value: Any = self.techniques
+        value: object = self.techniques  # a list or JSON entries before the conversion below
         if isinstance(value, (TechniqueConfig, dict)) or not isinstance(value, Iterable):
             raise ConfigError(f"techniques must be a sequence of technique configurations, got {type(value).__name__}")
         configs = []
@@ -56,14 +58,15 @@ class DraftWithConfig(TechniqueConfig):
         for config in self.techniques:
             config.validate(adapter)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         return {"techniques": [nested_dict(config) for config in self.techniques]}
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Any:
+    def from_dict(cls: type[D], data: dict[str, object]) -> D:
         data = dict(data)
-        if isinstance(data.get("techniques"), list):
-            data["techniques"] = tuple(nested_config(entry) for entry in data["techniques"])
+        entries = data.get("techniques")
+        if isinstance(entries, list):
+            data["techniques"] = tuple(nested_config(entry) for entry in entries)
         return super().from_dict(data)
 
 

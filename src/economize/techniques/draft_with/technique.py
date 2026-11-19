@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 from collections.abc import Iterator, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, TypeVar, cast
 
 import torch
 from torch import nn
@@ -35,8 +35,10 @@ if TYPE_CHECKING:
 
 __all__ = ["DraftWithTechnique"]
 
+T = TypeVar("T", bound=torch.Tensor)
+
 #: What identifies a base tensor and its contents: object, storage, layout and in-place version.
-_Fingerprint = dict[str, tuple[Any, ...]]
+_Fingerprint = dict[str, tuple[int, int, tuple[int, ...], int] | tuple[int, object]]
 
 
 @register_technique
@@ -320,7 +322,7 @@ def _copy_layers(
     that a layer refers to are not copied."""
     layers = list(adapter.layers)
     inside = {id(m) for layer in layers for m in layer.modules()}
-    memo: dict[int, Any] = {id(m): m for m in model.modules() if id(m) not in inside}
+    memo: dict[int, object] = {id(m): m for m in model.modules() if id(m) not in inside}
     for technique in context.techniques if context is not None else ():
         memo.update({id(m): m for m in technique.modules()})
     for obj in (adapter, getattr(model, "config", None)):
@@ -358,13 +360,13 @@ def _strided(tensor: torch.Tensor) -> bool:
     return tensor.layout is torch.strided and tensor.numel() > 0 and type(tensor) in (torch.Tensor, nn.Parameter)
 
 
-def _alias(tensor: torch.Tensor) -> torch.Tensor:
+def _alias(tensor: T) -> T:
     """A new tensor object (a parameter for a parameter) over the storage of ``tensor``, so that replacing its data
     (a kernel's re-layout) leaves the base tensor alone."""
     try:
         if isinstance(tensor, nn.Parameter):
-            return nn.Parameter(tensor.detach(), requires_grad=tensor.requires_grad)
-        return tensor.detach()
+            return cast(T, nn.Parameter(tensor.detach(), requires_grad=tensor.requires_grad))
+        return cast(T, tensor.detach())  # detach keeps the tensor's class
     except (RuntimeError, TypeError):  # a tensor subclass that cannot be wrapped again
         return tensor
 
@@ -377,14 +379,17 @@ def _share_unchanged(layers: Sequence[nn.Module], copies: Sequence[nn.Module]) -
             original = base.get(name)
             if original is None or type(original) is not type(module):
                 continue
-            stores: tuple[tuple[dict[str, Any], dict[str, Any]], ...] = (
-                (module._parameters, original._parameters), (module._buffers, original._buffers)
-            )
-            for store, source in stores:
-                for key, tensor in list(store.items()):
-                    base_tensor = source.get(key)
-                    if base_tensor is not None and _same(tensor, base_tensor):
-                        store[key] = _alias(base_tensor)
+            _share_store(module._parameters, original._parameters)
+            _share_store(module._buffers, original._buffers)
+
+
+def _share_store(store: dict[str, T | None], source: dict[str, T | None]) -> None:
+    """Point every tensor of ``store`` (a module's parameters or buffers) that equals its namesake in ``source`` at
+    the storage of that one."""
+    for key, tensor in list(store.items()):
+        base_tensor = source.get(key)
+        if base_tensor is not None and _same(tensor, base_tensor):
+            store[key] = _alias(base_tensor)
 
 
 def _same(tensor: torch.Tensor | None, base: torch.Tensor | None) -> bool:

@@ -27,12 +27,12 @@ import json
 import re
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
 import torch
 
 from ...core.serialization import FORMATS, Checkpoint, CheckpointFormat
 from ...errors import CheckpointFormatError, ConfigError, UnknownNameError
+from .._drafting import JSONObject
 from .config import VendorMTPConfig
 from .families import MTP_FAMILIES, MTPFamily, family_for
 
@@ -180,12 +180,12 @@ def state_to_vendor(state: Mapping[str, torch.Tensor], family: str, num_layers: 
     return out
 
 
-def _text_config(raw: dict[str, Any]) -> dict[str, Any]:
+def _text_config(raw: JSONObject) -> JSONObject:
     text = raw.get("text_config")
     return {**raw, **text} if isinstance(text, dict) else raw
 
 
-def mtp_settings(raw: dict[str, Any]) -> tuple[str | None, int, int]:
+def mtp_settings(raw: JSONObject) -> tuple[str | None, int, int]:
     """``(family, num_layers, num_modules)`` of a model ``config.json``: ``num_modules`` is ``0`` without MTP,
     ``family`` is ``None`` when no registered :class:`~economize.techniques.vendor_mtp.MTPFamily` lists the model
     type."""
@@ -198,7 +198,7 @@ def mtp_settings(raw: dict[str, Any]) -> tuple[str | None, int, int]:
     return family, int(config.get("num_hidden_layers", 0)), modules
 
 
-def _fp8_block(raw: dict[str, Any]) -> tuple[int, int]:
+def _fp8_block(raw: JSONObject) -> tuple[int, int]:
     quant = _text_config(raw).get("quantization_config") or {}
     block = quant.get("weight_block_size") if isinstance(quant, dict) else None
     return (int(block[0]), int(block[1])) if isinstance(block, list) and len(block) == 2 else FP8_BLOCK
@@ -208,7 +208,7 @@ class VendorMTPFormat(CheckpointFormat):
     """A model directory that ships MTP modules (``config.json`` and safetensors weights)."""
 
     @staticmethod
-    def _config(path: Path) -> dict[str, Any] | None:
+    def _config(path: Path) -> JSONObject | None:
         file = path / "config.json"
         if not path.is_dir() or not file.is_file():
             return None
