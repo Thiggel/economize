@@ -35,10 +35,13 @@ import importlib
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING
 
 from ...errors import ConfigError
 from ...registry import Registry
+
+if TYPE_CHECKING:
+    from vllm.config import VllmConfig
 
 __all__ = [
     "SYNC_PREFIX",
@@ -61,7 +64,7 @@ def _check_path(name: str, value: object) -> None:
         raise ConfigError(f"{name} must be a 'module:Class' import path, got {value!r}")
 
 
-def import_path(path: str) -> Any:
+def import_path(path: str) -> object:
     """The object a ``"module:attribute"`` path names (imports the module)."""
     module, _, attribute = path.partition(":")
     return getattr(importlib.import_module(module), attribute)
@@ -104,7 +107,7 @@ class VllmDrafter:
             _check_path(f"VllmDrafter.proposers[{target!r}]", replacement)
         object.__setattr__(self, "proposers", MappingProxyType(dict(self.proposers)))
 
-    def matches(self, vllm_config: Any) -> bool:
+    def matches(self, vllm_config: VllmConfig | None) -> bool:
         """Whether the speculative config of ``vllm_config`` drafts with an export of this technique (its draft
         architecture, or its config block in the draft model's ``hf_config``)."""
         draft = getattr(getattr(vllm_config, "speculative_config", None), "draft_model_config", None)
@@ -116,7 +119,8 @@ class VllmDrafter:
         architectures = getattr(hf_config, "architectures", None) or ()
         return self.architecture in architectures or hasattr(hf_config, self.config_key)
 
-    def owns_speculators_config(self, config_dict: Mapping[str, Any], pre_trained_config: Mapping[str, Any]) -> bool:
+    def owns_speculators_config(self, config_dict: Mapping[str, object],
+                                pre_trained_config: Mapping[str, object]) -> bool:
         """Whether a ``speculators`` config (vLLM's updater arguments) is an export of this technique."""
         return (config_dict.get(self.config_key) or pre_trained_config.get(self.config_key)) is not None
 
@@ -145,6 +149,6 @@ def drafter_for_architectures(architectures: Iterable[str]) -> VllmDrafter | Non
     return next((drafter for drafter in registered_drafters() if drafter.architecture in names), None)
 
 
-def drafter_of(vllm_config: Any) -> VllmDrafter | None:
+def drafter_of(vllm_config: VllmConfig | None) -> VllmDrafter | None:
     """The registered drafter whose export ``vllm_config`` drafts with, or ``None`` (any other draft model)."""
     return next((drafter for drafter in registered_drafters() if drafter.matches(vllm_config)), None)

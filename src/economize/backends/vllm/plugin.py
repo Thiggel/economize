@@ -31,15 +31,18 @@ Set ``VLLM_PLUGINS`` to a comma-separated allow-list (vLLM's own variable) to ke
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from functools import partial
 from types import ModuleType
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ..._compat import ENGINES, check_engine, private_module, require_engine
 from ..._deprecation import moved_getattr, warn_moved
 from .drafters import VllmDrafter, drafter_of, import_path, registered_drafters
 from .extensions import registered_extensions
+
+if TYPE_CHECKING:
+    from vllm.config import VllmConfig
 
 __all__ = ["TESTED_VLLM", "check_vllm_version", "register"]
 
@@ -62,7 +65,7 @@ def _jump() -> ModuleType:
 __getattr__ = moved_getattr(__name__, ["DRAFTER_ARCHITECTURE"], "economize.backends.vllm.jump", _jump)
 
 
-def is_jump_draft(vllm_config: Any) -> bool:
+def is_jump_draft(vllm_config: VllmConfig | None) -> bool:
     """Deprecated: use ``economize.backends.vllm.drafters.drafter_of(vllm_config)`` (``None`` for other drafts)."""
     warn_moved(f"{__name__}.is_jump_draft", "economize.backends.vllm.drafters.VLLM_DRAFTERS.get('jump').matches")
     from .drafters import VLLM_DRAFTERS
@@ -92,7 +95,7 @@ def _wrap_speculators_updater(algorithm: str) -> None:
     if original is None or getattr(original, _MARK, False):
         return
 
-    def update(config_dict: dict[str, Any], pre_trained_config: dict[str, Any]) -> None:
+    def update(config_dict: dict[str, object], pre_trained_config: dict[str, object]) -> None:
         owner = next((drafter for drafter in registered_drafters() if drafter.speculators_algorithm == algorithm
                       and drafter.owns_speculators_config(config_dict, pre_trained_config)), None)
         if owner is None:
@@ -103,7 +106,7 @@ def _wrap_speculators_updater(algorithm: str) -> None:
         pre_trained_config[key] = config_dict.get(key) or pre_trained_config.get(key)
         ids = config_dict.get("eagle_aux_hidden_state_layer_ids")
         if ids:
-            pre_trained_config["eagle_aux_hidden_state_layer_ids"] = list(ids)
+            pre_trained_config["eagle_aux_hidden_state_layer_ids"] = list(cast("Iterable[int]", ids))
 
     setattr(update, _MARK, True)
     algos.SUPPORTED_SPECULATORS_TYPES[algorithm] = update
@@ -113,19 +116,22 @@ def _hook_constructor(target: str) -> None:
     """Route ``Class(vllm_config, ...)`` (``target`` is ``"module:Class"``) to the replacement that the drafter of
     ``vllm_config`` declares for it, if any."""
     require_engine("vllm")  # the class is private to vLLM
-    cls = import_path(target)
+    # Any: a vLLM class patched in place; mypy types neither super(cls, klass) on a dynamic class nor a new __new__.
+    cls: Any = import_path(target)
     if cls.__dict__.get(_MARK, False):
         return
-    original_new: Callable[..., Any] | None = cls.__dict__.get("__new__")
+    # a class's own ``__new__`` is stored as a staticmethod
+    original_new: staticmethod[..., object] | None = cls.__dict__.get("__new__")
 
-    def new(klass: type, *args: Any, **kwargs: Any) -> Any:
+    def new(klass: type, *args: object, **kwargs: object) -> object:
         if klass is cls:
-            drafter = drafter_of(kwargs.get("vllm_config", args[0] if args else None))
+            vllm_config = kwargs.get("vllm_config", args[0] if args else None)
+            drafter = drafter_of(cast("VllmConfig | None", vllm_config))
             replacement = drafter.proposers.get(target) if drafter is not None else None
             if replacement is not None:
-                klass = import_path(replacement)
+                klass = cast(type, import_path(replacement))
         if original_new is not None:
-            return original_new.__func__(klass, *args, **kwargs)  # type: ignore[attr-defined]
+            return original_new.__func__(klass, *args, **kwargs)
         parent_new = super(cls, klass).__new__
         return object.__new__(klass) if parent_new is object.__new__ else parent_new(klass, *args, **kwargs)
 

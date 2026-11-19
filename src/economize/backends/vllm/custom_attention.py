@@ -25,10 +25,15 @@ Importing this module does not import vLLM.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING
 
 from ...errors import ConfigError
+
+if TYPE_CHECKING:
+    from vllm.v1.attention.backend import AttentionBackend
+    from vllm.v1.worker.utils import AttentionGroup
 
 __all__ = ["DISPATCH_PATH", "DRAFT_ATTRIBUTE", "CustomBackend", "install", "is_draft_builder",
            "mark_draft_builders", "register_custom_backend", "registered_backends", "resolve"]
@@ -98,7 +103,7 @@ def install() -> bool:
     return True
 
 
-def resolve(additional_config: dict[str, Any] | None) -> CustomBackend | None:
+def resolve(additional_config: Mapping[str, object] | None) -> CustomBackend | None:
     """The registered backend that ``additional_config`` selects, or ``None`` when it names none.
 
     Raises:
@@ -127,15 +132,16 @@ def _selected() -> CustomBackend:
     return backend
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> type[AttentionBackend]:
     if name != "EconomizeCustomBackend":
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     from vllm.utils.import_utils import resolve_obj_by_qualname
 
-    return resolve_obj_by_qualname(_selected().path)
+    backend: type[AttentionBackend] = resolve_obj_by_qualname(_selected().path)
+    return backend
 
 
-def mark_draft_builders(attn_groups: Any) -> None:
+def mark_draft_builders(attn_groups: Iterable[Iterable[AttentionGroup]] | None) -> None:
     """Flag every metadata builder of ``attn_groups`` (vLLM's ``list[list[AttentionGroup]]``) as a drafter's."""
     for groups in attn_groups or ():
         for group in groups:
@@ -143,6 +149,6 @@ def mark_draft_builders(attn_groups: Any) -> None:
                 setattr(builder, DRAFT_ATTRIBUTE, True)
 
 
-def is_draft_builder(builder: Any) -> bool:
+def is_draft_builder(builder: object) -> bool:
     """Whether :func:`mark_draft_builders` flagged ``builder``."""
     return bool(getattr(builder, DRAFT_ATTRIBUTE, False))
