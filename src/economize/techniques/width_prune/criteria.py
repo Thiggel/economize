@@ -27,17 +27,18 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import torch
 import torch.nn.functional as F
-from torch import Tensor
+from torch import Tensor, nn
 
 from ...registry import Registry
 from .._structured.layout import DecoderLayout
 from .stats import ChannelMoments, Hook, LayerShape, SampleNorm, layer_shape, run_dense
 
 if TYPE_CHECKING:
+    from ...arch import ArchAdapter
     from .config import WidthPruneConfig
 
 __all__ = ["FLAP", "WIDTH_CRITERIA", "LLMPruner", "Minitron", "Scores", "WidthCriterion", "standardize"]
@@ -90,7 +91,7 @@ class WidthCriterion(ABC):
 
     @abstractmethod
     def score(
-        self, adapter: Any, layout: DecoderLayout, batches: Sequence[Tensor], layers: Sequence[int],
+        self, adapter: ArchAdapter, layout: DecoderLayout, batches: Sequence[Tensor], layers: Sequence[int],
         config: WidthPruneConfig,
     ) -> Scores:
         """Score the units of ``layers`` (1-indexed) of the dense model on the calibration ``batches``.
@@ -115,7 +116,7 @@ def standardize(x: Tensor) -> Tensor:
     return (x - x.mean(-1, keepdim=True)) / torch.where(std > 0, std, torch.ones_like(std))
 
 
-def _shapes(adapter: Any, layout: DecoderLayout, layers: Sequence[int]) -> dict[int, LayerShape]:
+def _shapes(adapter: ArchAdapter, layout: DecoderLayout, layers: Sequence[int]) -> dict[int, LayerShape]:
     return {i: layer_shape(layout, adapter.layer(i)) for i in layers}
 
 
@@ -134,7 +135,7 @@ class FLAP(WidthCriterion):
     adaptive: ClassVar[bool] = True
 
     def score(
-        self, adapter: Any, layout: DecoderLayout, batches: Sequence[Tensor], layers: Sequence[int],
+        self, adapter: ArchAdapter, layout: DecoderLayout, batches: Sequence[Tensor], layers: Sequence[int],
         config: WidthPruneConfig,
     ) -> Scores:
         shapes = _shapes(adapter, layout, layers)
@@ -166,15 +167,15 @@ _ATTN_MAPS = ("q", "k", "v", "o")
 
 
 @contextmanager
-def _gradients_on(model: Any, params: Sequence[torch.Tensor]) -> Iterator[None]:
+def _gradients_on(model: nn.Module, params: Sequence[torch.Tensor]) -> Iterator[None]:
     """Only ``params`` require gradients inside the block; every flag and ``.grad`` is restored afterwards."""
     flags = [(p, p.requires_grad, p.grad) for p in model.parameters()]
     try:
         for p in model.parameters():
             p.requires_grad_(False)
-        for p in params:
-            p.requires_grad_(True)
-            p.grad = None
+        for t in params:
+            t.requires_grad_(True)
+            t.grad = None
         yield
     finally:
         for p, flag, grad in flags:
@@ -199,7 +200,7 @@ class LLMPruner(WidthCriterion):
     uses_gradients: ClassVar[bool] = True
 
     def score(
-        self, adapter: Any, layout: DecoderLayout, batches: Sequence[Tensor], layers: Sequence[int],
+        self, adapter: ArchAdapter, layout: DecoderLayout, batches: Sequence[Tensor], layers: Sequence[int],
         config: WidthPruneConfig,
     ) -> Scores:
         shapes = _shapes(adapter, layout, layers)
@@ -231,7 +232,7 @@ def _chunks(layers: Sequence[int], size: int) -> list[Sequence[int]]:
     return [layers[k:k + size] for k in range(0, len(layers), size)]
 
 
-def _calibration_loss(adapter: Any, batch: Tensor) -> Tensor:
+def _calibration_loss(adapter: ArchAdapter, batch: Tensor) -> Tensor:
     """Mean next-token cross-entropy of the model on one calibration batch."""
     ids = batch.to(adapter.device)
     logits = adapter.model(input_ids=ids, use_cache=False).logits[:, :-1].float()
@@ -253,7 +254,7 @@ class Minitron(WidthCriterion):
     scores_hidden: ClassVar[bool] = True
 
     def score(
-        self, adapter: Any, layout: DecoderLayout, batches: Sequence[Tensor], layers: Sequence[int],
+        self, adapter: ArchAdapter, layout: DecoderLayout, batches: Sequence[Tensor], layers: Sequence[int],
         config: WidthPruneConfig,
     ) -> Scores:
         shapes = _shapes(adapter, layout, layers)

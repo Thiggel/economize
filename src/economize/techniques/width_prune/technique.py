@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any, ClassVar, cast
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import torch
 from torch import Tensor, nn
@@ -22,6 +22,9 @@ from .recovery import RecoveryLoRA, recovery_targets, stub_targets
 from .selection import Selection, keep_count, select_adaptive, select_uniform, top_k
 from .stats import LayerShape, layer_shape
 
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
+
 __all__ = ["WidthPruneTechnique"]
 
 #: Families whose techniques size per-layer state from the config's global head geometry
@@ -29,11 +32,11 @@ __all__ = ["WidthPruneTechnique"]
 _GEOMETRY_READERS = (Family.KV_QUANTIZATION, Family.KV_EVICTION)
 
 
-def _parameters(model: Any) -> int:
+def _parameters(model: nn.Module) -> int:
     return sum(p.numel() for p in model.parameters())
 
 
-def _shapes(adapter: Any) -> list[LayerShape]:
+def _shapes(adapter: ArchAdapter) -> list[LayerShape]:
     """The layer shapes of the model the technique is built on (the global config when the layout is unknown, in
     which case :meth:`WidthPruneConfig.validate` refuses the model anyway)."""
     try:
@@ -80,7 +83,7 @@ class WidthPruneTechnique(CalibratedWeightTransform):
     mlp_mean: Tensor
     fitted: Tensor
 
-    def __init__(self, config: WidthPruneConfig, adapter: Any) -> None:
+    def __init__(self, config: WidthPruneConfig, adapter: ArchAdapter) -> None:
         super().__init__(config, adapter)
         shapes = _shapes(adapter)
         layers = len(shapes)
@@ -116,8 +119,8 @@ class WidthPruneTechnique(CalibratedWeightTransform):
         return self.lora
 
     def _load_from_state_dict(
-        self, state_dict: Any, prefix: str, local_metadata: Any, strict: bool, missing_keys: list[str],
-        unexpected_keys: list[str], error_msgs: list[str],
+        self, state_dict: Mapping[str, Tensor], prefix: str, local_metadata: Mapping[str, object], strict: bool,
+        missing_keys: list[str], unexpected_keys: list[str], error_msgs: list[str],
     ) -> None:
         # The recovery LoRA is created after pruning; a saved one is created here, shaped like the saved updates,
         # so that strict loading fills it before ``attach`` binds it to the pruned maps.
@@ -129,7 +132,7 @@ class WidthPruneTechnique(CalibratedWeightTransform):
                                       error_msgs)
 
     # ---- fit ------------------------------------------------------------------------------------------------
-    def _fit(self, adapter: Any, layout: DecoderLayout, batches: Sequence[Tensor]) -> None:
+    def _fit(self, adapter: ArchAdapter, layout: DecoderLayout, batches: Sequence[Tensor]) -> None:
         config = self.config
         layers = config.pruned_layers(adapter.num_layers)
         shapes = {i: layer_shape(layout, adapter.layer(i)) for i in layers}
@@ -157,7 +160,7 @@ class WidthPruneTechnique(CalibratedWeightTransform):
         self.fitted.fill_(True)
 
     # ---- replay ---------------------------------------------------------------------------------------------
-    def _prune(self, adapter: Any, layout: DecoderLayout) -> tuple[bool, bool]:
+    def _prune(self, adapter: ArchAdapter, layout: DecoderLayout) -> tuple[bool, bool]:
         compensated = [False, False]
         for i, shape in enumerate(realized_shapes(adapter, layout), start=1):
             groups = torch.nonzero(self.groups_kept[i - 1, : shape.kv_heads].cpu()).flatten()
@@ -182,7 +185,7 @@ class WidthPruneTechnique(CalibratedWeightTransform):
             prune_hidden(adapter, layout, torch.nonzero(self.hidden_kept.cpu()).flatten())
         return compensated[0], compensated[1]
 
-    def attach(self, model: Any, adapter: Any, context: AttachContext | None = None) -> None:
+    def attach(self, model: nn.Module, adapter: ArchAdapter, context: AttachContext | None = None) -> None:
         """Prune the base model and the other techniques' copies of its layers (:meth:`Technique.layer_copies`)."""
         self._copies = {} if context is None else context.layer_copies()
         try:
@@ -190,7 +193,7 @@ class WidthPruneTechnique(CalibratedWeightTransform):
         finally:
             self._copies = {}
 
-    def transform(self, adapter: Any, batches: Sequence[Tensor] | None) -> dict[str, Any]:
+    def transform(self, adapter: ArchAdapter, batches: Sequence[Tensor] | None) -> dict[str, object]:
         config = self.config
         layout = layout_for(adapter, self.name, residual=config.hidden_sparsity > 0)
         before, hidden = _parameters(adapter.model), adapter.hidden_size
@@ -214,7 +217,7 @@ class WidthPruneTechnique(CalibratedWeightTransform):
             "plain_checkpoint": describes(adapter),
             "compensated": {"attention": compensated[0], "mlp": compensated[1]},
             "hidden_size": hidden,
-            "width": int(adapter.embed_tokens.weight.shape[1]),
+            "width": int(cast(nn.Embedding, adapter.embed_tokens).weight.shape[1]),
             "kv_heads": [s.kv_heads for s in shapes],
             "heads": [s.heads for s in shapes],
             "intermediate": [s.intermediate for s in shapes],
@@ -223,7 +226,7 @@ class WidthPruneTechnique(CalibratedWeightTransform):
             "pruned_layer_copies": sorted(self._copies),
         }
 
-    def _install_lora(self, adapter: Any, layout: DecoderLayout) -> None:
+    def _install_lora(self, adapter: ArchAdapter, layout: DecoderLayout) -> None:
         targets = recovery_targets(adapter, layout)
         if self.lora is None:
             self.lora = RecoveryLoRA(targets, self.config.lora_rank, self.config.lora_alpha)

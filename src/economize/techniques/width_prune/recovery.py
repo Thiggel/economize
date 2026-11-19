@@ -8,13 +8,16 @@ updates are active on every call (the base model *is* the pruned model, so there
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, cast
 
 import torch
 from torch import Tensor, nn
 
 from ...modules import LayerLoRA, LoRADelta
 from .._structured.layout import DecoderLayout
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
 
 __all__ = ["RecoveryLoRA", "merge_lora", "recovery_targets", "stub_targets"]
 
@@ -35,7 +38,7 @@ class RecoveryLoRA(LayerLoRA):
         matched by.
         """
         saved: dict[str, dict[str, nn.Module]] = {
-            str(key): dict(deltas.items())  # type: ignore[operator]
+            str(key): dict(cast(nn.ModuleDict, deltas).items())
             for key, deltas in self.layers.items()
         }
         layers = nn.ModuleDict()
@@ -58,7 +61,7 @@ class RecoveryLoRA(LayerLoRA):
             yield linear, (weight.double() + update.to(weight.device)).to(weight.dtype)
 
 
-def recovery_targets(adapter: Any, layout: DecoderLayout) -> dict[int, dict[str, nn.Module]]:
+def recovery_targets(adapter: ArchAdapter, layout: DecoderLayout) -> dict[int, dict[str, nn.Module]]:
     """The seven maps of every decoder layer (six without a value map, see :attr:`DecoderLayout.optional_maps`),
     keyed by their attribute names (``q_proj``, ..., ``down_proj``)."""
     names = (*layout.attn_inputs, layout.attn_output, *layout.mlp_inputs, layout.mlp_output)
@@ -96,7 +99,7 @@ def merge_lora(lora: LayerLoRA, targets: Mapping[int, Mapping[str, nn.Module]]) 
     """The merged weight ``W + scale * B A`` of every adapted map (in the map's dtype; nothing is changed)."""
     merged: dict[nn.Module, Tensor] = {}
     for layer, deltas in lora.layers.items():
-        for name, delta in deltas.items():  # type: ignore[operator]
+        for name, delta in cast(nn.ModuleDict, deltas).items():
             assert isinstance(delta, LoRADelta)
             linear = targets[int(layer)][name]
             weight = linear.weight
