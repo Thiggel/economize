@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any
 
 import torch
 from torch import nn
@@ -46,7 +45,7 @@ __all__ = [
 _SPLIT_FIELDS = ("num_attention_heads", "num_key_value_heads", "intermediate_size", "moe_intermediate_size")
 
 
-def tensor_parallel_plan(config_or_model: Any) -> dict[str, str]:
+def tensor_parallel_plan(config_or_model: object) -> dict[str, str]:
     """The tensor-parallel plan of a model or config (module pattern to ``"colwise"``, ``"rowwise"``, ...); empty
     when the architecture has none."""
     if isinstance(config_or_model, nn.Module):
@@ -81,7 +80,7 @@ class TensorParallelCheck:
             raise ConfigError(f"cannot split the model over {self.world_size} processes: " + "; ".join(self.problems))
 
 
-def check_tensor_parallel(config: Any, world_size: int) -> TensorParallelCheck:
+def check_tensor_parallel(config: object, world_size: int) -> TensorParallelCheck:
     """Check that ``config`` has a tensor-parallel plan and that its heads and MLP widths divide by ``world_size``."""
     check_positive("world_size", world_size)
     text = text_config(config)
@@ -115,7 +114,7 @@ def init_distributed() -> tuple[int, int, int]:
     return rank, local_rank, world_size
 
 
-def load_tensor_parallel(name_or_path: str, **kwargs: Any) -> nn.Module:
+def load_tensor_parallel(name_or_path: str, **kwargs: object) -> nn.Module:
     """Load a causal LM split over the processes of the current ``torchrun`` launch.
 
     Args:
