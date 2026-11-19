@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 import torch
 
-from .cost import CostLog
+from .cost import CostLog, CostSummary
 
 __all__ = ["DecodeResult"]
 
@@ -43,7 +42,7 @@ class DecodeResult:
     match: list[list[list[float]]] = field(default_factory=list)
     row: int = 0
 
-    def cost_summary(self) -> dict[str, Any]:
+    def cost_summary(self) -> CostSummary:
         """Aggregate cost of this generation (see :meth:`CostLog.summary`)."""
         return self.cost.summary(self.num_layers, self.prompt_length, self.tokens.numel())
 

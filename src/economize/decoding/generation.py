@@ -9,7 +9,7 @@ policy, recurrent snapshot).
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 
@@ -184,10 +184,10 @@ class Generation:
     def outputs(self) -> list[DecodeResult]:
         """One result per original row, in order (every row must have finished)."""
         assert all(result is not None for result in self.results)
-        return list(self.results)  # type: ignore[arg-type]
+        return cast("list[DecodeResult]", list(self.results))
 
 
-def _host_cycles(cycles: list[torch.Tensor | None]) -> list[Any]:
+def _host_cycles(cycles: list[torch.Tensor | None]) -> list[Any]:  # Any: [k] or [k, m] floats, as the field says
     """Per-draft values of one row's verified cycles (``[k]`` or ``[k, m]`` each) on the host, with one transfer
     (``[]`` for a cycle without them, and no entries at all when none was recorded)."""
     known = [c for c in cycles if c is not None]

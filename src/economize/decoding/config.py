@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields
-from typing import Any
+from typing import TYPE_CHECKING, cast
 
 from ..errors import ConfigError
 from ..validation import check_positive, check_unit_interval, known_fields
+
+if TYPE_CHECKING:
+    from .._typing import JSONDict
 
 __all__ = ["DecodeConfig"]
 
@@ -84,13 +87,13 @@ class DecodeConfig:
     min_confidence: float | None = None
     verifier: str | None = None
     draft_policy: str | None = None
-    verifier_options: Mapping[str, Any] = field(default_factory=dict, hash=False)
+    verifier_options: Mapping[str, object] = field(default_factory=dict, hash=False)
     cuda_graphs: bool = False
     sync_interval: int = 8
     record_confidence: bool = False
     record_distributions: bool = False
     draft_loop_graph: bool = False
-    draft_policy_options: Mapping[str, Any] = field(default_factory=dict, hash=False)
+    draft_policy_options: Mapping[str, object] = field(default_factory=dict, hash=False)
     prefill_chunk: int | None = None
     window_cache: bool = False
 
@@ -125,20 +128,22 @@ class DecodeConfig:
     def draft_policy_name(self) -> str:
         return self.draft_policy or ("fixed" if self.min_confidence is None else "confidence")
 
-    def to_dict(self) -> dict[str, Any]:
-        data = {f.name: getattr(self, f.name) for f in fields(self)}
+    def to_dict(self) -> JSONDict:
+        data: dict[str, object] = {f.name: getattr(self, f.name) for f in fields(self)}
         data["verifier_options"] = dict(self.verifier_options)
         data["draft_policy_options"] = dict(self.draft_policy_options)
-        return data
+        return cast("JSONDict", data)  # the options hold JSON values (they are saved in checkpoints)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> DecodeConfig:
+    def from_dict(cls, data: Mapping[str, object]) -> DecodeConfig:
         """The options written by :meth:`to_dict`. Missing fields take their defaults; fields this release does not
         know (saved by a newer one) are dropped with an :class:`~economize.errors.UnknownFieldWarning`."""
-        return cls(**known_fields(cls.__name__, data, set(cls.__dataclass_fields__)))
+        # the constructor checks the field values; the read keywords are typed only as object
+        build: Callable[..., DecodeConfig] = cls
+        return build(**known_fields(cls.__name__, data, set(cls.__dataclass_fields__)))
 
 
-def _frozen(value: Any) -> Any:
+def _frozen(value: object) -> object:
     """``value`` with every list or tuple in it turned into a tuple, recursively (so it can be hashed)."""
     if isinstance(value, (list, tuple)):
         return tuple(_frozen(v) for v in value)

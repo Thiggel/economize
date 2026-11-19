@@ -21,7 +21,7 @@ Name                Behaviour
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import torch
 
@@ -312,11 +312,12 @@ class TypicalVerifier(Verifier):
 
     supports_trees = True
     lossless = False
-    default_options: ClassVar[Mapping[str, Any]] = {"threshold": 0.09, "alpha": 0.3}
+    default_options: ClassVar[Mapping[str, object]] = {"threshold": 0.09, "alpha": 0.3}
 
     def __init__(self, config: DecodeConfig) -> None:
         super().__init__(config)
-        self.threshold, self.alpha = float(self.options["threshold"]), float(self.options["alpha"])
+        options = cast("Mapping[str, float]", self.options)  # numbers, as documented
+        self.threshold, self.alpha = float(options["threshold"]), float(options["alpha"])
 
     # ---- drafts: the drafter's most likely tokens --------------------------------------------------------------
     def draft(

@@ -24,12 +24,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 
 from ..errors import ConfigError
 from ..runtime.transfer import device_tensor
+from ..validation import is_positive_int
 from .cost import CostKind
 from .policies import POLICIES
 from .protocols import Draft, Drafter, Verifier, draft_footprint
@@ -37,6 +38,7 @@ from .tree_search import LOGP_FLOOR, TreePolicy, TreeSearchDrafter, TreeStepDraf
 
 if TYPE_CHECKING:
     from .config import DecodeConfig
+    from .graphs import GraphWrap
     from .request import DraftRequest
 
 __all__ = ["DEFAULT_TOPK", "DEFAULT_TOTAL_TOKENS", "DynamicTreeDrafter", "DynamicTreePolicy", "TreeOptions",
@@ -80,22 +82,24 @@ class TreeOptions:
         ``cycle_length - 1``. A shallow tree with fewer than 60 candidates (``cycle_length=2``: ``topk`` of them)
         verifies all of them by default, so every cycle length works without options.
         """
-        options: Mapping[str, Any] = config.draft_policy_options
+        options: Mapping[str, object] = config.draft_policy_options
         unknown = sorted(set(options) - {"depth", "topk", "total_tokens"})
         if unknown:
             raise ConfigError(f"draft_policy 'dynamic_tree' has no options {unknown}; it takes depth, topk and "
                               "total_tokens")
-        values = {"depth": max(config.cycle_length - 1, 1), "topk": DEFAULT_TOPK, **options}
+        values: dict[str, object] = {"depth": max(config.cycle_length - 1, 1), "topk": DEFAULT_TOPK, **options}
         if "total_tokens" not in values:
             depth, topk = values["depth"], values["topk"]
-            shape_ok = all(isinstance(v, int) and not isinstance(v, bool) and v >= 1 for v in (depth, topk))
             values["total_tokens"] = (
-                min(DEFAULT_TOTAL_TOKENS, cls(depth, topk, 1).candidates) if shape_ok else DEFAULT_TOTAL_TOKENS
+                min(DEFAULT_TOTAL_TOKENS, cls(depth, topk, 1).candidates)
+                if is_positive_int(depth) and is_positive_int(topk) else DEFAULT_TOTAL_TOKENS
             )
+        checked: dict[str, int] = {}
         for name, value in values.items():
-            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            if not is_positive_int(value):
                 raise ConfigError(f"draft_policy 'dynamic_tree' needs a positive integer {name}, got {value!r}")
-        tree = cls(values["depth"], values["topk"], values["total_tokens"])
+            checked[name] = value
+        tree = cls(checked["depth"], checked["topk"], checked["total_tokens"])
         if tree.total_tokens > tree.candidates:
             raise ConfigError(f"total_tokens={tree.total_tokens} exceeds the {tree.candidates} candidates of a tree "
                               f"of depth {tree.depth} and topk {tree.topk}")
@@ -149,7 +153,7 @@ class DynamicTreeDrafter(TreeSearchDrafter):
         # the verified tree holds total_tokens nodes; the draft steps write the forwarded nodes after the prefix
         return max(self.options.total_tokens, self.options.forwarded)
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: GraphWrap) -> bool:
         if not self.inner.enable_graphs(wrap):
             return False
         self._root_fn = wrap(weak_method(self._root))
@@ -159,12 +163,12 @@ class DynamicTreeDrafter(TreeSearchDrafter):
 
     # ---- drafting ---------------------------------------------------------------------------------------------
     def propose(self, request: DraftRequest) -> Draft:
-        inner: Any = self.inner
+        inner = self._stepper
         k, depth = self.options.topk, self.options.depth
         batch, device = request.batch_size, request.device
-        footprint = draft_footprint(inner)
+        footprint = draft_footprint(self.inner)
         inner.tree_begin(request)
-        logits = inner.step(request.tokens, request.positions, None)
+        logits = self.inner.step(request.tokens, request.positions, None)
         for b, cost in enumerate(request.costs):
             cost.record_footprint(CostKind.DRAFT, 1, request.ends[b] - 1, footprint, step=0)
         n_states = len(inner.tree_state())
@@ -201,7 +205,7 @@ class DynamicTreeDrafter(TreeSearchDrafter):
         k, depth = self.options.topk, self.options.depth
         batch = frontier_tokens.shape[0]
         d = forwarded.shape[1] // k  # forwarded holds k parents per forwarded level
-        logits, out = self.inner.tree_step(frontier_tokens, forwarded, base, *states)  # type: ignore[attr-defined]
+        logits, out = self._stepper.tree_step(frontier_tokens, forwarded, base, *states)
         top = torch.log_softmax(logits.float(), -1).clamp_min(LOGP_FLOOR).topk(k, -1)
         here = frontier_scores.device
         child_scores = (frontier_scores[:, :, None] + top.values.to(here)).reshape(batch, k * k)

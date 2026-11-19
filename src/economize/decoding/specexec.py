@@ -30,12 +30,13 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 
 from ..errors import ConfigError
 from ..runtime.transfer import device_tensor
+from ..validation import is_positive_int
 from .cost import CostKind
 from .policies import POLICIES
 from .protocols import Draft, Drafter, Verifier, draft_footprint
@@ -43,6 +44,7 @@ from .tree_search import LOGP_FLOOR, TreePolicy, TreeSearchDrafter, select_candi
 
 if TYPE_CHECKING:
     from .config import DecodeConfig
+    from .graphs import GraphWrap
     from .request import DraftRequest
 
 __all__ = ["SearchOptions", "SpecExecDrafter", "SpecExecPolicy"]
@@ -80,19 +82,22 @@ class SearchOptions:
     @classmethod
     def from_config(cls, config: DecodeConfig) -> SearchOptions:
         """The options in ``config.draft_policy_options`` (``depth`` defaults to ``cycle_length - 1``)."""
-        options: Mapping[str, Any] = config.draft_policy_options
+        options: Mapping[str, object] = config.draft_policy_options
         names = ("depth", "width", "topk", "total_tokens", "decay")
         unknown = sorted(set(options) - set(names))
         if unknown:
             raise ConfigError(f"draft_policy 'specexec' has no options {unknown}; it takes {', '.join(names)}")
-        values = {"depth": max(config.cycle_length - 1, 1), "width": 8, "topk": 8, "total_tokens": 60, **options}
+        defaults = {"depth": max(config.cycle_length - 1, 1), "width": 8, "topk": 8, "total_tokens": 60}
+        values: dict[str, object] = {**defaults, **options}
         decay = values.pop("decay", 0.95)
         if isinstance(decay, bool) or not isinstance(decay, (int, float)) or not 0.0 < decay <= 1.0:
             raise ConfigError(f"draft_policy 'specexec' needs a decay in (0, 1], got {decay!r}")
+        checked: dict[str, int] = {}
         for name, value in values.items():
-            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            if not is_positive_int(value):
                 raise ConfigError(f"draft_policy 'specexec' needs a positive integer {name}, got {value!r}")
-        search = cls(values["depth"], values["width"], values["topk"], values["total_tokens"], float(decay))
+            checked[name] = value
+        search = cls(checked["depth"], checked["width"], checked["topk"], checked["total_tokens"], float(decay))
         if search.width > search.topk:
             raise ConfigError(f"width={search.width} exceeds topk={search.topk}: the first search step expands "
                               "the root's topk children only")
@@ -145,7 +150,7 @@ class SpecExecDrafter(TreeSearchDrafter):
     def draft_capacity(self, cycle_length: int) -> int:
         return max(self.options.total_tokens, self.options.steps * self.options.width)
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: GraphWrap) -> bool:
         if not self.inner.enable_graphs(wrap):
             return False
         self._root_fn = wrap(weak_method(self._root))
@@ -155,12 +160,12 @@ class SpecExecDrafter(TreeSearchDrafter):
 
     # ---- drafting ---------------------------------------------------------------------------------------------
     def propose(self, request: DraftRequest) -> Draft:
-        inner: Any = self.inner
+        inner = self._stepper
         width, steps = self.options.width, self.options.steps
         batch, device = request.batch_size, request.device
-        footprint = draft_footprint(inner)
+        footprint = draft_footprint(self.inner)
         inner.tree_begin(request)
-        logits = inner.step(request.tokens, request.positions, None)
+        logits = self.inner.step(request.tokens, request.positions, None)
         for b, cost in enumerate(request.costs):
             cost.record_footprint(CostKind.DRAFT, 1, request.ends[b] - 1, footprint, step=0)
         n_states = len(inner.tree_state())
@@ -203,8 +208,7 @@ class SpecExecDrafter(TreeSearchDrafter):
         fwd_parent = torch.where(pick_parent >= 0, fwd.gather(1, pick_parent.clamp_min(0)), -1)
         forwarded = torch.cat([forwarded, fwd_parent], 1)
         frontier_states = [s[rows, fwd_parent + 1] for s in states]
-        logits, out = self.inner.tree_step(tokens.gather(1, pick), forwarded, base,  # type: ignore[attr-defined]
-                                           *frontier_states)
+        logits, out = self._stepper.tree_step(tokens.gather(1, pick), forwarded, base, *frontier_states)
         top = torch.log_softmax(logits.float(), -1).clamp_min(LOGP_FLOOR).topk(k, -1)
         here = scores.device
         child_logp = top.values.to(here) + math.log(self.options.decay)

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from .capabilities import BatchDistributions, BatchSelector, DistributionSelector, SeededSelector
 from .config import DecodeConfig
-from .cost import CostEvent, CostKind, CostLog, LayerFootprint
+from .cost import CostEvent, CostKind, CostLog, CostSummary, LayerFootprint
 from .dynamic_tree import DynamicTreeDrafter, DynamicTreePolicy, TreeOptions, TreeStepDrafter
 from .graphs import DecodeGraphs
 from .loop import CycleDecoder, DecodeResult, StopCondition, VerifyObserver
@@ -58,6 +58,7 @@ __all__ = [
     "CostEvent",
     "CostKind",
     "CostLog",
+    "CostSummary",
     "CycleDecoder",
     "DecodeConfig",
     "DecodeGraphs",
