@@ -3,8 +3,7 @@ run one sublayer (:mod:`economize.backends.vllm.knapspec`)."""
 
 from __future__ import annotations
 
-from torch import nn
-
+from ....core.technique import Technique
 from ...exporters import UnsupportedBackendError
 from .base import PlanBuilder, Support, register_vllm_technique
 from .drafters import JumpVllm
@@ -24,7 +23,7 @@ class KnapSpecVllm(JumpVllm):
               "decoding)")
     exporter = "knapspec"
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
         from ....errors import ConfigError
         from ....techniques.knapspec.export import KnapSpecDrafterSpec
 
@@ -33,7 +32,7 @@ class KnapSpecVllm(JumpVllm):
         except ConfigError as error:
             raise UnsupportedBackendError(f"the KnapSpec drafter cannot be served on vLLM: {error}") from error
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         super().contribute(technique, builder)
         builder.note(self.technique, "vLLM serves the skip set current at export (no re-search while decoding) and "
                                      "drafts num_speculative_tokens per round in place of the searched draft length")

@@ -25,7 +25,7 @@ This module does not import vLLM at import time; the attention layer is built th
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from typing import Any, cast
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import torch
 from torch import nn
@@ -34,8 +34,12 @@ from ....errors import ConfigError
 from ....techniques.jump.export import JumpDrafterSpec
 from ....techniques.kangaroo.adapter import KangarooAdapter
 from ....techniques.kangaroo.export import WEIGHTS_PREFIX, KangarooDrafterSpec
-from ..jump.model import EconomizeJumpEagle3ForCausalLM, TargetModules, _draft_hf_config
+from ..jump.model import EconomizeJumpEagle3ForCausalLM, TargetModules, _DecoderStack, _draft_hf_config
 from ..sharding import HeadShard, head_shard
+
+if TYPE_CHECKING:
+    from transformers import PretrainedConfig
+    from vllm.config import VllmConfig
 
 __all__ = ["DRAFTER_ARCHITECTURE", "EconomizeKangarooEagle3ForCausalLM", "vllm_attention"]
 
@@ -44,10 +48,10 @@ DRAFTER_ARCHITECTURE = "EconomizeKangarooEagle3"
 
 #: ``factory(shard, vllm_config, prefix) -> attention``: called as ``attention(q, k, v)`` on ``[T, H * D]`` tensors
 #: of the shard's heads on this rank.
-AttentionFactory = Callable[[HeadShard, Any, str], nn.Module]
+AttentionFactory = Callable[[HeadShard, "VllmConfig", str], nn.Module]
 
 
-def vllm_attention(shard: HeadShard, vllm_config: Any, prefix: str) -> nn.Module:
+def vllm_attention(shard: HeadShard, vllm_config: VllmConfig, prefix: str) -> nn.Module:
     """vLLM's paged ``Attention`` over this rank's heads of the adapter (softmax scale ``head_dim ** -0.5``, as the
     adapter's SDPA)."""
     from vllm.model_executor.layers.attention.attention import Attention
@@ -71,9 +75,9 @@ class EconomizeKangarooEagle3ForCausalLM(EconomizeJumpEagle3ForCausalLM):
     """
 
     #: Builds the adapter's attention layer; CPU tests swap it for a plain attention.
-    attention_factory: AttentionFactory = staticmethod(vllm_attention)  # type: ignore[assignment]
+    attention_factory: ClassVar[AttentionFactory] = staticmethod(vllm_attention)
 
-    def __init__(self, *, vllm_config: Any, prefix: str = "") -> None:
+    def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
         super().__init__(vllm_config=vllm_config, prefix=prefix)
         self.kangaroo_spec = KangarooDrafterSpec.from_hf_config(_draft_hf_config(vllm_config))
         spec = self.kangaroo_spec
@@ -87,7 +91,7 @@ class EconomizeKangarooEagle3ForCausalLM(EconomizeJumpEagle3ForCausalLM):
         self._rotary: nn.Module | None = None
 
     @classmethod
-    def read_spec(cls, hf_config: Any) -> JumpDrafterSpec:
+    def read_spec(cls, hf_config: PretrainedConfig) -> JumpDrafterSpec:
         return KangarooDrafterSpec.from_hf_config(hf_config).path
 
     # ---- the target ------------------------------------------------------------------------------------------------
@@ -99,7 +103,7 @@ class EconomizeKangarooEagle3ForCausalLM(EconomizeJumpEagle3ForCausalLM):
                 target has no ``self_attn.rotary_emb``.
         """
         tied = super().tie_to_target(target)
-        inner: Any = target.model
+        inner = cast(_DecoderStack, target.model)
         layer = list(inner.layers)[self.kangaroo_spec.rope_layer - 1]
         rotary = getattr(getattr(layer, "self_attn", None), "rotary_emb", None)
         if rotary is None:

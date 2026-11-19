@@ -7,15 +7,17 @@ matching vLLM adapter (:mod:`economize.backends.vllm.serving.weights`) and rewor
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
-
-from torch import nn
+from typing import TYPE_CHECKING, ClassVar, cast
 
 from ....core.metadata import Simulation
 from ...exporters import UnsupportedBackendError
-from ...vllm.serving.base import VllmTechnique
+from ...vllm.serving.base import Configured, VllmTechnique
 from ...vllm.serving.weights import DepthPruneVllm, LittleBitVllm, PruneVllm, QuantVllm
 from .base import Role, SglangPlanBuilder, SglangTechnique, Support, register_sglang_technique
+
+if TYPE_CHECKING:
+    from ....core.technique import Technique
+    from ....techniques.quant.config import QuantConfig
 
 __all__ = ["DelegatedSglang", "DepthPruneSglang", "LittleBitSglang", "LowRankSglang", "PruneSglang", "QuantSglang"]
 
@@ -39,15 +41,15 @@ class DelegatedSglang(SglangTechnique):
     def _inner(self) -> VllmTechnique:
         return self.vllm()
 
-    def level(self, technique: nn.Module) -> Support:
+    def level(self, technique: Configured) -> Support:
         return self._inner().level(technique)
 
-    def simulation_of(self, technique: nn.Module) -> Simulation | None:
+    def simulation_of(self, technique: Configured) -> Simulation | None:
         if self.simulation is not self.vllm.simulation:  # the subclass declared its own
             return self.simulation
         return self._inner().simulation_of(technique)
 
-    def check(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
+    def check(self, technique: Technique, builder: SglangPlanBuilder) -> None:
         super().check(technique, builder)
         try:
             self._inner().check(technique, builder)
@@ -55,7 +57,7 @@ class DelegatedSglang(SglangTechnique):
             raise UnsupportedBackendError(f"SGLang loads the checkpoint economize writes for vLLM, and {error}"
                                           ) from error
 
-    def contribute(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: SglangPlanBuilder) -> None:
         self._inner().contribute(technique, builder)
 
 
@@ -79,25 +81,25 @@ class QuantSglang(DelegatedSglang):
         "mxfp4": "SGLang has no mxfp4-pack-quantized scheme for linear layers (only MXFP4 MoE); vLLM serves it",
     }
 
-    def check(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
-        config: Any = technique.config
+    def check(self, technique: Technique, builder: SglangPlanBuilder) -> None:
+        config = cast("QuantConfig", technique.config)
         reason = self.unsupported_formats.get(config.format)
         if reason is not None:
             raise UnsupportedBackendError(f"quant format {config.format!r} has no SGLang kernel: {reason}")
         super().check(technique, builder)
 
-    def level(self, technique: nn.Module) -> Support:
-        config: Any = technique.config
+    def level(self, technique: Configured) -> Support:
+        config = cast("QuantConfig", technique.config)
         if config.format in self.unsupported_formats:
             return Support.UNSUPPORTED
         return super().level(technique)
 
-    def reason_of(self, technique: nn.Module) -> str:
+    def reason_of(self, technique: Configured) -> str:
         """Why SGLang refuses the configured format, or :attr:`reason` (what it runs).
 
         Parameters
         ----------
-        technique : nn.Module
+        technique : Configured
             The technique, or any object with its ``config``.
 
         Returns
@@ -105,7 +107,7 @@ class QuantSglang(DelegatedSglang):
         str
             The reason shown by :func:`economize.backend_support`.
         """
-        config: Any = technique.config
+        config = cast("QuantConfig", technique.config)
         return self.unsupported_formats.get(config.format, self.reason)
 
 
@@ -138,7 +140,7 @@ class PruneSglang(DelegatedSglang):
               "masked dense reference (simulated: same outputs, no memory or speed saving)")
     vllm = PruneVllm
 
-    def reason_of(self, technique: nn.Module) -> str:
+    def reason_of(self, technique: Configured) -> str:
         """The refusal, or what the reference serves (the level follows :class:`PruneVllm`)."""
         if self.level(technique) is Support.DENSIFIED:
             return PruneVllm.reference_reason

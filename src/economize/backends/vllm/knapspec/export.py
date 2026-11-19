@@ -8,7 +8,7 @@ an identity readout.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import torch
 from torch import nn
@@ -18,6 +18,9 @@ from ....techniques.knapspec.export import CONFIG_KEY, KnapSpecDrafterSpec, draf
 from ...exporters import register_exporter
 from ..jump.export import JumpVllmExporter
 from .model import DRAFTER_ARCHITECTURE
+
+if TYPE_CHECKING:
+    from ....core.technique import Technique
 
 __all__ = ["KnapSpecVllmExporter"]
 
@@ -36,6 +39,6 @@ class KnapSpecVllmExporter(JumpVllmExporter):
     def drafter_state(self, technique: nn.Module) -> dict[str, torch.Tensor]:
         return drafter_state(technique)
 
-    def config_block(self, technique: nn.Module, spec: JumpDrafterSpec) -> dict[str, Any]:
+    def config_block(self, technique: Technique, spec: JumpDrafterSpec) -> dict[str, object]:
         shared = super().config_block(technique, spec)["shared_with_target"]
         return KnapSpecDrafterSpec.of(technique).to_dict() | {"shared_with_target": shared}

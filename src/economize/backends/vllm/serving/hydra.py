@@ -3,11 +3,15 @@ Hydra proposer (:mod:`economize.backends.vllm.hydra`)."""
 
 from __future__ import annotations
 
-from torch import nn
+from typing import TYPE_CHECKING, cast
 
+from ....core.technique import Technique
 from ...exporters import UnsupportedBackendError
 from .base import PlanBuilder, Support, register_vllm_technique
 from .drafters import JumpVllm
+
+if TYPE_CHECKING:
+    from ....techniques.hydra.technique import HydraTechnique
 
 __all__ = ["HydraVllm"]
 
@@ -24,7 +28,7 @@ class HydraVllm(JumpVllm):
               "vLLM verifies the top-1 chain")
     exporter = "hydra"
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
         from ....errors import ConfigError
         from ....techniques.hydra.export import HydraDrafterSpec
 
@@ -36,10 +40,10 @@ class HydraVllm(JumpVllm):
             raise UnsupportedBackendError(f"Hydra with {spec.num_heads} heads drafts at most {spec.num_heads} tokens; "
                                           f"asked for num_speculative_tokens={builder.num_speculative_tokens}")
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         super().contribute(technique, builder)
         builder.note(self.technique, "vLLM 0.30 verifies one chain per request (no tree verification), so "
                                      "it serves the top-1 chain of the heads")
-        if technique.prefix is not None:
+        if cast("HydraTechnique", technique).prefix is not None:
             builder.note(self.technique, "the Hydra++ prefix layer's attention runs in the target's dtype "
                                          "(float32 in the HF backend with param_dtype='float32')")

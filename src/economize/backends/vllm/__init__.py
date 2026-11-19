@@ -28,12 +28,15 @@ Importing this package does not import vLLM.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 from ...registry import import_submodules
 from .drafters import VLLM_DRAFTERS, VllmDrafter, register_vllm_drafter
 from .export import drafter_config, drafter_weights, export_drafter
 from .spec import serve_args, speculative_config, verl_engine_kwargs
+
+if TYPE_CHECKING:  # served lazily by __getattr__
+    from .jump import DRAFTER_ARCHITECTURE, JumpVllmExporter
 
 __all__ = [
     "DRAFTER_ARCHITECTURE",
@@ -53,7 +56,7 @@ __all__ = [
 import_submodules(__name__, __path__)  # each servable technique registers its exporter and its VllmDrafter
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> object:
     if name in ("DRAFTER_ARCHITECTURE", "JumpVllmExporter"):  # the built-in jump drafter's names, kept here
         from . import jump
 

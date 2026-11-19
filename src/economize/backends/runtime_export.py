@@ -363,7 +363,7 @@ class ExportRuntime:
         """
         builder = ExportBuilder(self, model, Path(out_dir) if out_dir is not None else None,
                                 num_draft_tokens=num_draft_tokens)
-        steps: list[tuple[ExportTechnique, nn.Module]] = []
+        steps: list[tuple[ExportTechnique, Technique]] = []
         for name, technique in _ordered(builder.techniques):
             adapter = self.adapter_for(name)
             adapter.check(technique, builder)
@@ -443,9 +443,10 @@ class ExportBuilder:
         return module
 
     @property
-    def techniques(self) -> dict[str, nn.Module]:
+    def techniques(self) -> dict[str, Technique]:
         """The model's techniques by name (empty for a plain model)."""
-        return dict(getattr(self.model, "techniques", None) or {})
+        techniques: Mapping[str, Technique] = getattr(self.model, "techniques", None) or {}
+        return dict(techniques)
 
     def claim(self, role: Role, owner: str) -> None:
         """Record that ``owner`` takes ``role``.

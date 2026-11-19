@@ -20,8 +20,8 @@ This module imports ``sglang``; :func:`economize.backends.sglang.register` impor
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import Any
+from collections.abc import Callable, Iterable
+from typing import TYPE_CHECKING, Protocol, cast
 
 import torch
 from sglang.srt.layers.layernorm import RMSNorm
@@ -32,14 +32,26 @@ from sglang.srt.model_loader.weight_utils import default_weight_loader
 from sglang.srt.utils import add_prefix
 from torch import nn
 
+from ...arch.config import HFConfig
 from ...errors import ConfigError
 from ...techniques.jump.export import CONFIG_KEY, ExportedJumpDrafter, JumpDrafterSpec
 from .export import DRAFTER_ARCHITECTURE, SGLANG_CONFIG_KEY
+
+if TYPE_CHECKING:
+    from sglang.srt.layers.logits_processor import LogitsProcessorOutput
+    from sglang.srt.layers.quantization.base_config import QuantizationConfig
+    from sglang.srt.model_executor.forward_batch_info import PPProxyTensors
 
 __all__ = ["DRAFTER_ARCHITECTURE", "EconomizeJumpForCausalLM", "decoder_layer_class"]
 
 _STACKED = (("qkv_proj", "q_proj", "q"), ("qkv_proj", "k_proj", "k"), ("qkv_proj", "v_proj", "v"),
             ("gate_up_proj", "gate_proj", 0), ("gate_up_proj", "up_proj", 1))
+
+
+class _ShardedParameter(Protocol):
+    """An SGLang parameter of a stacked projection: its loader writes one shard (``q``/``k``/``v``, gate/up)."""
+
+    weight_loader: Callable[[nn.Parameter, torch.Tensor, str | int], None]
 
 def decoder_layer_class(architecture: str) -> type[nn.Module]:
     """SGLang's decoder layer of the target ``architecture``.
@@ -61,7 +73,7 @@ def decoder_layer_class(architecture: str) -> type[nn.Module]:
         return LlamaDecoderLayer
     raise ConfigError(f"the SGLang jump drafter has no decoder layer for {architecture!r}")
 
-def _block(config: Any, key: str) -> dict[str, Any]:
+def _block(config: HFConfig, key: str) -> dict[str, object]:
     value = getattr(config, key, None)
     if not isinstance(value, dict):
         raise ConfigError(f"the draft config has no {key!r} block: export it with economize's sglang exporter")
@@ -76,7 +88,7 @@ class _JumpBody(nn.Module):
     extension still run in CUDA graphs.
     """
 
-    def __init__(self, config: Any, num_layers: int, layer_class: type[nn.Module], prefix: str) -> None:
+    def __init__(self, config: HFConfig, num_layers: int, layer_class: type[nn.Module], prefix: str) -> None:
         super().__init__()
         self.embed_tokens = VocabParallelEmbedding(config.vocab_size, config.hidden_size,
                                                    prefix=add_prefix("embed_tokens", prefix))
@@ -92,12 +104,12 @@ class EconomizeJumpForCausalLM(nn.Module):
     #: SGLang's EAGLE worker shares the target's LM head and embedding with the draft model.
     load_lm_head_from_target = True
 
-    def __init__(self, config: Any, quant_config: Any = None, prefix: str = "") -> None:
+    def __init__(self, config: HFConfig, quant_config: QuantizationConfig | None = None, prefix: str = "") -> None:
         super().__init__()
         self.config = config
         self.spec = JumpDrafterSpec.from_dict(_block(config, CONFIG_KEY))
         block = _block(config, SGLANG_CONFIG_KEY)
-        self.jump_layers = tuple(int(i) for i in block["jump_layers"])
+        self.jump_layers = tuple(int(i) for i in cast("list[int]", block["jump_layers"]))
         if self.jump_layers != tuple(self.spec.jump_layers):
             raise ConfigError("the draft config's jump_layers disagree with its economize_jump block")
         self.target_layer = int(self.spec.target_layer)
@@ -155,7 +167,7 @@ class EconomizeJumpForCausalLM(nn.Module):
 
     def forward(self, input_ids: torch.Tensor, positions: torch.Tensor, forward_batch: ForwardBatch,
                 input_embeds: torch.Tensor | None = None, get_embedding: bool = False,
-                pp_proxy_tensors: Any = None) -> Any:
+                pp_proxy_tensors: PPProxyTensors | None = None) -> LogitsProcessorOutput:
         hidden_in = forward_batch.spec_info.hidden_states
         if hidden_in is None or hidden_in.shape[0] == 0 or input_ids.shape[0] == 0:
             empty = self.lm_head.weight.new_empty((0, self.hidden_size))
@@ -196,7 +208,7 @@ class EconomizeJumpForCausalLM(nn.Module):
                     continue
                 stacked = name.replace(weight_name, param_name)
                 param = params[stacked]
-                param.weight_loader(param, tensor, shard)  # type: ignore[attr-defined]
+                cast(_ShardedParameter, param).weight_loader(param, tensor, shard)
                 loaded.add(stacked)
                 break
             else:

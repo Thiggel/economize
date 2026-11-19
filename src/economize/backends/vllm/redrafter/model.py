@@ -17,6 +17,8 @@ The technique's tensors are parameters of this module (``redrafter.*``), in the 
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -26,6 +28,9 @@ from ....techniques.redrafter.export import WEIGHTS_PREFIX, RedrafterDrafterSpec
 from ....techniques.redrafter.technique import LOG_0
 from ..heads.model import HeadDrafterModel
 from ..jump.model import _draft_hf_config
+
+if TYPE_CHECKING:
+    from vllm.config import VllmConfig
 
 __all__ = ["DRAFTER_ARCHITECTURE", "EconomizeRedrafterEagle3ForCausalLM"]
 
@@ -58,7 +63,9 @@ class EconomizeRedrafterEagle3ForCausalLM(HeadDrafterModel):
     drafter_name = "ReDrafter"
     weights_prefix = WEIGHTS_PREFIX
 
-    def __init__(self, *, vllm_config: object, prefix: str = "") -> None:
+    spec: RedrafterDrafterSpec
+
+    def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
         super().__init__(vllm_config)
         self.spec = RedrafterDrafterSpec.from_hf_config(_draft_hf_config(vllm_config))
         self.redrafter = _Redrafter(self.spec)

@@ -3,10 +3,14 @@ economize's vLLM plugin (:mod:`economize.backends.vllm.dmtd`)."""
 
 from __future__ import annotations
 
-from torch import nn
+from typing import TYPE_CHECKING, cast
 
+from ....core.technique import Technique
 from .base import PlanBuilder, Support, register_vllm_technique
 from .drafters import JumpVllm
+
+if TYPE_CHECKING:
+    from ....techniques.dynamic_depth.dmtd import DmtdConfig
 
 __all__ = ["DmtdVllm"]
 
@@ -23,9 +27,9 @@ class DmtdVllm(JumpVllm):
               "LoRA or copies for adapted paths); served lossless, every draft verified")
     exporter = "dmtd"
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         super().contribute(technique, builder)
-        tau = technique.config.cycle_length
+        tau = cast("DmtdConfig", technique.config).cycle_length
         builder.note(self.technique, f"vLLM verifies every draft: DMTD's lossy cycles (drafts kept, "
                                      f"DmtdTechnique.decode_config) run on the HF backend only; "
                                      f"num_speculative_tokens={max(tau - 1, 1)} drafts one cycle of tau={tau}")

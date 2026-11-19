@@ -19,7 +19,7 @@ drafter (``economize_drafter.jump.*``), for pushing a re-distilled drafter into 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 import torch
 from torch import nn
@@ -28,12 +28,15 @@ from ..._deprecation import warn_moved
 from ..exporters import DrafterExporter, exporter_for
 from .drafters import SYNC_PREFIX
 
+if TYPE_CHECKING:
+    from ...core.technique import Technique
+
 __all__ = ["drafter_config", "drafter_weights", "export_drafter"]
 
 ExportFormat = Literal["eagle3", "speculators"]
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> object:
     if name == "JumpVllmExporter":  # the class moved; kept here (no warning) for ``from .export import ...``
         from .jump.export import JumpVllmExporter
 
@@ -46,19 +49,19 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def jump_technique_of(model: Any) -> nn.Module:
+def jump_technique_of(model: nn.Module) -> Technique:
     """Deprecated: use ``JumpVllmExporter().technique_of(model)`` (:meth:`DrafterExporter.technique_of`)."""
     warn_moved(f"{__name__}.jump_technique_of", "economize.backends.vllm.JumpVllmExporter().technique_of")
     return exporter_for(model, "vllm", "jump").technique_of(model)
 
 
-def _exporter(model: Any) -> DrafterExporter:
+def _exporter(model: nn.Module) -> DrafterExporter[Technique]:
     """The vLLM exporter of the model's drafter technique (:func:`~economize.backends.exporter_for`)."""
     return exporter_for(model, "vllm")
 
 
-def drafter_config(model: Any, *, format: ExportFormat = "eagle3", num_speculative_tokens: int = 4,
-                   verifier: str | None = None) -> dict[str, Any]:
+def drafter_config(model: nn.Module, *, format: ExportFormat = "eagle3", num_speculative_tokens: int = 4,
+                   verifier: str | None = None) -> dict[str, object]:
     """The ``config.json`` of an exported drafter (see the module docstring for the two formats).
 
     Args:
@@ -73,8 +76,8 @@ def drafter_config(model: Any, *, format: ExportFormat = "eagle3", num_speculati
     )
 
 
-def export_drafter(model: Any, path: str | Path, *, format: ExportFormat = "eagle3", num_speculative_tokens: int = 4,
-                   verifier: str | None = None) -> Path:
+def export_drafter(model: nn.Module, path: str | Path, *, format: ExportFormat = "eagle3",
+                   num_speculative_tokens: int = 4, verifier: str | None = None) -> Path:
     """Write ``config.json`` and ``model.safetensors`` (drafter-owned float32 tensors, ``jump.*``) to ``path``.
 
     Args:
@@ -91,7 +94,7 @@ def export_drafter(model: Any, path: str | Path, *, format: ExportFormat = "eagl
                                    verifier=verifier)
 
 
-def drafter_weights(model: Any, *, device: torch.device | str | None = None) -> list[tuple[str, torch.Tensor]]:
+def drafter_weights(model: nn.Module, *, device: torch.device | str | None = None) -> list[tuple[str, torch.Tensor]]:
     """The drafter's tensors named for an RL weight sync of the target: ``("economize_drafter.<name>", tensor)``,
     where ``<name>`` is the tensor's name in the exported ``model.safetensors`` (``jump.*`` for a jump drafter).
 

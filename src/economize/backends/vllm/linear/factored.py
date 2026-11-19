@@ -116,7 +116,8 @@ def factored_linear(x: Tensor, bias: Tensor | None, weight: Tensor | None, dense
     for size, rank in zip(sizes, ranks, strict=True):
         if rank == 0:
             start, end = next(dense_bounds)
-            parts.append(dense[:, start:end])  # type: ignore[index]
+            assert dense is not None  # a dense unit makes dense_sizes nonempty
+            parts.append(dense[:, start:end])
             continue
         start, end = next(latent_bounds)
         parts.append(teal_linear(latent[:, start:end], up_factor(up, offset, rank, size), None,

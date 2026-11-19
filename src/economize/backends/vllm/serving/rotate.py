@@ -24,6 +24,7 @@ from typing import ClassVar
 import torch
 from torch import nn
 
+from ....core.technique import Technique
 from ...exporters import UnsupportedBackendError
 from .base import PlanBuilder, Role, Support, VllmTechnique, register_vllm_technique
 from .weights import _dense_dtype, quantized_inside
@@ -108,7 +109,7 @@ class RotateVllm(VllmTechnique):
     #: The kernel vLLM applies a ``hadamard`` input transform with.
     kernel: ClassVar[str] = "vllm._custom_ops.hadacore_transform (compressed-tensors HadamardTransform)"
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
         for name in rotation_sites(builder.base):
             leaf = name.rsplit(".", 1)[-1]
             if leaf in FUSED_LEAVES and quantized_inside(builder.base.get_submodule(name)) is not None:
@@ -118,7 +119,7 @@ class RotateVllm(VllmTechnique):
                 )
 
     @torch.no_grad()
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         from ....techniques.rotate import hadamard_transform, sylvester
 
         base = builder.base

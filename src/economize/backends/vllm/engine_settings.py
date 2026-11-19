@@ -18,40 +18,49 @@ Importing this module does not import vLLM.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeAlias, TypeVar, cast
 
-__all__ = ["EngineSettings", "additional_config"]
+if TYPE_CHECKING:
+    from vllm.config import VllmConfig
 
+__all__ = ["EngineConfig", "EngineSettings", "additional_config"]
+
+#: A ``VllmConfig``, or a plain ``additional_config`` mapping taken as one.
+EngineConfig: TypeAlias = "VllmConfig | Mapping[str, object]"
+
+E = TypeVar("E", bound=Mapping[str, object])
 S = TypeVar("S")
 
 
-def additional_config(vllm_config: Any) -> Mapping[str, Any]:
+def additional_config(vllm_config: EngineConfig | None) -> Mapping[str, object]:
     """The ``additional_config`` of a ``VllmConfig`` (empty if it has none); a plain mapping is taken as one."""
     if isinstance(vllm_config, Mapping):
         return vllm_config
-    return getattr(vllm_config, "additional_config", None) or {}
+    # vLLM types it ``dict | SupportsHash``; economize's entries live in the dict form
+    return cast("Mapping[str, object]", getattr(vllm_config, "additional_config", None) or {})
 
 
-class EngineSettings(Generic[S]):
+class EngineSettings(Generic[E, S]):
     """The settings of one economize backend, parsed from the engine config (see the module docstring).
 
     Args:
-        key: The ``additional_config`` key of the backend's entry.
+        key: The ``additional_config`` key of the backend's entry (an ``E``, written by
+            :func:`economize.backends.vllm.serving.to_vllm`).
         parse: Settings from the entry and the whole config (the config may be a plain ``additional_config``
             mapping, see :func:`additional_config`).
     """
 
-    def __init__(self, key: str, parse: Callable[[Mapping[str, Any], Any], S]) -> None:
+    def __init__(self, key: str, parse: Callable[[E, EngineConfig], S]) -> None:
         self.key = key
         self._parse = parse
         self._bound: S | None = None
 
-    def of(self, vllm_config: Any) -> S | None:
+    def of(self, vllm_config: EngineConfig) -> S | None:
         """The settings ``vllm_config`` asks for, or ``None`` when it has no entry under :attr:`key`."""
         entry = additional_config(vllm_config).get(self.key)
-        return self._parse(entry, vllm_config) if entry else None
+        return self._parse(cast(E, entry), vllm_config) if entry else None
 
-    def bind(self, vllm_config: Any) -> S | None:
+    def bind(self, vllm_config: EngineConfig) -> S | None:
         """:meth:`of`, which :meth:`current` returns from now on outside a config context (when not ``None``)."""
         settings = self.of(vllm_config)
         if settings is not None:

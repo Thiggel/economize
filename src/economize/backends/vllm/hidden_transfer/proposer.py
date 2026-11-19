@@ -12,9 +12,15 @@ The auxiliary states at ``P`` stay in the sources buffer over the round. The V1 
 from __future__ import annotations
 
 import functools
-from typing import Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from ....errors import ConfigError
+
+if TYPE_CHECKING:
+    from torch import nn
+
+    from ..jump.proposer import DraftStep
 
 __all__: list[str] = []
 
@@ -33,7 +39,7 @@ else:
     class HiddenTransferSpeculator(JumpSpeculator):
         """Hidden Transfer drafting in the V2 model runner (see the module docstring)."""
 
-        def load_model(self, target_model: Any) -> None:
+        def load_model(self, target_model: nn.Module) -> None:
             super().load_model(target_model)
             spec = self.model.ht_spec
             if self.num_speculative_steps > spec.num_steps:
@@ -44,8 +50,9 @@ else:
             self.sources = torch.zeros(self.max_num_tokens, width, dtype=self.dtype, device=self.device)
 
         # ---- CUDA graphs -----------------------------------------------------------------------------------------
-        def init_cudagraph_manager(self, cudagraph_mode: Any) -> None:
+        def init_cudagraph_manager(self, cudagraph_mode: CUDAGraphMode) -> None:
             super().init_cudagraph_manager(cudagraph_mode)
+            assert self.decode_cudagraph_manager is not None
             mode = self.decode_cudagraph_manager.cudagraph_mode
             for step in range(1, self.num_speculative_steps):
                 setattr(self, f"step_cudagraph_manager_{step + 1}",
@@ -63,15 +70,17 @@ else:
                     progress_bar_desc=f"Capturing Hidden Transfer draft step {step + 1} CUDA graphs",
                 )
 
-        def _step_manager(self, step: int) -> Any:
+        def _step_manager(self, step: int) -> SpeculatorCudaGraphManager | None:
             return self.decode_cudagraph_manager if step == 0 else getattr(self, f"step_cudagraph_manager_{step + 1}")
 
-        def _step_function(self, step: int) -> Any:
+        def _step_function(self, step: int) -> DraftStep:
             return functools.partial(self._transfer_step, step + 1)
 
         # ---- drafting --------------------------------------------------------------------------------------------
-        def _transfer_step(self, step: int, num_reqs: int, num_tokens: int, attn_metadata: Any, slot_mappings: Any,
-                           num_tokens_across_dp: Any, cudagraph_runtime_mode: Any = None) -> None:
+        def _transfer_step(self, step: int, num_reqs: int, num_tokens: int,
+                           attn_metadata: Mapping[str, object] | None, slot_mappings: dict[str, torch.Tensor] | None,
+                           num_tokens_across_dp: torch.Tensor | None,
+                           cudagraph_runtime_mode: CUDAGraphMode | None = None) -> None:
             assert self.sources is not None
             self._prepare_eplb_forward(num_reqs)
             mode = CUDAGraphMode.NONE if cudagraph_runtime_mode is None else cudagraph_runtime_mode

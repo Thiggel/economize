@@ -19,7 +19,7 @@ The exporters reuse the vLLM exporters' drafter state (they import no ``vllm``).
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import torch
 from torch import nn
@@ -33,6 +33,13 @@ from ..vllm.early_exit.export import EarlyExitVllmExporter
 from ..vllm.free.export import FreeVllmExporter
 from ..vllm.jump.export import JumpVllmExporter
 from ..vllm.layer_skip.export import LayerSkipVllmExporter
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
+    from ...core.technique import Technique
+    from ...techniques.eagle3.technique import Eagle3Technique
+    from ..exporters import ExportOptions
 
 __all__ = [
     "DRAFTER_ARCHITECTURE",
@@ -68,7 +75,7 @@ def sglang_aux_ids(layers: list[int]) -> list[int]:
     return sorted({int(i) - 1 for i in layers})
 
 
-def _architecture(technique: Any) -> str:
+def _architecture(technique: Technique) -> str:
     adapter = technique.adapter
     names = list(getattr(adapter.model.config, "architectures", None) or getattr(adapter.config, "architectures",
                                                                                    None) or [])
@@ -78,7 +85,7 @@ def _architecture(technique: Any) -> str:
     return name if name.endswith("ForCausalLM") else ""
 
 
-def check_sglang_jump(technique: Any, spec: JumpDrafterSpec) -> None:
+def check_sglang_jump(technique: Technique, spec: JumpDrafterSpec) -> None:
     """Refuse a jump-format drafter SGLang's EAGLE-3 path cannot run.
 
     Raises:
@@ -121,7 +128,7 @@ def _layer_path(layer: nn.Module, target: nn.Module) -> str:
 
 
 @register_exporter("sglang", "jump")
-class JumpSglangExporter(DrafterExporter):
+class JumpSglangExporter(DrafterExporter["Technique"]):
     """A jump-format drafter as SGLang's ``EconomizeJumpForCausalLM`` draft model, see the module docstring.
 
     A drafter written in the jump format subclasses it and names its vLLM exporter in :attr:`vllm_exporter`, whose
@@ -134,13 +141,13 @@ class JumpSglangExporter(DrafterExporter):
     def _vllm(self) -> JumpVllmExporter:
         return self.vllm_exporter()
 
-    def spec(self, technique: nn.Module) -> JumpDrafterSpec:
+    def spec(self, technique: Technique) -> JumpDrafterSpec:
         """The ``economize_jump`` block of ``technique`` (from :attr:`vllm_exporter`)."""
         return self._vllm().spec(technique)
 
-    def check(self, model: Any) -> JumpDrafterSpec:
+    def check(self, model: nn.Module) -> JumpDrafterSpec:
         """The spec of ``model``'s drafter after :func:`check_sglang_jump`."""
-        technique: Any = self.technique_of(model)
+        technique = self.technique_of(model)
         if self._vllm().architecture != JumpVllmExporter.architecture:
             raise UnsupportedBackendError(
                 f"{self.technique!r} drafts with its own draft model on vLLM ({self._vllm().architecture}); the "
@@ -149,20 +156,22 @@ class JumpSglangExporter(DrafterExporter):
         check_sglang_jump(technique, spec)
         return spec
 
-    def config(self, model: Any, **options: Any) -> dict[str, Any]:
+    def config(self, model: nn.Module, **options: Unpack[ExportOptions]) -> dict[str, object]:
         """The draft ``config.json`` (``options`` are accepted for the generic export functions and ignored)."""
-        technique: Any = self.technique_of(model)
+        technique = self.technique_of(model)
         spec = self.check(model)
         m, u, r = spec.target_layer, int(spec.config.source_layer), spec.exit_layer
-        config = dict(technique.adapter.config.to_dict())
+        config: dict[str, object] = dict(technique.adapter.config.to_dict())
         for key in _DROPPED_KEYS:
             config.pop(key, None)
         jump_layers = [int(i) for i in spec.jump_layers]
         for key in ("layer_types",):
-            if isinstance(config.get(key), list):
-                config[key] = [config[key][i - 1] for i in jump_layers]
+            values = config.get(key)
+            if isinstance(values, list):
+                config[key] = [values[i - 1] for i in jump_layers]
         if "max_window_layers" in config:
-            config["max_window_layers"] = sum(1 for i in jump_layers if i <= int(config["max_window_layers"]))
+            window = int(cast(int, config["max_window_layers"]))
+            config["max_window_layers"] = sum(1 for i in jump_layers if i <= window)
         captured = [u] + ([m] if m >= 1 and m != u else [])
         architecture = _architecture(technique)
         config.update({
@@ -180,12 +189,12 @@ class JumpSglangExporter(DrafterExporter):
         config.pop("draft_vocab_size", None)  # full vocabulary: SGLang shares the target's LM head
         return config
 
-    def drafter_tensors(self, technique: nn.Module) -> dict[str, torch.Tensor]:
+    def drafter_tensors(self, technique: Technique) -> dict[str, torch.Tensor]:
         """The predictor, mixer and readout tensors, keyed ``jump.<name>`` (LoRA and copies are merged elsewhere)."""
         state = self._vllm().drafter_state(technique)
         return {"jump." + name: tensor for name, tensor in state.items() if not name.startswith(("lora.", "blocks."))}
 
-    def layer_tensors(self, technique: Any, spec: JumpDrafterSpec,
+    def layer_tensors(self, technique: Technique, spec: JumpDrafterSpec,
                       base_state: Mapping[str, torch.Tensor] | None = None) -> dict[str, torch.Tensor]:
         """The jump-path layers as SGLang loads them (``model.layers.<j>.<hf name>``) and the final norm.
 
@@ -231,19 +240,20 @@ class JumpSglangExporter(DrafterExporter):
         if base_state is not None and norm_prefix + "weight" in base_state:
             out["model.norm.weight"] = base_state[norm_prefix + "weight"].to("cpu", torch.float32).contiguous()
         else:
-            out["model.norm.weight"] = norm.weight.detach().to("cpu", torch.float32).contiguous()
+            out["model.norm.weight"] = cast(torch.Tensor, norm.weight).detach().to("cpu", torch.float32).contiguous()
         return out
 
-    def tensors(self, model: Any, base_state: Mapping[str, torch.Tensor] | None = None) -> dict[str, torch.Tensor]:
+    def tensors(self, model: nn.Module,
+                base_state: Mapping[str, torch.Tensor] | None = None) -> dict[str, torch.Tensor]:
         """All tensors of the draft folder in float32 on the CPU."""
-        technique: Any = self.technique_of(model)
+        technique = self.technique_of(model)
         spec = self.check(model)
         out = {name: tensor.detach().to("cpu", torch.float32).contiguous()
                for name, tensor in self.drafter_tensors(technique).items()}
         out.update(self.layer_tensors(technique, spec, base_state))
         return out
 
-    def live_tensors(self, model: Any) -> dict[str, torch.Tensor]:
+    def live_tensors(self, model: nn.Module) -> dict[str, torch.Tensor]:
         return self.tensors(model)
 
     def metadata(self) -> dict[str, str]:
@@ -278,7 +288,7 @@ class DmtdSglangExporter(JumpSglangExporter):
     vllm_exporter = DmtdVllmExporter
 
 
-def check_sglang_eagle3(technique: Any) -> None:
+def check_sglang_eagle3(technique: Eagle3Technique) -> None:
     """Refuse an EAGLE-3 drafter SGLang's ``LlamaForCausalLMEagle3`` would load wrongly.
 
     Raises:
@@ -300,11 +310,11 @@ def check_sglang_eagle3(technique: Any) -> None:
 class Eagle3SglangExporter(Eagle3VllmExporter):
     """An EAGLE-3 drafter as SGLang's ``LlamaForCausalLMEagle3`` folder (aux ids shifted to SGLang's convention)."""
 
-    def config(self, model: Any, **options: Any) -> dict[str, Any]:
-        technique: Any = self.technique_of(model)
+    def config(self, model: nn.Module, **options: Unpack[ExportOptions]) -> dict[str, object]:
+        technique = self.technique_of(model)
         check_sglang_eagle3(technique)
         config = self.build_config(model, format="eagle3")
-        aux = [int(i) for i in config.pop("eagle_aux_hidden_state_layer_ids")]
+        aux = [int(i) for i in cast("list[int]", config.pop("eagle_aux_hidden_state_layer_ids"))]
         config["architectures"] = ["LlamaForCausalLMEagle3"]
         config["eagle_config"] = {"eagle_aux_hidden_state_layer_ids": sglang_aux_ids(aux),
                                   "use_aux_hidden_state": True}

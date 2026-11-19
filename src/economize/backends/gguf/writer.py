@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import torch
@@ -26,6 +26,7 @@ from .arch import GgufArch, gguf_arch
 
 if TYPE_CHECKING:
     import gguf
+    from transformers import PreTrainedTokenizerFast
 
     from ...techniques.quant.grid import QuantizedWeight
 
@@ -182,7 +183,7 @@ def _vocabulary(writer: gguf.GGUFWriter, shape: ModelShape, arch: GgufArch, toke
     if model.get("type") != "BPE" or model.get("byte_fallback"):
         raise ConfigError("the GGUF writer writes byte-level BPE vocabularies; convert a SentencePiece model with "
                           "llama.cpp's convert_hf_to_gguf.py and pass the dense export to it")
-    vocab: Mapping[str, int] = tokenizer.get_vocab()  # type: ignore[attr-defined]  # a PreTrainedTokenizerFast
+    vocab: Mapping[str, int] = cast("PreTrainedTokenizerFast", tokenizer).get_vocab()  # it has a backend_tokenizer
     added = {token.content: token for token in getattr(tokenizer, "added_tokens_decoder", {}).values()}
     by_id = {index: token for token, index in vocab.items()}
     tokens, types = [], []

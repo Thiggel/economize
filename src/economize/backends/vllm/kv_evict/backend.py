@@ -37,9 +37,8 @@ Importing this module imports vLLM.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass, fields, replace
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import torch
 from vllm.v1.attention.backends.triton_attn import (
@@ -51,8 +50,14 @@ from vllm.v1.attention.backends.triton_attn import (
 from vllm.v1.kv_cache_interface import FullAttentionSpec
 
 from ....errors import ConfigError, UnsupportedModelError
-from ..engine_settings import EngineSettings
+from ..engine_settings import EngineConfig, EngineSettings
+from . import StreamingEntry
 from .spec import StreamingSpec
+
+if TYPE_CHECKING:
+    from vllm.config import VllmConfig
+    from vllm.v1.attention.backend import CommonAttentionMetadata
+    from vllm.v1.kv_cache_interface import AttentionSpec
 
 __all__ = ["CONFIG_KEY", "SETTINGS", "SINGLE_PASS", "EconomizeStreamingBackend", "StreamingMetadata",
            "StreamingSettings", "compact_block_table", "dropped_pages", "prefix_lens", "settings_of"]
@@ -90,7 +95,7 @@ class StreamingSettings:
         return self.recent + 1
 
 
-def _parse(entry: Mapping[str, Any], vllm_config: Any) -> StreamingSettings:
+def _parse(entry: StreamingEntry, vllm_config: EngineConfig) -> StreamingSettings:
     speculative = getattr(vllm_config, "speculative_config", None)
     retain = max(0, int(getattr(speculative, "num_speculative_tokens", 0) or 0) - 1) if speculative else 0
     return StreamingSettings(sinks=int(entry["sinks"]), recent=int(entry["recent"]),
@@ -98,7 +103,7 @@ def _parse(entry: Mapping[str, Any], vllm_config: Any) -> StreamingSettings:
 
 
 #: The streaming settings of the engine (see :class:`~economize.backends.vllm.engine_settings.EngineSettings`).
-SETTINGS: EngineSettings[StreamingSettings] = EngineSettings(CONFIG_KEY, _parse)
+SETTINGS: EngineSettings[StreamingEntry, StreamingSettings] = EngineSettings(CONFIG_KEY, _parse)
 #: The streaming settings ``vllm_config`` asks for, or ``None``.
 settings_of = SETTINGS.of
 
@@ -157,12 +162,12 @@ class StreamingMetadata(TritonAttentionMetadata):
     dropped_tokens: torch.Tensor | None = None
 
 
-def _streams(spec: Any) -> bool:
+def _streams(spec: object) -> bool:
     return getattr(spec, "sliding_window", None) is None and not getattr(spec, "non_causal", False) \
         and getattr(spec, "attention_chunk_size", None) is None
 
 
-def streaming_spec(spec: Any, settings: StreamingSettings | None) -> Any:
+def streaming_spec(spec: AttentionSpec, settings: StreamingSettings | None) -> AttentionSpec:
     """``spec`` as a :class:`StreamingSpec` when its layer streams and frees blocks, else ``spec``."""
     if settings is None or settings.layers or type(spec) is not FullAttentionSpec or not _streams(spec):
         return spec
@@ -173,7 +178,8 @@ def streaming_spec(spec: Any, settings: StreamingSettings | None) -> Any:
 class EconomizeStreamingMetadataBuilder(TritonAttentionMetadataBuilder):
     """Triton metadata with the sink-plus-window mask on every decoding request of a full-attention group."""
 
-    def __init__(self, kv_cache_spec: Any, layer_names: list[str], vllm_config: Any, device: torch.device) -> None:
+    def __init__(self, kv_cache_spec: AttentionSpec, layer_names: list[str], vllm_config: VllmConfig,
+                 device: torch.device) -> None:
         super().__init__(kv_cache_spec, layer_names, vllm_config, device)
         settings = SETTINGS.bind(vllm_config)
         self.streaming = settings if settings is not None and _streams(kv_cache_spec) else None
@@ -210,7 +216,8 @@ class EconomizeStreamingMetadataBuilder(TritonAttentionMetadataBuilder):
         assert self._seq_lens is not None and self._dropped is not None
         return self._table, self._seq_lens, self._dropped
 
-    def build(self, common_prefix_len: int, common_attn_metadata: Any, fast_build: bool = False) -> Any:
+    def build(self, common_prefix_len: int, common_attn_metadata: CommonAttentionMetadata,
+              fast_build: bool = False) -> TritonAttentionMetadata:
         if self.streaming is None:
             return super().build(common_prefix_len, common_attn_metadata, fast_build)
         prefix = prefix_lens(common_attn_metadata.is_prefilling, common_attn_metadata.num_reqs, self.streaming.sinks)
@@ -220,7 +227,9 @@ class EconomizeStreamingMetadataBuilder(TritonAttentionMetadataBuilder):
             return metadata
         return self._compact(metadata, prefix, common_prefix_len)
 
-    def _compact(self, metadata: Any, prefix: torch.Tensor, common_prefix_len: int) -> StreamingMetadata:
+    def _compact(
+        self, metadata: TritonAttentionMetadata, prefix: torch.Tensor, common_prefix_len: int
+    ) -> StreamingMetadata:
         """``metadata`` with each decoding request's block table compacted (through persistent buffers always, so
         that captured CUDA graphs read the current step's tables)."""
         assert self.streaming is not None
@@ -249,14 +258,14 @@ class EconomizeStreamingMetadataBuilder(TritonAttentionMetadataBuilder):
         values.update(seq_lens=seq_out[:rows], block_table=table_out[:table_rows, :table.shape[1]])
         return StreamingMetadata(**values, full_seq_lens=seq_lens, dropped_tokens=dropped)
 
-    def update_draft_decode_metadata(self, metadata: Any) -> None:
+    def update_draft_decode_metadata(self, metadata: TritonAttentionMetadata) -> None:
         """Follow vLLM's in-place advance of the draft positions: the pages dropped at the first draft step stay
         before the window of every later step, so only the shortened lengths change."""
         if isinstance(metadata, StreamingMetadata) and metadata.full_seq_lens is not None:
             assert metadata.dropped_tokens is not None
             torch.sub(metadata.full_seq_lens, metadata.dropped_tokens, out=metadata.seq_lens)
 
-    def build_for_cudagraph_capture(self, common_attn_metadata: Any) -> Any:
+    def build_for_cudagraph_capture(self, common_attn_metadata: CommonAttentionMetadata) -> TritonAttentionMetadata:
         metadata = super().build_for_cudagraph_capture(common_attn_metadata)
         if isinstance(metadata, StreamingMetadata) and metadata.full_seq_lens is not None:
             assert metadata.dropped_tokens is not None
@@ -268,6 +277,8 @@ class EconomizeStreamingMetadataBuilder(TritonAttentionMetadataBuilder):
 class EconomizeStreamingImpl(TritonAttentionImpl):
     """Triton attention that drops the streaming mask on the layers outside a layer subset."""
 
+    # forwards the arguments of vLLM's TritonAttentionImpl constructor unchanged, whatever types they have
+    # Any: forwarded unchanged to the vLLM base-class constructor, whose signature varies across vLLM versions.
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         settings = SETTINGS.current()
@@ -280,14 +291,15 @@ class EconomizeStreamingImpl(TritonAttentionImpl):
                 "by the distance between query and key. List the streaming layers in layers=(...) to keep the full "
                 "table, or serve the model with economize's runtime")
 
-    def _streams_at(self, layer: Any) -> bool:
+    def _streams_at(self, layer: torch.nn.Module) -> bool:
         if not self._subset:
             return True
         match = _LAYER.search(str(getattr(layer, "layer_name", "")))
         return match is not None and int(match.group(1)) + 1 in self._subset
 
-    def forward(self, layer: Any, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, kv_cache: Any,
-                attn_metadata: Any, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def forward(self, layer: torch.nn.Module, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor,
+                kv_cache: torch.Tensor, attn_metadata: TritonAttentionMetadata | None, *args: torch.Tensor | None,
+                **kwargs: torch.Tensor | None) -> torch.Tensor:
         if self._subset and attn_metadata is not None and attn_metadata.rswa_prefix_lens is not None:
             if self._layer_streams is None:
                 self._layer_streams = self._streams_at(layer)
@@ -314,5 +326,5 @@ class EconomizeStreamingBackend(TritonAttentionBackend):
         return EconomizeStreamingMetadataBuilder
 
     @classmethod
-    def customize_spec(cls, spec: Any) -> Any:
+    def customize_spec(cls, spec: AttentionSpec) -> AttentionSpec:
         return streaming_spec(super().customize_spec(spec), SETTINGS.current())

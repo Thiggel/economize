@@ -3,8 +3,7 @@ proposer (:mod:`economize.backends.vllm.hidden_transfer`)."""
 
 from __future__ import annotations
 
-from torch import nn
-
+from ....core.technique import Technique
 from ...exporters import UnsupportedBackendError
 from .base import PlanBuilder, Support, register_vllm_technique
 from .drafters import JumpVllm
@@ -24,7 +23,7 @@ class HiddenTransferVllm(JumpVllm):
               "after layer t_i and runs the target's own layers t_i+1..L on the paged cache, one CUDA graph per step")
     exporter = "hidden_transfer"
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
         from ....errors import ConfigError
         from ....techniques.dynamic_depth.hidden_transfer_export import HiddenTransferDrafterSpec
 
@@ -37,6 +36,6 @@ class HiddenTransferVllm(JumpVllm):
                                           f"{spec.num_steps} tokens; asked for num_speculative_tokens="
                                           f"{builder.num_speculative_tokens}")
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         super().contribute(technique, builder)
         builder.note(self.technique, "the transfer maps are replicated on every tensor-parallel rank")

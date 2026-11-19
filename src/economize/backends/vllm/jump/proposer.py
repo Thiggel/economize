@@ -32,9 +32,29 @@ the full graphs. Data parallel drafting (``data_parallel_size > 1``) is untested
 from __future__ import annotations
 
 import logging
-from typing import Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Protocol
 
 from ..custom_attention import mark_draft_builders
+
+if TYPE_CHECKING:
+    import torch
+    from torch import nn
+    from vllm.config import VllmConfig
+    from vllm.config.compilation import CUDAGraphMode
+    from vllm.v1.kv_cache_interface import KVCacheConfig
+    from vllm.v1.worker.gpu.block_table import BlockTables
+    from vllm.v1.worker.gpu.dp_utils import DPSyncState
+    from vllm.v1.worker.gpu.input_batch import InputBatch, InputBuffers
+    from vllm.v1.worker.gpu.model_states.interface import ModelState
+    from vllm.v1.worker.utils import AttentionGroup
+
+    class DraftStep(Protocol):
+        """One eager draft step, called as vLLM's graph managers call a captured function."""
+
+        def __call__(self, num_reqs: int, num_tokens: int, attn_metadata: Mapping[str, object] | None,
+                     slot_mappings: dict[str, torch.Tensor] | None, num_tokens_across_dp: torch.Tensor | None,
+                     cudagraph_runtime_mode: CUDAGraphMode | None = None) -> None: ...
 
 __all__: list[str] = []
 
@@ -52,7 +72,7 @@ else:
     class JumpProposer(EagleProposer):
         """Jump drafting in the V1 model runner (``GPUModelRunner.drafter``): not supported, raises at startup."""
 
-        def __init__(self, vllm_config: Any, device: Any, runner: Any = None) -> None:
+        def __init__(self, vllm_config: VllmConfig, device: torch.device, runner: object = None) -> None:
             raise NotImplementedError(_V1_MESSAGE)
 
     __all__.append("JumpProposer")
@@ -83,29 +103,29 @@ else:
         layers, and :meth:`propose` replaces the prefill-plus-decode loop by ``k`` jump steps.
         """
 
-        def __init__(self, vllm_config: Any, device: Any, *args: Any, **kwargs: Any) -> None:
+        def __init__(self, vllm_config: VllmConfig, device: torch.device, *args: object, **kwargs: object) -> None:
             super().__init__(vllm_config, device, *args, **kwargs)
             self.sources: torch.Tensor | None = None  # [max_num_tokens, n * d], allocated by load_model
 
         # ---- loading ---------------------------------------------------------------------------------------------
-        def load_draft_model(self, target_model: Any, target_attn_layer_names: set[str]) -> Any:
+        def load_draft_model(self, target_model: nn.Module, target_attn_layer_names: set[str]) -> nn.Module:
             from vllm.compilation.backends import set_model_tag
             from vllm.model_executor.model_loader import get_model
 
             with set_model_tag("eagle_head"):
                 model = get_model(vllm_config=self.vllm_config, model_config=self.draft_model_config)
-            language_model = (target_model.get_language_model() if hasattr(target_model, "get_language_model")
-                              else target_model)
+            get_language_model = getattr(target_model, "get_language_model", None)
+            language_model = get_language_model() if get_language_model is not None else target_model
             model.tie_to_target(language_model)
             return model
 
-        def load_model(self, target_model: Any) -> None:
+        def load_model(self, target_model: nn.Module) -> None:
             super().load_model(target_model)
             width = len(self.model.spec.source_layers) * self.model.spec.hidden_size
             self.sources = torch.zeros(self.max_num_tokens, width, dtype=self.dtype, device=self.device)
 
-        def set_attn(self, model_state: Any, kv_cache_config: Any, block_tables: Any, target_input_buffers: Any,
-                     target_attn_groups: Any) -> None:
+        def set_attn(self, model_state: ModelState, kv_cache_config: KVCacheConfig, block_tables: BlockTables,
+                     target_input_buffers: InputBuffers, target_attn_groups: list[list[AttentionGroup]]) -> None:
             # DraftModelSpeculator.set_attn with metadata builders for the jump path's attention layers (the
             # target's layers m+1..r) in place of the (empty) set of draft attention layers
             self.model_state = model_state
@@ -123,7 +143,7 @@ else:
             self.use_fused_multi_step_decode = False
 
         # ---- CUDA graphs -----------------------------------------------------------------------------------------
-        def init_cudagraph_manager(self, cudagraph_mode: Any) -> None:
+        def init_cudagraph_manager(self, cudagraph_mode: CUDAGraphMode) -> None:
             mode = CUDAGraphMode.FULL_DECODE_ONLY if cudagraph_mode.decode_mode() == CUDAGraphMode.FULL else (
                 CUDAGraphMode.NONE)
             if mode == CUDAGraphMode.NONE and cudagraph_mode != CUDAGraphMode.NONE:
@@ -149,12 +169,16 @@ else:
 
         # ---- drafting --------------------------------------------------------------------------------------------
         @torch.inference_mode()
-        def propose(self, input_batch: Any, attn_metadata: Any, slot_mappings: Any, last_hidden_states: Any,
-                    aux_hidden_states: Any, num_sampled: Any, num_rejected: Any, last_sampled: Any,
-                    next_prefill_tokens: Any, temperature: Any, seeds: Any, dp_sync: Any = None,
-                    dummy_run: bool = False, skip_attn_for_dummy_run: bool = False, mm_inputs: Any = None,
+        def propose(self, input_batch: InputBatch, attn_metadata: Mapping[str, object] | None,
+                    slot_mappings: dict[str, torch.Tensor], last_hidden_states: torch.Tensor,
+                    aux_hidden_states: list[torch.Tensor] | None, num_sampled: torch.Tensor,
+                    num_rejected: torch.Tensor, last_sampled: torch.Tensor, next_prefill_tokens: torch.Tensor,
+                    temperature: torch.Tensor, seeds: torch.Tensor, dp_sync: DPSyncState | None = None,
+                    dummy_run: bool = False, skip_attn_for_dummy_run: bool = False,
+                    mm_inputs: tuple[list[torch.Tensor], torch.Tensor] | None = None,
                     is_profile: bool = False) -> torch.Tensor:
             assert self.sources is not None
+            assert aux_hidden_states is not None  # the drafter declares its source layers as auxiliary layers
             self.model.refresh_if_stale()  # after an RL weight sync of layers m+1..r or of the drafter
             num_reqs = input_batch.num_reqs
             max_seq_len = int(input_batch.seq_lens_cpu_upper_bound[:num_reqs].max().item())
@@ -197,22 +221,25 @@ else:
                     )
                 self.current_draft_step.fill_(step)
                 if batch_desc.cg_mode == CUDAGraphMode.FULL:
-                    self._step_manager(step).run_fullgraph(batch_desc)
+                    manager = self._step_manager(step)
+                    assert manager is not None
+                    manager.run_fullgraph(batch_desc)
                 else:
                     self._step_function(step)(num_reqs, batch_desc.num_tokens, step_metadata, step_slots,
                                               num_tokens_across_dp, batch_desc.cg_mode)
             return self.draft_tokens[:num_reqs]
 
-        def _step_manager(self, step: int) -> Any:
+        def _step_manager(self, step: int) -> SpeculatorCudaGraphManager | None:
             """The graph manager whose graphs replay draft step ``step`` (0-based); one for every jump step."""
             return self.decode_cudagraph_manager
 
-        def _step_function(self, step: int) -> Any:
+        def _step_function(self, step: int) -> DraftStep:
             """The eager draft step ``step`` (0-based), called as the graph managers call it; the same every step."""
             return self._jump_step
 
-        def _jump_step(self, num_reqs: int, num_tokens: int, attn_metadata: Any, slot_mappings: Any,
-                       num_tokens_across_dp: Any, cudagraph_runtime_mode: Any = None) -> None:
+        def _jump_step(self, num_reqs: int, num_tokens: int, attn_metadata: Mapping[str, object] | None,
+                       slot_mappings: dict[str, torch.Tensor] | None, num_tokens_across_dp: torch.Tensor | None,
+                       cudagraph_runtime_mode: CUDAGraphMode | None = None) -> None:
             assert self.sources is not None
             self._prepare_eplb_forward(num_reqs)
             mode = CUDAGraphMode.NONE if cudagraph_runtime_mode is None else cudagraph_runtime_mode

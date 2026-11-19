@@ -7,13 +7,15 @@ globally sliced SliceGPT model serves on all four (vLLM 0.30 refuses ``qwen2``, 
 
 from __future__ import annotations
 
-from typing import ClassVar
-
-from torch import nn
+from typing import TYPE_CHECKING, ClassVar
 
 from ....techniques.width_prune.serving import EngineArchitectures, merged_lora_state, serving_obstacle
 from ...exporters import UnsupportedBackendError
+from ...vllm.serving.base import Configured
 from .base import Role, SglangPlanBuilder, SglangTechnique, Support, register_sglang_technique
+
+if TYPE_CHECKING:
+    from ....core.technique import Technique
 
 __all__ = ["SliceGPTSglang", "WidthPruneSglang"]
 
@@ -30,11 +32,11 @@ class SliceGPTSglang(SglangTechnique):
     #: ``model_type`` values whose SGLang implementation takes the head size from ``config.head_dim``.
     head_dim_types: ClassVar[frozenset[str]] = frozenset({"llama", "mistral", "qwen2", "qwen3"})
 
-    def level(self, technique: nn.Module) -> Support:
+    def level(self, technique: Configured) -> Support:
         config = getattr(technique, "config", None)
         return Support.NATIVE if getattr(config, "rotation", None) == "global" else Support.UNSUPPORTED
 
-    def check(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
+    def check(self, technique: Technique, builder: SglangPlanBuilder) -> None:
         if self.level(technique) is Support.UNSUPPORTED:
             raise UnsupportedBackendError(
                 "SGLang cannot serve slicegpt(rotation='per_block'): every residual connection of the sliced model "
@@ -46,7 +48,7 @@ class SliceGPTSglang(SglangTechnique):
                 f"slicegpt serves on SGLang for model types {sorted(self.head_dim_types)}, not {model_type!r}"
             )
 
-    def contribute(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: SglangPlanBuilder) -> None:
         builder.rewrite_base = True
         builder.note(self.technique, f"hidden width {getattr(builder.base.config, 'hidden_size', '?')} after slicing")
 
@@ -68,19 +70,19 @@ class WidthPruneSglang(SglangTechnique):
         "SGLang", head_dim=frozenset({"llama", "mistral", "qwen2", "qwen3"}),
         output_bias=frozenset({"llama", "mistral", "qwen3"}), mlp_bias=frozenset())
 
-    def level(self, technique: nn.Module) -> Support:
+    def level(self, technique: Configured) -> Support:
         config = getattr(technique, "config", None)
         if not getattr(config, "uniform_widths", False):
             return Support.UNSUPPORTED
         mlp_compensated = getattr(config, "compensates", False) and getattr(config, "mlp_ratio", 0) > 0
         return Support.UNSUPPORTED if mlp_compensated and not self.architectures.mlp_bias else Support.NATIVE
 
-    def check(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
+    def check(self, technique: Technique, builder: SglangPlanBuilder) -> None:
         obstacle = serving_obstacle(technique, builder.base, self.architectures)
         if obstacle is not None:
             raise UnsupportedBackendError(f"SGLang cannot serve this width_prune: {obstacle}")
 
-    def contribute(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: SglangPlanBuilder) -> None:
         builder.rewrite_base = True
         builder.dense.update(merged_lora_state(technique, builder.base))
         summary = getattr(technique, "summary", {})

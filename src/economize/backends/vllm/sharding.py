@@ -14,11 +14,14 @@ the unsharded layer. With ``p = 1`` the shard is the identity and nothing is com
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING
 
 import torch
 
 from ...errors import ConfigError
+
+if TYPE_CHECKING:
+    from vllm.config import VllmConfig
 
 __all__ = ["HeadShard", "head_shard", "tensor_parallel_size"]
 
@@ -26,7 +29,7 @@ __all__ = ["HeadShard", "head_shard", "tensor_parallel_size"]
 AllGather = Callable[[torch.Tensor], torch.Tensor]
 
 
-def tensor_parallel_size(vllm_config: Any) -> int:
+def tensor_parallel_size(vllm_config: VllmConfig) -> int:
     """``parallel_config.tensor_parallel_size`` of a ``VllmConfig`` (1 when it has none)."""
     return int(getattr(getattr(vllm_config, "parallel_config", None), "tensor_parallel_size", 1) or 1)
 
@@ -118,7 +121,7 @@ class HeadShard:
                 f"rank={self.rank}, size={self.size})")
 
 
-def head_shard(num_heads: int, num_kv_heads: int, head_dim: int, vllm_config: Any) -> HeadShard:
+def head_shard(num_heads: int, num_kv_heads: int, head_dim: int, vllm_config: VllmConfig) -> HeadShard:
     """The :class:`HeadShard` of this process's tensor-parallel rank under ``vllm_config`` (vLLM's group state)."""
     size = tensor_parallel_size(vllm_config)
     return HeadShard(num_heads, num_kv_heads, head_dim, _tp_rank() if size > 1 else 0, size)

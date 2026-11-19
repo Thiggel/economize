@@ -13,7 +13,7 @@ attention, so a model whose full-attention layers all stream keeps one KV cache 
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vllm.utils.math_utils import cdiv
 from vllm.v1.core.single_type_kv_cache_manager import FullAttentionManager, register_all_kvcache_specs
@@ -21,6 +21,9 @@ from vllm.v1.kv_cache_interface import FullAttentionSpec
 from vllm.v1.kv_cache_spec_registry import KVCacheSpecRegistry
 
 from ....errors import ConfigError
+
+if TYPE_CHECKING:
+    from vllm.v1.kv_cache_interface import KVCacheSpec
 
 __all__ = ["StreamingManager", "StreamingSpec", "freed_block_range"]
 
@@ -42,14 +45,15 @@ class StreamingSpec(FullAttentionSpec):
     retain: int = 0
 
     @classmethod
-    def merge(cls, specs: list[Any]) -> StreamingSpec:
-        if not all(isinstance(spec, StreamingSpec) for spec in specs):
+    def merge(cls, specs: list[KVCacheSpec]) -> StreamingSpec:
+        streaming = [spec for spec in specs if isinstance(spec, StreamingSpec)]
+        if len(streaming) != len(specs):
             raise ConfigError("all attention layers of a KV cache group must be StreamingSpec when one is")
-        windows = {(spec.sinks, spec.recent, spec.retain) for spec in specs}
+        windows = {(spec.sinks, spec.recent, spec.retain) for spec in streaming}
         if len(windows) != 1:
             raise ConfigError(f"all streaming layers of a KV cache group must share one window, got {windows}")
         sinks, recent, retain = windows.pop()
-        base = FullAttentionSpec.merge(specs)
+        base = FullAttentionSpec.merge(streaming)
         kwargs = {f.name: getattr(base, f.name) for f in fields(FullAttentionSpec) if f.init}
         return cls(**kwargs, sinks=sinks, recent=recent, retain=retain)
 
@@ -73,6 +77,8 @@ def freed_block_range(sinks: int, recent: int, retain: int, block_size: int, pro
 class StreamingManager(FullAttentionManager):
     """Full-attention manager that frees the blocks between the sinks and the window of a decoding request."""
 
+    # forwards the keyword arguments of vLLM's SingleTypeKVCacheManager constructor unchanged, whatever types they have
+    # Any: forwarded unchanged to the vLLM base-class constructor, whose signature varies across vLLM versions.
     def __init__(self, kv_cache_spec: StreamingSpec, **kwargs: Any) -> None:
         super().__init__(kv_cache_spec, **kwargs)
         self.sinks = kv_cache_spec.sinks

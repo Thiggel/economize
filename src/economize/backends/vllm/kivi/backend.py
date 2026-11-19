@@ -33,7 +33,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import replace
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import torch
 from vllm.v1.attention.backends.triton_attn import (
@@ -45,6 +45,12 @@ from vllm.v1.attention.backends.triton_attn import (
 from ....errors import ConfigError
 from ..custom_attention import is_draft_builder
 from .layout import SETTINGS, CellLayout, KIVISettings, cell_layout
+
+if TYPE_CHECKING:
+    from vllm.config import VllmConfig
+    from vllm.v1.attention.backend import AttentionLayer, CommonAttentionMetadata, MultipleOf
+    from vllm.v1.attention.backends.triton_attn import TritonAttentionMetadata
+    from vllm.v1.kv_cache_interface import AttentionSpec
 
 __all__ = ["MAX_FUSED_QUERIES", "EconomizeKIVIBackend", "EconomizeKIVIImpl", "EconomizeKIVIMetadataBuilder"]
 
@@ -72,14 +78,16 @@ class EconomizeKIVIMetadataBuilder(TritonAttentionMetadataBuilder):
     #: Whether this builder warned already about a pass without per-request prefill flags.
     kivi_warned: bool = False
 
-    def __init__(self, kv_cache_spec: Any, layer_names: list[str], vllm_config: Any, device: torch.device) -> None:
+    def __init__(self, kv_cache_spec: AttentionSpec, layer_names: list[str], vllm_config: VllmConfig,
+                 device: torch.device) -> None:
         super().__init__(kv_cache_spec, layer_names, vllm_config, device)
         self.kivi = SETTINGS.bind(vllm_config)
         self.kivi_covers = any(_covers(self.kivi, name) for name in layer_names)
         self.kivi_keys = int(vllm_config.model_config.max_model_len)
         self.kivi_prefill = torch.zeros(vllm_config.scheduler_config.max_num_seqs, dtype=torch.int32, device=device)
 
-    def build(self, common_prefix_len: int, common_attn_metadata: Any, fast_build: bool = False) -> Any:
+    def build(self, common_prefix_len: int, common_attn_metadata: CommonAttentionMetadata,
+              fast_build: bool = False) -> TritonAttentionMetadata:
         metadata = super().build(common_prefix_len, common_attn_metadata, fast_build)
         rows = metadata.seq_lens.shape[0]
         flags = common_attn_metadata.is_prefilling
@@ -105,6 +113,8 @@ class EconomizeKIVIMetadataBuilder(TritonAttentionMetadataBuilder):
 class EconomizeKIVIImpl(TritonAttentionImpl):
     """Triton attention over the dense part of KIVI's cells; quantization and the packed kernel on covered layers."""
 
+    # forwards the arguments of vLLM's TritonAttentionImpl constructor unchanged, whatever types they have
+    # Any: forwarded unchanged to the vLLM base-class constructor, whose signature varies across vLLM versions.
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.kivi = SETTINGS.current()
@@ -115,7 +125,7 @@ class EconomizeKIVIImpl(TritonAttentionImpl):
     def fused_rope_kvcache_supported(self) -> bool:
         return False  # the cache write must go through do_kv_cache_update (it clears KIVI's flags)
 
-    def _layer_layout(self, layer: Any, kv_cache: torch.Tensor) -> CellLayout | None:
+    def _layer_layout(self, layer: object, kv_cache: torch.Tensor) -> CellLayout | None:
         if self._covered is None:
             self._covered = _covers(self.kivi, str(getattr(layer, "layer_name", "")))
             if self._covered:
@@ -123,7 +133,7 @@ class EconomizeKIVIImpl(TritonAttentionImpl):
                 self._layout = cell_layout(self.head_size, kv_cache.dtype, self.kivi)
         return self._layout if self._covered else None
 
-    def do_kv_cache_update(self, layer: Any, key: torch.Tensor, value: torch.Tensor, kv_cache: torch.Tensor,
+    def do_kv_cache_update(self, layer: AttentionLayer, key: torch.Tensor, value: torch.Tensor, kv_cache: torch.Tensor,
                            slot_mapping: torch.Tensor) -> None:
         super().do_kv_cache_update(layer, key, value, kv_cache[..., :self._dense], slot_mapping)
         layout = self._layer_layout(layer, kv_cache)
@@ -132,15 +142,16 @@ class EconomizeKIVIImpl(TritonAttentionImpl):
 
             clear_flags(kv_cache, slot_mapping[:key.shape[0]], layout)
 
-    def _packed_kernel_fits(self, metadata: Any, output_scale: Any) -> bool:
+    def _packed_kernel_fits(self, metadata: TritonAttentionMetadata, output_scale: torch.Tensor | None) -> bool:
         return (self.kivi is not None and self.kivi.fused and not metadata.kivi_any_prefill
                 and metadata.max_query_len <= MAX_FUSED_QUERIES and output_scale is None
                 and self.alibi_slopes is None and tuple(self.sliding_window) == (-1, -1)
                 and metadata.mm_prefix_range_tensor is None and metadata.rswa_window is None
                 and self.chunk_lookback in (None, -1) and metadata.causal is True)
 
-    def forward(self, layer: Any, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, kv_cache: torch.Tensor,
-                attn_metadata: Any, output: torch.Tensor, output_scale: torch.Tensor | None = None,
+    def forward(self, layer: torch.nn.Module, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor,
+                kv_cache: torch.Tensor, attn_metadata: TritonAttentionMetadata | None, output: torch.Tensor,
+                output_scale: torch.Tensor | None = None,
                 output_block_scale: torch.Tensor | None = None) -> torch.Tensor:
         dense = kv_cache[..., :self._dense]
         if attn_metadata is None or not hasattr(attn_metadata, "kivi_quantize"):
@@ -187,7 +198,7 @@ class EconomizeKIVIBackend(TritonAttentionBackend):
         return EconomizeKIVIMetadataBuilder
 
     @staticmethod
-    def get_supported_kernel_block_sizes() -> list[Any]:
+    def get_supported_kernel_block_sizes() -> list[int | MultipleOf]:
         from vllm.v1.attention.backend import MultipleOf
 
         settings = SETTINGS.current()
@@ -199,7 +210,7 @@ class EconomizeKIVIBackend(TritonAttentionBackend):
         return block_size is None or block_size % (settings.block_multiple if settings is not None else 16) == 0
 
     @classmethod
-    def customize_spec(cls, spec: Any) -> Any:
+    def customize_spec(cls, spec: AttentionSpec) -> AttentionSpec:
         spec = super().customize_spec(spec)
         settings = SETTINGS.current()
         if settings is None or getattr(spec, "state_content_bytes", None) is not None or "MLA" in type(spec).__name__:

@@ -33,16 +33,37 @@ from __future__ import annotations
 import dataclasses
 import json
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import torch
 from torch import nn
 
 from ....core.config import TechniqueConfig
+from ....core.technique import Technique
 from ....errors import ConfigError
 from ...exporters import UnsupportedBackendError
 from ..spec import speculative_config
-from .base import PlanBuilder, Role, Support, VllmTechnique, register_vllm_technique
+from .base import Configured, PlanBuilder, Role, Support, VllmTechnique, register_vllm_technique
+
+if TYPE_CHECKING:
+    from transformers import PreTrainedModel
+
+    from ....techniques.draft_model.technique import DraftModelTechnique
+    from ....techniques.eagle3.technique import Eagle3Technique
+    from ....techniques.frspec.technique import FRSpecTechnique
+    from ....techniques.gemma4_assistant.config import Gemma4AssistantDraftConfig
+    from ....techniques.gemma4_assistant.technique import Gemma4AssistantTechnique
+    from ....techniques.jump.config import JumpConfig
+    from ....techniques.lookahead.config import LookaheadConfig
+    from ....techniques.lookup.config import LookupConfig
+    from ....techniques.medusa.config import MedusaConfig
+    from ....techniques.pard.technique import PardTechnique
+    from ....techniques.placed_draft.config import PlacedDraftModelConfig
+    from ....techniques.quant.config import DraftQuantConfig
+    from ....techniques.rest.config import RestConfig
+    from ....techniques.suffix_decoding.config import SuffixDecodingConfig
+    from ....techniques.vendor_mtp.config import VendorMTPConfig
+    from ....techniques.vendor_mtp.technique import VendorMTPTechnique
 
 __all__ = [
     "DRAFT_QUANT_FAKE",
@@ -78,9 +99,9 @@ def _ct_quantized(builder: PlanBuilder) -> bool:
     return quant is not None and QuantVllm().level(quant) is Support.NATIVE
 
 
-def _model_spec(builder: PlanBuilder, method: str, drafter: str | Path | None, **extra: Any) -> dict[str, Any]:
+def _model_spec(builder: PlanBuilder, method: str, drafter: str | Path | None, **extra: object) -> dict[str, object]:
     """The ``speculative_config`` of a model-based proposer (sampling as the plan says)."""
-    spec: dict[str, Any] = {"method": method, "num_speculative_tokens": builder.num_speculative_tokens}
+    spec: dict[str, object] = {"method": method, "num_speculative_tokens": builder.num_speculative_tokens}
     if drafter is not None:
         spec["model"] = str(drafter)
     if builder.sampling:
@@ -117,7 +138,8 @@ def _resolved(config: TechniqueConfig) -> TechniqueConfig:
     folder = Path(datastore).expanduser().resolve()
     if not folder.is_dir():
         raise UnsupportedBackendError(f"the {config.technique!r} datastore {str(folder)!r} does not exist")
-    return dataclasses.replace(config, datastore=str(folder))
+    changes: dict[str, object] = {"datastore": str(folder)}  # a field of the configs that have a datastore only
+    return dataclasses.replace(config, **changes)
 
 
 def custom_class_proposer(builder: PlanBuilder, owner: str, config: TechniqueConfig, num_tokens: int) -> None:
@@ -147,16 +169,16 @@ class TokenProposerVllm(_Drafter):
 
     support = Support.PLUGIN
 
-    def num_tokens(self, technique: nn.Module, builder: PlanBuilder) -> int:
+    def num_tokens(self, technique: Technique, builder: PlanBuilder) -> int:
         """Draft tokens per verification (default: the plan's)."""
         return builder.num_speculative_tokens
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
         super().check(technique, builder)
         if self.level(technique) is Support.PLUGIN:
             _resolved(technique.config)
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         custom_class_proposer(builder, self.technique, technique.config, self.num_tokens(technique, builder))
 
 
@@ -170,17 +192,17 @@ class LookupVllm(TokenProposerVllm):
     reason = ("method='ngram' with prompt_lookup_max/min (vLLM matches the longest n-gram at its earliest "
               "position); match='latest' through economize's custom_class proposer")
 
-    def level(self, technique: nn.Module) -> Support:
-        return Support.NATIVE if technique.config.match == "earliest" else Support.PLUGIN
+    def level(self, technique: Configured) -> Support:
+        return Support.NATIVE if cast("LookupConfig", technique.config).match == "earliest" else Support.PLUGIN
 
-    def num_tokens(self, technique: nn.Module, builder: PlanBuilder) -> int:
-        return int(technique.config.max_proposal or builder.num_speculative_tokens)
+    def num_tokens(self, technique: Technique, builder: PlanBuilder) -> int:
+        return int(cast("LookupConfig", technique.config).max_proposal or builder.num_speculative_tokens)
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         if self.level(technique) is Support.PLUGIN:
             super().contribute(technique, builder)
             return
-        config = technique.config
+        config = cast("LookupConfig", technique.config)
         builder.speculative = {
             "method": "ngram",
             "prompt_lookup_max": int(config.max_ngram),
@@ -199,15 +221,15 @@ class SuffixDecodingVllm(TokenProposerVllm):
     reason = ("method='suffix' (needs the arctic-inference package); a prebuilt datastore or max_spec_offset "
               "through economize's custom_class proposer")
 
-    def level(self, technique: nn.Module) -> Support:
-        config = technique.config
+    def level(self, technique: Configured) -> Support:
+        config = cast("SuffixDecodingConfig", technique.config)
         return Support.PLUGIN if config.datastore is not None or config.max_spec_offset else Support.NATIVE
 
-    def num_tokens(self, technique: nn.Module, builder: PlanBuilder) -> int:
-        return int(technique.config.max_spec_tokens or builder.num_speculative_tokens)
+    def num_tokens(self, technique: Technique, builder: PlanBuilder) -> int:
+        return int(cast("SuffixDecodingConfig", technique.config).max_spec_tokens or builder.num_speculative_tokens)
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        config = technique.config
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
+        config = cast("SuffixDecodingConfig", technique.config)
         if config.tree:
             builder.note(self.technique, "vLLM verifies the best path of the suffix tree as one chain")
         if self.level(technique) is Support.PLUGIN:
@@ -234,8 +256,8 @@ class RestVllm(TokenProposerVllm):
     technique = "rest"
     reason = "economize's custom_class proposer over the suffix-array datastore (the best path of the trie)"
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        if technique.config.tree:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
+        if cast("RestConfig", technique.config).tree:
             builder.note(self.technique, "vLLM 0.30 has no tree verification (no token tree, no tree attention "
                                          "backend), so it verifies the best path of the retrieved trie as one "
                                          "chain")
@@ -254,18 +276,18 @@ class LookaheadVllm(TokenProposerVllm):
               "causally masked tokens per "
               "decoding request")
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        if not technique.config.pool_from_prompt:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
+        if not cast("LookaheadConfig", technique.config).pool_from_prompt:
             raise UnsupportedBackendError("on vLLM, lookahead drafts from the n-gram pool of the committed tokens "
                                           "only (the Jacobi window, which fills the pool otherwise, adds guess "
                                           "tokens under its own 2-D mask to the target's forward, which vLLM's "
                                           "scheduler and attention do not run): set pool_from_prompt=True")
         super().check(technique, builder)
 
-    def num_tokens(self, technique: nn.Module, builder: PlanBuilder) -> int:
-        return min(builder.num_speculative_tokens, technique.config.ngram - 1)
+    def num_tokens(self, technique: Technique, builder: PlanBuilder) -> int:
+        return min(builder.num_speculative_tokens, cast("LookaheadConfig", technique.config).ngram - 1)
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         builder.note(self.technique, "vLLM serves the n-gram pool of the committed tokens without the Jacobi "
                                      "window and drafts the newest n-gram of the last token as one chain")
         super().contribute(technique, builder)
@@ -283,25 +305,25 @@ class DraftModelVllm(_Drafter):
     reason = "method='draft_model' with the draft LM saved to the plan folder"
     method = "draft_model"
 
-    def draft_config(self, technique: nn.Module) -> dict[str, Any]:
+    def draft_config(self, technique: Technique) -> dict[str, object]:
         """Entries added to the saved draft ``config.json``."""
         return {}
 
-    def extra(self, technique: nn.Module) -> dict[str, Any]:
+    def extra(self, technique: Technique) -> dict[str, object]:
         """Further ``speculative_config`` fields."""
         return {}
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
         self.draft_config(technique)  # raises on a missing setting before anything is written
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         if builder.out_dir is not None:
             builder.drafter_dir = builder.path(DRAFTER_DIR)
         builder.speculative = _model_spec(builder, self.method, builder.drafter_dir, **self.extra(technique))
 
-    def export(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def export(self, technique: Technique, builder: PlanBuilder) -> None:
         target = builder.path(DRAFTER_DIR)
-        draft: Any = technique.draft_model
+        draft = cast("PreTrainedModel", cast("DraftModelTechnique", technique).draft_model)
         draft.save_pretrained(target)
         edits = self.draft_config(technique)
         if edits:
@@ -316,9 +338,10 @@ class PlacedDraftModelVllm(DraftModelVllm):
     technique = "placed_draft_model"
     reason = "method='draft_model'; vLLM places the draft LM on the target's GPUs (draft_tensor_parallel_size)"
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         super().contribute(technique, builder)
-        builder.note(self.technique, f"the draft LM runs on the target's GPUs, not on {technique.config.device}")
+        device = cast("PlacedDraftModelConfig", technique.config).device
+        builder.note(self.technique, f"the draft LM runs on the target's GPUs, not on {device}")
 
 
 @register_vllm_technique
@@ -328,10 +351,10 @@ class PardVllm(DraftModelVllm):
     technique = "pard"
     reason = "method='draft_model', parallel_drafting=True, pard_token in the draft config"
 
-    def draft_config(self, technique: nn.Module) -> dict[str, Any]:
-        return {"pard_token": int(technique.mask_token_id)}
+    def draft_config(self, technique: Technique) -> dict[str, object]:
+        return {"pard_token": int(cast("PardTechnique", technique).mask_token_id)}
 
-    def extra(self, technique: nn.Module) -> dict[str, Any]:
+    def extra(self, technique: Technique) -> dict[str, object]:
         return {"parallel_drafting": True}
 
 
@@ -343,18 +366,19 @@ class Gemma4AssistantVllm(_Drafter):
     support = Support.NATIVE
     reason = "method='mtp' with the assistant model (vLLM's Gemma-4 assistant proposer)"
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         if builder.out_dir is not None:
             builder.drafter_dir = builder.path(DRAFTER_DIR)
         builder.speculative = _model_spec(builder, "mtp", builder.drafter_dir)
 
-    def export(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        assistant: Any = technique.assistant
-        if callable(getattr(assistant, "save_pretrained", None)):
-            assistant.save_pretrained(builder.path(DRAFTER_DIR))
+    def export(self, technique: Technique, builder: PlanBuilder) -> None:
+        save = getattr(cast("Gemma4AssistantTechnique", technique).assistant, "save_pretrained", None)
+        if callable(save):
+            save(builder.path(DRAFTER_DIR))
         else:  # not a transformers model: serve the configured checkpoint as is
             builder.drafter_dir = None
-            builder.speculative = _model_spec(builder, "mtp", technique.config.model)
+            config = cast("Gemma4AssistantDraftConfig", technique.config)
+            builder.speculative = _model_spec(builder, "mtp", config.model)
 
 
 # ---- MTP modules in the target checkpoint ---------------------------------------------------------------------
@@ -372,35 +396,37 @@ class VendorMTPVllm(_Drafter):
     support = Support.NATIVE
     reason = "method='mtp' with the modules written under their vendor names into the target checkpoint"
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        if technique.config.head != "shared":
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
+        if cast("VendorMTPConfig", technique.config).head != "shared":
             raise UnsupportedBackendError("vLLM's MTP modules use the target's LM head; vendor_mtp with head='own' "
                                           "has no vLLM equivalent (train with head='shared')")
         if _ct_quantized(builder):
             raise UnsupportedBackendError("vendor_mtp next to a compressed-tensors base is not exported yet: the "
                                           "quantization config would have to exclude the MTP layers")
 
-    def count_key(self, technique: Any, builder: PlanBuilder) -> str:
+    def count_key(self, technique: Technique, builder: PlanBuilder) -> str:
         """The ``config.json`` key that counts the MTP modules (the one the base config has, else the family's)."""
         config = builder.base.config
         for key in ("num_nextn_predict_layers", "mtp_num_hidden_layers"):
             if getattr(config, key, None) is not None:
                 return key
-        return MTP_COUNT_KEYS.get(technique.family, "num_nextn_predict_layers")
+        return MTP_COUNT_KEYS.get(cast("VendorMTPTechnique", technique).family, "num_nextn_predict_layers")
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         builder.rewrite_base = True
-        builder.config_edits[self.count_key(technique, builder)] = int(technique.config.num_modules)
+        config = cast("VendorMTPConfig", technique.config)
+        builder.config_edits[self.count_key(technique, builder)] = int(config.num_modules)
         builder.speculative = _model_spec(builder, "mtp", None)
         builder.note(self.technique, "vendor MTP export is checked on tiny models only, not on a real checkpoint")
 
-    def export(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def export(self, technique: Technique, builder: PlanBuilder) -> None:
         from safetensors.torch import save_file
 
         from ....techniques.vendor_mtp.formats import state_to_vendor
 
         state = {key: value for key, value in technique.state_dict().items() if not key.startswith("lm_head.")}
-        tensors = state_to_vendor(state, technique.family, int(technique.adapter.num_layers))
+        tensors = state_to_vendor(state, cast("VendorMTPTechnique", technique).family,
+                                  int(technique.adapter.num_layers))
         target = builder.path("model")
         file = "model-mtp.safetensors"
         save_file({key: value.detach().to("cpu").contiguous() for key, value in tensors.items()}, str(target / file),
@@ -420,24 +446,24 @@ class _Exported(_Drafter):
 
     exporter: str = ""
 
-    def method(self, technique: nn.Module) -> str | None:
+    def method(self, technique: Technique) -> str | None:
         """The speculative method (``None``: the one of the exported folder's architecture)."""
         return None
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         if builder.out_dir is not None:
             builder.drafter_dir = builder.path(DRAFTER_DIR)
 
-    def write(self, technique: nn.Module, target: Path, builder: PlanBuilder) -> None:
+    def write(self, technique: Technique, target: Path, builder: PlanBuilder) -> None:
         from ...exporters import EXPORTERS, exporter_key
 
         exporter = EXPORTERS.get(exporter_key("vllm", self.exporter))()
         exporter.export(technique, target, num_speculative_tokens=builder.num_speculative_tokens)
 
-    def export(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def export(self, technique: Technique, builder: PlanBuilder) -> None:
         target = builder.path(DRAFTER_DIR)
         self.write(technique, target, builder)
-        extra: dict[str, Any] = {}
+        extra: dict[str, str] = {}
         method = self.method(technique)
         if method is not None:
             extra["method"] = method
@@ -454,20 +480,20 @@ class Eagle3Vllm(_Exported):
     reason = "method='eagle3' (flat Llama draft config, aux layer ids, d2t/t2d for a reduced vocabulary)"
     exporter = "eagle3"
 
-    def method(self, technique: nn.Module) -> str | None:
+    def method(self, technique: Technique) -> str | None:
         return "eagle3"
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
         _check_eagle3(technique)
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         super().contribute(technique, builder)
-        if technique.lm_head is None:
+        if cast("Eagle3Technique", technique).lm_head is None:
             builder.note(self.technique, "head='shared': vLLM applies the target's LM head without its logit "
                                          "softcapping, which changes the draft distribution only")
 
 
-def _check_eagle3(technique: Any) -> None:
+def _check_eagle3(technique: Configured) -> None:
     if getattr(technique.config, "zero_source_first", False):
         raise UnsupportedBackendError("vLLM's EAGLE-3 reads the target's state at the first draft step; an eagle3 "
                                       "drafter trained with zero_source_first=True has no vLLM equivalent")
@@ -482,21 +508,22 @@ class MedusaVllm(_Exported):
     reason = "method='medusa' for head='own' heads (vLLM drafts the top-1 chain, no static tree)"
     exporter = "medusa"
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        heads = int(technique.config.num_heads)
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
+        config = cast("MedusaConfig", technique.config)
+        heads = int(config.num_heads)
         if builder.num_speculative_tokens > heads:
             raise UnsupportedBackendError(f"Medusa with {heads} heads drafts at most {heads} tokens; asked for "
                                           f"num_speculative_tokens={builder.num_speculative_tokens}")
-        if technique.config.head != "own":
+        if config.head != "own":
             raise UnsupportedBackendError("vLLM's Medusa projects each head with its own matrix after the final "
                                           "norm; head='shared' Medusa heads have no vLLM equivalent")
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         super().contribute(technique, builder)
-        if technique.config.tree is not None:
+        if cast("MedusaConfig", technique.config).tree is not None:
             builder.note(self.technique, "vLLM verifies the top-1 chain of the heads, not the static tree")
 
-    def export(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def export(self, technique: Technique, builder: PlanBuilder) -> None:
         target = builder.path(DRAFTER_DIR)
         self.write(technique, target, builder)
         builder.speculative = {"method": "medusa", "model": str(target),
@@ -513,14 +540,14 @@ class JumpVllm(_Exported):
               "shared with the target, readout")
     exporter = "jump"
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
         from ....techniques.jump.export import JumpDrafterSpec
 
         try:
             JumpDrafterSpec.of(technique)
         except ConfigError as error:
             raise UnsupportedBackendError(f"the jump drafter cannot be served on vLLM: {error}") from error
-        adaptation = technique.config.adaptation
+        adaptation = cast("JumpConfig", technique.config).adaptation
         if adaptation == "lora" and _ct_quantized(builder):
             raise UnsupportedBackendError(
                 "a jump drafter with adaptation='lora' merges its updates into copies of the jump-path layers, "
@@ -528,8 +555,8 @@ class JumpVllm(_Exported):
                 "(full copies are served dense next to the quantized target)"
             )
 
-    def needs_dense_linears(self, technique: nn.Module, builder: PlanBuilder) -> str | None:
-        if technique.config.adaptation == "lora":
+    def needs_dense_linears(self, technique: Technique, builder: PlanBuilder) -> str | None:
+        if cast("JumpConfig", technique.config).adaptation == "lora":
             return "a jump drafter with adaptation='lora' merges its updates into copies of the target's dense weights"
         return None
 
@@ -537,7 +564,8 @@ class JumpVllm(_Exported):
 # ---- wrappers and draft options ---------------------------------------------------------------------------------
 
 
-def eagle3_restricted(inner: Any, ids: torch.Tensor, shared_head: nn.Module | None) -> dict[str, torch.Tensor]:
+def eagle3_restricted(inner: Eagle3Technique, ids: torch.Tensor,
+                      shared_head: nn.Module | None) -> dict[str, torch.Tensor]:
     """The EAGLE-3 tensors of ``inner`` restricted to the draft vocabulary ``ids`` (vLLM's ``d2t`` layout).
 
     Args:
@@ -556,7 +584,7 @@ def eagle3_restricted(inner: Any, ids: torch.Tensor, shared_head: nn.Module | No
     head = inner.lm_head if inner.lm_head is not None else shared_head
     if head is None:
         raise ConfigError("an eagle3 drafter with a shared head needs the target's LM head")
-    rows = head.weight.detach().to("cpu")[ids]
+    rows = cast("torch.Tensor", head.weight).detach().to("cpu")[ids]
     tensors["lm_head.weight"] = rows.to(tensors["fc.weight"].dtype).contiguous()
     tensors["d2t"] = (ids - torch.arange(ids.numel())).contiguous()
     mask = torch.zeros(int(inner.vocab_size), dtype=torch.bool)
@@ -573,30 +601,33 @@ class FRSpecVllm(_Drafter):
     support = Support.NATIVE
     reason = "around eagle3: method='eagle3' with draft_vocab_size, d2t/t2d and the LM-head rows of the draft ids"
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        inner: Any = technique.inner
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
+        frspec = cast("FRSpecTechnique", technique)
+        inner = frspec.inner
         if getattr(inner, "name", None) != "eagle3":
             raise UnsupportedBackendError(f"vLLM restricts the draft vocabulary of EAGLE-3 drafters only; frspec "
                                           f"around {getattr(inner, 'name', type(inner).__name__)!r} has no vLLM path")
         _check_eagle3(inner)
-        if int(inner.draft_vocab_size) != int(inner.vocab_size):
+        eagle3 = cast("Eagle3Technique", inner)
+        if int(eagle3.draft_vocab_size) != int(eagle3.vocab_size):
             raise UnsupportedBackendError("the eagle3 drafter inside frspec already has a reduced vocabulary")
-        if not technique.has_vocab:
+        if not frspec.has_vocab:
             raise ConfigError("frspec has no draft vocabulary yet: set it (set_vocab or token_ids) before export")
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         if builder.out_dir is not None:
             builder.drafter_dir = builder.path(DRAFTER_DIR)
         builder.note(self.technique, "vLLM's restricted head sets the other logits to -inf like economize's, and "
                                      "drops the target's logit softcapping")
 
-    def export(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def export(self, technique: Technique, builder: PlanBuilder) -> None:
         from safetensors.torch import save_file
 
         from ..eagle3.export import Eagle3VllmExporter
 
-        inner: Any = technique.inner
-        ids = technique.draft_ids
+        frspec = cast("FRSpecTechnique", technique)
+        inner = cast("Eagle3Technique", frspec.inner)  # check() refused any other inner drafter
+        ids = frspec.draft_ids
         target = builder.path(DRAFTER_DIR)
         target.mkdir(parents=True, exist_ok=True)
         exporter = Eagle3VllmExporter()
@@ -622,15 +653,15 @@ class DraftQuantVllm(VllmTechnique):
     #: its level here.
     levels: ClassVar[dict[str, Support]] = {"fake": Support.DENSIFIED}
 
-    def level(self, technique: nn.Module) -> Support:
-        return self.levels.get(str(technique.config.backend), Support.UNSUPPORTED)
+    def level(self, technique: Configured) -> Support:
+        return self.levels.get(str(cast("DraftQuantConfig", technique.config).backend), Support.UNSUPPORTED)
 
-    def reason_of(self, technique: nn.Module) -> str:
+    def reason_of(self, technique: Configured) -> str:
         """What vLLM serves for the configured backend, or why it refuses it.
 
         Parameters
         ----------
-        technique : nn.Module
+        technique : Configured
             The technique, or any object with its ``config``.
 
         Returns
@@ -642,6 +673,6 @@ class DraftQuantVllm(VllmTechnique):
             return DRAFT_QUANT_FAKE
         return self.reason
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         builder.note(self.technique, "the drafter runs the rounded weights in the dense dtype: same drafts, no "
                                      "memory or speed saving")

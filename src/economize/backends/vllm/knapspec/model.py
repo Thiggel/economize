@@ -20,7 +20,7 @@ The path is frozen (the target's layers); the drafter owns at most an identity r
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 from torch import nn
@@ -31,6 +31,10 @@ from ....techniques.jump.export import JumpDrafterSpec
 from ....techniques.knapspec.export import KnapSpecDrafterSpec
 from ....techniques.knapspec.sublayer import PartialLayer, SublayerLayout, _ZeroModule
 from ..jump.model import EconomizeJumpEagle3ForCausalLM, TargetModules, _draft_hf_config, _is_attention
+
+if TYPE_CHECKING:
+    from transformers import PretrainedConfig
+    from vllm.config import VllmConfig
 
 __all__ = ["DRAFTER_ARCHITECTURE", "VLLM_SUBLAYER_LAYOUTS", "EconomizeKnapSpecEagle3ForCausalLM",
            "vllm_default_layout"]
@@ -69,9 +73,10 @@ class _ZeroAttention(nn.Module):
         super().__init__()
         self.width = width
 
-    def forward(self, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def forward(self, *args: object, **kwargs: object) -> torch.Tensor:
         hidden = kwargs["hidden_states"] if "hidden_states" in kwargs else args[1 if len(args) > 1 else 0]
-        return cast(torch.Tensor, hidden.new_zeros(*hidden.shape[:-1], self.width))
+        hidden = cast(torch.Tensor, hidden)
+        return hidden.new_zeros(*hidden.shape[:-1], self.width)
 
 
 def _layout(layer: nn.Module) -> SublayerLayout:
@@ -87,14 +92,14 @@ class EconomizeKnapSpecEagle3ForCausalLM(EconomizeJumpEagle3ForCausalLM):
         prefix: Module prefix of the draft model (unused).
     """
 
-    def __init__(self, *, vllm_config: Any, prefix: str = "") -> None:
+    def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
         super().__init__(vllm_config=vllm_config, prefix=prefix)
         self.knapspec_spec = KnapSpecDrafterSpec.from_hf_config(_draft_hf_config(vllm_config))
         if self.spec.config.adaptation != "frozen":
             raise ConfigError("a KnapSpec drafter runs the target's own layers: its path must be frozen")
 
     @classmethod
-    def read_spec(cls, hf_config: Any) -> JumpDrafterSpec:
+    def read_spec(cls, hf_config: PretrainedConfig) -> JumpDrafterSpec:
         return KnapSpecDrafterSpec.from_hf_config(hf_config).path
 
     def tie_to_target(self, target: nn.Module) -> TargetModules:
@@ -107,6 +112,7 @@ class EconomizeKnapSpecEagle3ForCausalLM(EconomizeJumpEagle3ForCausalLM):
         tied = super().tie_to_target(target)
         width = self.spec.hidden_size
         attention, mlp = set(self.knapspec_spec.skip_attention), set(self.knapspec_spec.skip_mlp)
+        # Any: a PartialLayer (a plain callable) stands in for a layer module; a frozen path is only ever called.
         path: list[Any] = []
         for index, layer in zip(self.spec.jump_layers, self._jump_path):
             layout = _layout(layer)

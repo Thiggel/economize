@@ -22,13 +22,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, cast
 
 import torch
 from torch import nn
 
+from ....core.technique import Technique
 from ...exporters import UnsupportedBackendError
 from .base import PlanBuilder, Role, Support, VllmTechnique, register_vllm_technique
+
+if TYPE_CHECKING:
+    from ....techniques.kv_quant.fp8 import FP8KVConfig, FP8KVTechnique
 
 __all__ = [
     "KV_CACHE_SCHEME",
@@ -41,7 +45,7 @@ __all__ = [
 ]
 
 #: The compressed-tensors ``kv_cache_scheme`` of one static fp8 (e4m3) scale per layer for keys and for values.
-KV_CACHE_SCHEME: dict[str, Any] = {
+KV_CACHE_SCHEME: dict[str, object] = {
     "num_bits": 8,
     "type": "float",
     "strategy": "tensor",
@@ -54,7 +58,7 @@ KV_CACHE_SCHEME: dict[str, Any] = {
 TOKEN_SCALE_ATTENTION: tuple[str, ...] = ("TRITON_ATTN", "CUSTOM")
 
 #: A compressed-tensors ``quantization_config`` that quantizes only the KV cache (no linear layer is quantized).
-_KV_ONLY_CONFIG: dict[str, Any] = {
+_KV_ONLY_CONFIG: dict[str, object] = {
     "quant_method": "compressed-tensors",
     "format": "dense",
     "config_groups": {},
@@ -147,26 +151,29 @@ class FP8KVVllm(VllmTechnique):
     support = Support.NATIVE
     reason = "kv_cache_dtype fp8_e4m3 / fp8_e5m2 / fp8_per_token_head, kv_cache_dtype_skip_layers for a layer subset"
 
-    def _settings(self, technique: nn.Module, builder: PlanBuilder) -> dict[str, object]:
-        config = technique.config
+    def _settings(self, technique: Technique, builder: PlanBuilder) -> dict[str, object]:
+        config = cast("FP8KVConfig", technique.config)
         return kv_cache_settings(config.format, config.scale, tuple(config.layers),
                                  int(builder.model.adapter.num_layers))
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
         self._settings(technique, builder)
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         for key, value in self._settings(technique, builder).items():
             builder.set_engine(key, value, owner=self.technique)
-        if technique.config.scale == "token":
+        config = cast("FP8KVConfig", technique.config)
+        if config.scale == "token":
             builder.require_attention(*TOKEN_SCALE_ATTENTION, owner=self.technique)
             builder.note(self.technique, "vLLM computes the per-token scales in its Triton attention kernel; the "
                                          "rounding of the scale may differ from economize's in the last bit")
-        if technique.config.scale == "tensor":
+        if config.scale == "tensor":
             self._export_scales(technique, builder)
 
-    def _export_scales(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        keys, values = technique.static_scales()
+    def _export_scales(self, technique: Technique, builder: PlanBuilder) -> None:
+        scales = cast("FP8KVTechnique", technique).static_scales()
+        assert scales is not None  # scale="tensor" always has static scales
+        keys, values = scales
         # Every layer gets its scales (a complete checkpoint for any loader); the layers outside ``layers`` are in
         # kv_cache_dtype_skip_layers, so vLLM keeps their cache in the model dtype and never reads their scales.
         for index, name in enumerate(attention_modules(builder.base, builder.model.adapter.layers)):

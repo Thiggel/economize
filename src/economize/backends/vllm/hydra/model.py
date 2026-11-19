@@ -27,7 +27,7 @@ This module does not import vLLM at import time; the attention layer is built th
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, cast
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import torch
 from torch import nn
@@ -40,6 +40,9 @@ from ..heads.model import HeadDrafterModel
 from ..jump.model import _draft_hf_config
 from ..sharding import HeadShard, head_shard
 
+if TYPE_CHECKING:
+    from vllm.config import VllmConfig
+
 __all__ = ["DRAFTER_ARCHITECTURE", "EconomizeHydraEagle3ForCausalLM", "vllm_attention"]
 
 #: Architecture name of exported Hydra drafters (``method="eagle3"`` keeps names that end in ``Eagle3``).
@@ -47,10 +50,10 @@ DRAFTER_ARCHITECTURE = "EconomizeHydraEagle3"
 
 #: ``factory(shard, vllm_config, prefix) -> attention``: called as ``attention(q, k, v)`` on ``[T, H * D]`` tensors
 #: of the shard's heads on this rank.
-AttentionFactory = Callable[[HeadShard, Any, str], nn.Module]
+AttentionFactory = Callable[[HeadShard, "VllmConfig", str], nn.Module]
 
 
-def vllm_attention(shard: HeadShard, vllm_config: Any, prefix: str) -> nn.Module:
+def vllm_attention(shard: HeadShard, vllm_config: VllmConfig, prefix: str) -> nn.Module:
     """vLLM's paged ``Attention`` over this rank's heads of the prefix layer (softmax scale ``head_dim ** -0.5``, as
     its SDPA)."""
     from vllm.model_executor.layers.attention.attention import Attention
@@ -89,10 +92,12 @@ class EconomizeHydraEagle3ForCausalLM(HeadDrafterModel):
     drafter_name = "Hydra"
     weights_prefix = WEIGHTS_PREFIX
 
-    #: Builds the prefix layer's attention; CPU tests swap it for a plain attention.
-    attention_factory: AttentionFactory = staticmethod(vllm_attention)  # type: ignore[assignment]
+    spec: HydraDrafterSpec
 
-    def __init__(self, *, vllm_config: Any, prefix: str = "") -> None:
+    #: Builds the prefix layer's attention; CPU tests swap it for a plain attention.
+    attention_factory: ClassVar[AttentionFactory] = staticmethod(vllm_attention)
+
+    def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
         super().__init__(vllm_config)
         self.spec = HydraDrafterSpec.from_hf_config(_draft_hf_config(vllm_config))
         spec = self.spec

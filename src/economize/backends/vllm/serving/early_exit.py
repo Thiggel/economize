@@ -5,11 +5,16 @@ which adds the adapter layer)."""
 
 from __future__ import annotations
 
-from torch import nn
+from typing import TYPE_CHECKING, cast
 
+from ....core.technique import Technique
 from ...exporters import UnsupportedBackendError
 from .base import PlanBuilder, Support, register_vllm_technique
 from .drafters import JumpVllm, _ct_quantized
+
+if TYPE_CHECKING:
+    from ....techniques.early_exit.config import EarlyExitConfig
+    from ....techniques.layer_skip.technique import LayerSkipTechnique
 
 __all__ = ["EarlyExitVllm", "FreeVllm", "KangarooVllm", "LayerSkipVllm"]
 
@@ -25,8 +30,8 @@ class EarlyExitVllm(JumpVllm):
               "the readout")
     exporter = "early_exit"
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        if technique.config.adaptation == "lora" and _ct_quantized(builder):
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
+        if cast("EarlyExitConfig", technique.config).adaptation == "lora" and _ct_quantized(builder):
             raise UnsupportedBackendError(
                 "an early-exit drafter with adaptation='lora' merges its updates into copies of layers 1..r, which "
                 "vLLM holds as compressed-tensors codes: use backend='fake', or adaptation='frozen' or 'full' (full "
@@ -46,7 +51,7 @@ class FreeVllm(EarlyExitVllm):
               "lossless, every draft verified")
     exporter = "free"
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         super().contribute(technique, builder)
         builder.note(self.technique, "vLLM verifies every draft and drafts num_speculative_tokens tokens: FREE's kept "
                                      "shallow exits and its softmax-gap stop (FreeTechnique.decode_config) run on "
@@ -65,8 +70,8 @@ class LayerSkipVllm(JumpVllm):
               "draft path")
     exporter = "layer_skip"
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        if not technique.skip_layers:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
+        if not cast("LayerSkipTechnique", technique).skip_layers:
             raise UnsupportedBackendError("the layer_skip technique has no skip set yet: attach it first")
 
 
@@ -81,7 +86,7 @@ class KangarooVllm(JumpVllm):
               "pages; the confidence early stop is not served (vLLM drafts k tokens)")
     exporter = "kangaroo"
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
         from ....errors import ConfigError
         from ....techniques.kangaroo.export import KangarooDrafterSpec
 
@@ -90,7 +95,7 @@ class KangarooVllm(JumpVllm):
         except ConfigError as error:
             raise UnsupportedBackendError(f"the Kangaroo drafter cannot be served on vLLM: {error}") from error
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         super().contribute(technique, builder)
         builder.note(self.technique, "the adapter runs in the engine dtype, its attention heads sharded as the "
                                      "target's; DecodeConfig.min_confidence has no vLLM equivalent")

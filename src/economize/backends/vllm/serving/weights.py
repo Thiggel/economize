@@ -27,16 +27,21 @@ meta-device copy, so a renamed or missing tensor fails here).
 from __future__ import annotations
 
 import copy
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Protocol, cast
 
 import torch
 from torch import nn
 
 from ....core.metadata import Saving, Simulation
+from ....core.technique import Technique
 from ....errors import ConfigError
 from ...exporters import UnsupportedBackendError
-from .base import PlanBuilder, Role, Support, VllmTechnique, register_vllm_technique
+from .base import Configured, PlanBuilder, Role, Support, VllmTechnique, register_vllm_technique
+
+if TYPE_CHECKING:
+    from ....techniques.quant.config import QuantConfig
 
 __all__ = [
     "DepthPruneVllm",
@@ -53,6 +58,12 @@ __all__ = [
 _QUANTIZED_ATTR = "economize_quantized_weight"
 
 
+class _Factored(Protocol):
+    """A module that stands for one linear map (see :func:`dense_modules`)."""
+
+    def dense_weight(self) -> torch.Tensor: ...
+
+
 def dense_modules(base: nn.Module) -> dict[str, nn.Module]:
     """The modules of ``base`` that stand for one linear map through a ``dense_weight()`` method (outermost only)."""
     found: dict[str, nn.Module] = {}
@@ -66,7 +77,8 @@ def dense_modules(base: nn.Module) -> dict[str, nn.Module]:
 
 
 def _dense_dtype(base: nn.Module) -> torch.dtype:
-    embedding = base.get_input_embeddings() if hasattr(base, "get_input_embeddings") else None
+    get_embeddings = getattr(base, "get_input_embeddings", None)
+    embedding = get_embeddings() if callable(get_embeddings) else None
     weight = getattr(embedding, "weight", None)
     if isinstance(weight, torch.Tensor) and weight.is_floating_point():
         return weight.dtype
@@ -90,7 +102,7 @@ def _plain(tensor: torch.Tensor) -> torch.Tensor:
     return tensor
 
 
-def _reference_keys(base: nn.Module, edits: dict[str, Any]) -> set[str]:
+def _reference_keys(base: nn.Module, edits: Mapping[str, object]) -> set[str]:
     """The state-dict keys of the plain architecture for ``base.config`` with ``edits`` (built on the meta device)."""
     config = copy.deepcopy(base.config)
     for key, value in edits.items():
@@ -146,7 +158,7 @@ def serving_state(builder: PlanBuilder) -> dict[str, torch.Tensor]:
         prefix = name + "."
         for key in [key for key in state if key.startswith(prefix)]:
             del state[key]
-        state[prefix + "weight"] = module.dense_weight().detach().to(dtype)
+        state[prefix + "weight"] = cast("_Factored", module).dense_weight().detach().to(dtype)
         bias = _bias_of(module)
         if bias is not None:
             state[prefix + "bias"] = bias.detach().to(dtype)
@@ -220,16 +232,16 @@ class QuantVllm(VllmTechnique):
         for fmt in ("nvfp4", "mxfp4")
     }
 
-    def level(self, technique: nn.Module) -> Support:
-        config: Any = technique.config
+    def level(self, technique: Configured) -> Support:
+        config = cast("QuantConfig", technique.config)
         return self.level_of(config.backend)
 
-    def simulation_of(self, technique: nn.Module) -> Simulation | None:
-        config: Any = technique.config
+    def simulation_of(self, technique: Configured) -> Simulation | None:
+        config = cast("QuantConfig", technique.config)
         return self.format_simulations.get(config.format, self.simulation)
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        config = technique.config
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
+        config = cast("QuantConfig", technique.config)
         if getattr(config, "fp8_activations", False):
             raise UnsupportedBackendError(
                 "quant with fp8_activations (W8A8) has no economize export to vLLM: quantize with "
@@ -246,7 +258,7 @@ class QuantVllm(VllmTechnique):
         if activations is not None:
             self._check_activations(config, activations)
 
-    def _check_activations(self, config: Any, activations: str) -> None:
+    def _check_activations(self, config: QuantConfig, activations: str) -> None:
         """Raise :class:`UnsupportedBackendError` unless vLLM has a W8A8 kernel for the config."""
         if self.level_of(config.backend) is not Support.NATIVE:
             raise UnsupportedBackendError(
@@ -270,13 +282,14 @@ class QuantVllm(VllmTechnique):
         """How vLLM serves the quantization backend ``backend``."""
         return self.levels.get(backend, Support.UNSUPPORTED)
 
-    def needs_dense_linears(self, technique: nn.Module, builder: PlanBuilder) -> str | None:
+    def needs_dense_linears(self, technique: Technique, builder: PlanBuilder) -> str | None:
         if self.level(technique) is Support.NATIVE:
-            return f"quant backend {technique.config.backend!r} writes the base in the compressed-tensors format"
+            backend = cast("QuantConfig", technique.config).backend
+            return f"quant backend {backend!r} writes the base in the compressed-tensors format"
         return None
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        config: Any = technique.config
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
+        config = cast("QuantConfig", technique.config)
         backend = config.backend
         if self.level(technique) is Support.NATIVE:
             builder.set_writer(_write_compressed_tensors, owner=self.technique)
@@ -318,16 +331,16 @@ class PruneVllm(VllmTechnique):
     reference_reason: ClassVar[str] = ("semi_structured=False (the simulated reference): the masked weights are "
                                        "served dense")
 
-    def level(self, technique: nn.Module) -> Support:
+    def level(self, technique: Configured) -> Support:
         """``DENSIFIED`` for the explicit reference ``semi_structured=False``, else ``UNSUPPORTED``."""
         reference = getattr(technique.config, "semi_structured", None) is False
         return Support.DENSIFIED if reference else Support.UNSUPPORTED
 
-    def reason_of(self, technique: nn.Module) -> str:
+    def reason_of(self, technique: Configured) -> str:
         """The refusal, or what the reference serves (see :meth:`level`)."""
         return self.reference_reason if self.level(technique) is Support.DENSIFIED else self.reason
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         builder.rewrite_base = True
         builder.note(self.technique, "pruned weights are served dense (zeros kept): same outputs, no sparse speedup")
 
@@ -339,5 +352,5 @@ class DepthPruneVllm(VllmTechnique):
     support = Support.NATIVE
     reason = "the shallower model (layers removed, config renumbered) is a plain checkpoint"
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         builder.rewrite_base = True

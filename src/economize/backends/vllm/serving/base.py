@@ -48,24 +48,31 @@ import os
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar, TypeVar
+from typing import TYPE_CHECKING, ClassVar, Protocol, TypeVar, cast, overload
 
 import torch
-from torch import nn
 
 from ...._compat import require_engine
+from ....core.config import TechniqueConfig
 from ....core.metadata import Simulation
-from ....core.technique import CAPABILITY_ORDER, Capability
+from ....core.technique import CAPABILITY_ORDER, Capability, Technique
 from ....errors import ConfigError, IncompatibleTechniquesError
 from ....registry import Registry
 from ....unwrap import base_model_of
 from ...exporters import UnsupportedBackendError
+
+if TYPE_CHECKING:
+    from transformers import PreTrainedModel
+    from vllm import LLM
+
+    from ....core.model import EfficientModel
 
 __all__ = [
     "PLAN_FILE",
     "V2_RUNNER_ENV",
     "V2_UNSUPPORTED_METHODS",
     "VLLM_TECHNIQUES",
+    "Configured",
     "PlanBuilder",
     "Role",
     "Support",
@@ -130,6 +137,14 @@ class Support(enum.Enum):
     UNSUPPORTED = "unsupported"
 
 
+class Configured(Protocol):
+    """What :meth:`VllmTechnique.level` and :meth:`VllmTechnique.simulation_of` read of a technique: its config (a
+    :class:`~economize.core.technique.Technique`, or a stand-in holding only the config)."""
+
+    @property
+    def config(self) -> TechniqueConfig: ...
+
+
 class VllmTechnique:
     """The vLLM adapter of one economize technique.
 
@@ -153,13 +168,13 @@ class VllmTechnique:
     reason: ClassVar[str] = ""
     simulation: ClassVar[Simulation | None] = None
 
-    def level(self, technique: nn.Module) -> Support:
+    def level(self, technique: Configured) -> Support:
         """How far vLLM serves ``technique`` as configured (default: :attr:`support`; the ``quant`` adapter's level
         depends on the quantization backend). It reads only ``technique.config``, so that
         :func:`economize.backend_support` can ask it without a model."""
         return self.support
 
-    def simulation_of(self, technique: nn.Module) -> Simulation | None:
+    def simulation_of(self, technique: Configured) -> Simulation | None:
         """What vLLM leaves unrealized of ``technique`` as configured (default: :attr:`simulation`). Like
         :meth:`level` it reads only ``technique.config``.
 
@@ -171,7 +186,7 @@ class VllmTechnique:
         """
         return self.simulation
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
         """Raise if this technique, as configured, cannot be served next to what ``builder`` already holds.
 
         The default refuses an ``UNSUPPORTED`` adapter with :attr:`reason`.
@@ -182,7 +197,7 @@ class VllmTechnique:
         if self.level(technique) is Support.UNSUPPORTED:
             raise UnsupportedBackendError(f"vLLM cannot serve the {self.technique!r} technique: {self.reason}")
 
-    def needs_dense_linears(self, technique: nn.Module, builder: PlanBuilder) -> str | None:
+    def needs_dense_linears(self, technique: Technique, builder: PlanBuilder) -> str | None:
         """Why this technique needs the target's linear maps in vLLM's plain layout (one ``weight`` per map), or
         ``None`` (the default) when it accepts economize's linear method in their place.
 
@@ -191,10 +206,10 @@ class VllmTechnique:
         """
         return None
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         """Add this technique's part of the plan to ``builder`` (called after :meth:`check`)."""
 
-    def export(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def export(self, technique: Technique, builder: PlanBuilder) -> None:
         """Write the files this technique needs (called after every technique contributed, drafters last)."""
 
 
@@ -204,7 +219,15 @@ VLLM_TECHNIQUES: Registry[type[VllmTechnique]] = Registry("vLLM technique adapte
 _V = TypeVar("_V", bound=type[VllmTechnique])
 
 
-def register_vllm_technique(cls: _V | None = None, *, override: bool = False) -> Any:
+@overload
+def register_vllm_technique(cls: _V, *, override: bool = False) -> _V: ...
+
+
+@overload
+def register_vllm_technique(cls: None = None, *, override: bool = False) -> Callable[[_V], _V]: ...
+
+
+def register_vllm_technique(cls: _V | None = None, *, override: bool = False) -> _V | Callable[[_V], _V]:
     """Class decorator registering a :class:`VllmTechnique` under its :attr:`~VllmTechnique.technique`."""
 
     def add(adapter: _V) -> _V:
@@ -251,17 +274,17 @@ class PlanBuilder:
             ``{"model.layers.0.mlp.down_proj": {"lowrank_down": ..., "lowrank_up": ...}}``).
     """
 
-    model: Any
+    model: EfficientModel
     out_dir: Path | None
     num_speculative_tokens: int = 4
     sampling: bool = True
     dense: dict[str, dict[str, torch.Tensor]] = field(default_factory=dict)
-    config_edits: dict[str, Any] = field(default_factory=dict)
+    config_edits: dict[str, object] = field(default_factory=dict)
     weight_writer: Callable[[PlanBuilder, Path, dict[str, torch.Tensor]], None] | None = None
     weight_writer_owner: str | None = None
     rewrite_base: bool = False
-    engine: dict[str, Any] = field(default_factory=dict)
-    speculative: dict[str, Any] | None = None
+    engine: dict[str, object] = field(default_factory=dict)
+    speculative: dict[str, object] | None = None
     env: dict[str, str] = field(default_factory=dict)
     notes: dict[str, list[str]] = field(default_factory=dict)
     roles: dict[Role, str] = field(default_factory=dict)
@@ -271,19 +294,19 @@ class PlanBuilder:
     post_writers: list[Callable[[PlanBuilder, Path], None]] = field(default_factory=list)
     attention: dict[str, tuple[str, ...]] = field(default_factory=dict)
     v2_runner: list[str] = field(default_factory=list)
-    linear: dict[str, dict[str, Any]] = field(default_factory=dict)
+    linear: dict[str, dict[str, object]] = field(default_factory=dict)
     linear_owners: dict[str, str] = field(default_factory=dict)
     plugin_tensors: dict[str, dict[str, torch.Tensor]] = field(default_factory=dict)
 
     @property
-    def base(self) -> nn.Module:
+    def base(self) -> PreTrainedModel:
         """The Hugging Face model inside :attr:`model`."""
-        return base_model_of(self.model)
+        return cast("PreTrainedModel", base_model_of(self.model))
 
     @property
-    def techniques(self) -> Mapping[str, nn.Module]:
+    def techniques(self) -> Mapping[str, Technique]:
         """The model's techniques by name (a plain dict, so adapters can use ``.get``)."""
-        return dict(getattr(self.model, "techniques", None) or {})
+        return cast("dict[str, Technique]", dict(getattr(self.model, "techniques", None) or {}))
 
     def claim(self, role: Role, owner: str) -> None:
         """Record that ``owner`` takes ``role``.
@@ -298,7 +321,7 @@ class PlanBuilder:
             )
         self.roles.setdefault(role, owner)
 
-    def set_engine(self, key: str, value: Any, *, owner: str) -> None:
+    def set_engine(self, key: str, value: object, *, owner: str) -> None:
         """Set an engine argument.
 
         Raises:
@@ -310,14 +333,14 @@ class PlanBuilder:
             )
         self.engine[key] = value
 
-    def set_additional(self, key: str, value: Any, *, owner: str) -> None:
+    def set_additional(self, key: str, value: object, *, owner: str) -> None:
         """Set ``key`` of the engine's ``additional_config`` (the dict vLLM hands to plugins as
         ``vllm_config.additional_config``; several techniques can each own a key).
 
         Raises:
             IncompatibleTechniquesError: Another technique set ``key`` to a different value.
         """
-        extra = self.engine.setdefault("additional_config", {})
+        extra = cast("dict[str, object]", self.engine.setdefault("additional_config", {}))
         if key in extra and extra[key] != value:
             raise IncompatibleTechniquesError(
                 f"{owner!r} needs additional_config[{key!r}]={value!r}, but another technique set {extra[key]!r}"
@@ -402,7 +425,7 @@ class PlanBuilder:
                 "vLLM loads one quantization method per model. Quantize with backend='fake' (served densified) or "
                 f"serve {linear} on the dense weights")
 
-    def add_linear_section(self, section: str, payload: Mapping[str, Any], *, owner: str) -> None:
+    def add_linear_section(self, section: str, payload: Mapping[str, object], *, owner: str) -> None:
         """Add ``section`` to the ``quantization_config`` of economize's linear method (written with the base).
 
         Raises:
@@ -451,13 +474,13 @@ class VllmPlan:
 
     model: str
     tokenizer: str | None = None
-    engine: dict[str, Any] = field(default_factory=dict)
-    speculative: dict[str, Any] | None = None
+    engine: dict[str, object] = field(default_factory=dict)
+    speculative: dict[str, object] | None = None
     env: dict[str, str] = field(default_factory=dict)
     techniques: dict[str, str] = field(default_factory=dict)
     notes: dict[str, list[str]] = field(default_factory=dict)
 
-    def llm_kwargs(self, **overrides: Any) -> dict[str, Any]:
+    def llm_kwargs(self, **overrides: object) -> dict[str, object]:
         """Keyword arguments of ``vllm.LLM`` (``overrides`` win, e.g. ``gpu_memory_utilization``).
 
         With an fp8 KV cache and a drafter served by economize's plugin (jump, early exit), the attention backend
@@ -467,7 +490,7 @@ class VllmPlan:
         plugin's draft step would run eagerly, several times slower at batch 1. Triton attention allows full graphs
         for every batch and reads the fp8 cache.
         """
-        kwargs: dict[str, Any] = {"model": self.model, **self.engine}
+        kwargs: dict[str, object] = {"model": self.model, **self.engine}
         if self.tokenizer:
             kwargs["tokenizer"] = self.tokenizer
         if self.speculative is not None:
@@ -477,10 +500,11 @@ class VllmPlan:
             _log.info("economize: fp8 KV cache with a plugin drafter, attention backend %s (keeps the draft step "
                       "in full CUDA graphs); pass attention_config={'backend': ...} to choose another",
                       FP8_DRAFT_ATTENTION)
-            kwargs["attention_config"] = {**(kwargs.get("attention_config") or {}), "backend": FP8_DRAFT_ATTENTION}
+            attention = cast("Mapping[str, object] | None", kwargs.get("attention_config"))
+            kwargs["attention_config"] = {**(attention or {}), "backend": FP8_DRAFT_ATTENTION}
         return kwargs
 
-    def _needs_graph_safe_attention(self, kwargs: Mapping[str, Any]) -> bool:
+    def _needs_graph_safe_attention(self, kwargs: Mapping[str, object]) -> bool:
         """Whether :meth:`llm_kwargs` chooses :data:`FP8_DRAFT_ATTENTION` (fp8 cache, plugin drafter, no backend
         named)."""
         if self.speculative is None or Support.PLUGIN.value not in self.techniques.values():
@@ -498,7 +522,7 @@ class VllmPlan:
         for key, value in self.env.items():
             os.environ.setdefault(key, value)
 
-    def llm(self, **overrides: Any) -> Any:
+    def llm(self, **overrides: object) -> LLM:
         """A ``vllm.LLM`` for this plan (imports vLLM).
 
         Installs economize's vLLM plugin first when a technique needs it, so the plan also works from a source
@@ -553,7 +577,7 @@ class VllmPlan:
             lines += [f"    - {text}" for text in self.notes.get(name, [])]
         return "\n".join(lines)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         return {"model": self.model, "tokenizer": self.tokenizer, "engine": self.engine,
                 "speculative": self.speculative, "env": self.env, "techniques": self.techniques, "notes": self.notes}
 
@@ -576,10 +600,10 @@ class VllmPlan:
                                                     "techniques", "notes") if key in data})
 
 
-def _ordered(techniques: Mapping[str, nn.Module]) -> list[tuple[str, nn.Module]]:
+def _ordered(techniques: Mapping[str, Technique]) -> list[tuple[str, Technique]]:
     """The techniques in attach order (capability group, then ``order``)."""
 
-    def rank(item: tuple[str, nn.Module]) -> tuple[int, int]:
+    def rank(item: tuple[str, Technique]) -> tuple[int, int]:
         capabilities = getattr(type(item[1]), "capabilities", Capability.NONE)
         group = next((i for i, c in enumerate(CAPABILITY_ORDER) if c & capabilities), len(CAPABILITY_ORDER))
         return group, int(getattr(type(item[1]), "order", 50))
@@ -601,10 +625,10 @@ def adapter_for(name: str) -> VllmTechnique:
     return VLLM_TECHNIQUES.get(name)()
 
 
-def _build(model: Any, out_dir: Path | None, num_speculative_tokens: int, sampling: bool,
-           ) -> tuple[PlanBuilder, list[tuple[VllmTechnique, nn.Module]]]:
+def _build(model: EfficientModel, out_dir: Path | None, num_speculative_tokens: int, sampling: bool,
+           ) -> tuple[PlanBuilder, list[tuple[VllmTechnique, Technique]]]:
     builder = PlanBuilder(model, out_dir, num_speculative_tokens, sampling)
-    steps: list[tuple[VllmTechnique, nn.Module]] = []
+    steps: list[tuple[VllmTechnique, Technique]] = []
     for name, technique in _ordered(builder.techniques):
         adapter = adapter_for(name)
         adapter.check(technique, builder)
@@ -622,7 +646,7 @@ def _build(model: Any, out_dir: Path | None, num_speculative_tokens: int, sampli
     return builder, steps
 
 
-def check_servable(model: Any, *, num_speculative_tokens: int = 4) -> dict[str, Support]:
+def check_servable(model: EfficientModel, *, num_speculative_tokens: int = 4) -> dict[str, Support]:
     """Run every adapter's checks without writing anything, and return the support level per technique.
 
     Raises:
@@ -674,7 +698,7 @@ def _write_base(builder: PlanBuilder) -> str:
     return str(target)
 
 
-def to_vllm(model: Any, out_dir: str | Path, *, num_speculative_tokens: int = 4, sampling: bool = True,
+def to_vllm(model: EfficientModel, out_dir: str | Path, *, num_speculative_tokens: int = 4, sampling: bool = True,
             dtype: str | None = None) -> VllmPlan:
     """Export ``model`` (an EfficientModel, any combination of servable techniques) for vLLM.
 
@@ -717,8 +741,8 @@ def to_vllm(model: Any, out_dir: str | Path, *, num_speculative_tokens: int = 4,
     return plan
 
 
-def serve(model: Any, out_dir: str | Path, *, num_speculative_tokens: int = 4, sampling: bool = True,
-          dtype: str | None = None, **llm_kwargs: Any) -> Any:
+def serve(model: EfficientModel, out_dir: str | Path, *, num_speculative_tokens: int = 4, sampling: bool = True,
+          dtype: str | None = None, **llm_kwargs: object) -> LLM:
     """:func:`to_vllm`, then a ``vllm.LLM`` for the plan (``llm_kwargs`` go to ``vllm.LLM``)."""
     plan = to_vllm(model, out_dir, num_speculative_tokens=num_speculative_tokens, sampling=sampling, dtype=dtype)
     return plan.llm(**llm_kwargs)

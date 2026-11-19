@@ -3,13 +3,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, cast
 
-from torch import nn
-
+from ....core.technique import Technique
 from ...exporters import UnsupportedBackendError
 from .base import PlanBuilder, Support, register_vllm_technique
 from .drafters import _Exported
+
+if TYPE_CHECKING:
+    from ....techniques.dflash.config import DFlashConfig
+    from ....techniques.dflash.technique import DFlashTechnique
 
 __all__ = ["DFlashVllm"]
 
@@ -17,7 +20,7 @@ __all__ = ["DFlashVllm"]
 V2_RUNNER_ENV = "VLLM_USE_V2_MODEL_RUNNER"
 
 
-def _mixed(technique: Any) -> bool:
+def _mixed(technique: DFlashTechnique) -> bool:
     kinds = set(technique.layer_types)
     return len(kinds) > 1
 
@@ -36,31 +39,33 @@ class DFlashVllm(_Exported):
     reason = "method='dflash' (z-lab DFlashDraftModel config, target embedding and LM head shared)"
     exporter = "dflash"
 
-    def method(self, technique: nn.Module) -> str | None:
+    def method(self, technique: Technique) -> str | None:
         return "dflash"
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        block = int(technique.config.block_size)
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
+        block = int(cast("DFlashConfig", technique.config).block_size)
         if builder.num_speculative_tokens > block - 1:
             raise UnsupportedBackendError(f"a DFlash drafter with block_size={block} drafts at most {block - 1} "
                                           f"tokens; asked for num_speculative_tokens={builder.num_speculative_tokens}")
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         super().contribute(technique, builder)
-        if _mixed(technique):
+        dflash = cast("DFlashTechnique", technique)
+        config = cast("DFlashConfig", technique.config)
+        if _mixed(dflash):
             builder.require_v2_runner(self.technique, "mixed sliding/full draft layers")
             builder.note(self.technique, "mixed sliding/full draft layers: vLLM's V2 model runner "
                                          f"({V2_RUNNER_ENV}=1) serves the drafter and the target")
-        bidirectional = not all(technique.causal(i) for i in range(len(technique.layers)))
-        block = int(technique.config.block_size)
+        bidirectional = not all(dflash.causal(i) for i in range(len(dflash.layers)))
+        block = int(config.block_size)
         if bidirectional and builder.num_speculative_tokens < block - 1:
             builder.note(self.technique, f"vLLM runs a block of {builder.num_speculative_tokens + 1} slots, the "
                                          f"drafter was trained on {block}: its bidirectional layers see fewer masks, "
                                          "so the drafts can differ from economize's (the output stays lossless)")
-        cap = technique.config.logit_softcap
+        cap = config.logit_softcap
         if cap or (cap is None and getattr(technique.adapter, "final_logit_softcap", None)):
             builder.note(self.technique, "vLLM's DFlash head applies no logit soft cap, which changes "
                                          "probabilistic drafts only")
-        if technique.config.embed_scale != 1.0:
+        if config.embed_scale != 1.0:
             builder.note(self.technique, "embed_scale != 1: the export writes the scaled embedding as the drafter's "
                                          "own embed_tokens (one V x d tensor)")

@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
 from ...exporters import UnsupportedBackendError
 from ..linear import QUANT_METHOD
@@ -23,13 +22,13 @@ __all__ = ["write_linear_config"]
 KV_SCHEME_METHODS.add(QUANT_METHOD)  # EconomizeLinearConfig serves calibrated fp8 KV scales
 
 
-def _kv_only(config: Mapping[str, Any]) -> bool:
+def _kv_only(config: Mapping[str, object]) -> bool:
     """Whether a ``quantization_config`` quantizes the KV cache only (a compressed-tensors config without groups)."""
     return (config.get("quant_method") == "compressed-tensors" and not config.get("config_groups")
             and not config.get("sparsity_config") and not config.get("transform_config"))
 
 
-def write_linear_config(path: Path, sections: Mapping[str, Mapping[str, Any]]) -> None:
+def write_linear_config(path: Path, sections: Mapping[str, Mapping[str, object]]) -> None:
     """Write the ``economize`` ``quantization_config`` with ``sections`` into the ``config.json`` at ``path``.
 
     A KV-only compressed-tensors config already in the file gives its ``kv_cache_scheme`` to the new config.
@@ -39,7 +38,7 @@ def write_linear_config(path: Path, sections: Mapping[str, Mapping[str, Any]]) -
     """
     config = json.loads(path.read_text())
     existing = config.get("quantization_config")
-    linear: dict[str, Any] = {"quant_method": QUANT_METHOD, **{name: dict(body) for name, body in sections.items()}}
+    linear: dict[str, object] = {"quant_method": QUANT_METHOD, **{name: dict(body) for name, body in sections.items()}}
     if existing:
         if existing.get("quant_method") != QUANT_METHOD and not _kv_only(existing):
             raise UnsupportedBackendError(

@@ -15,16 +15,26 @@ own attention layer shards that layer's heads (:mod:`economize.backends.vllm.sha
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar, Protocol, cast
 
 import torch
 from torch import nn
 
 from ....errors import ConfigError
 from ..drafters import SYNC_PREFIX
-from ..jump.model import TargetModules
+from ..jump.model import TargetModules, _DecoderStack
+
+if TYPE_CHECKING:
+    from vllm.config import VllmConfig
 
 __all__ = ["HeadDrafterModel"]
+
+
+class _HeadSpec(Protocol):
+    """What the base reads from a head drafter's specification; a subclass narrows ``spec`` to its own class."""
+
+    @property
+    def num_layers(self) -> int: ...
 
 
 class HeadDrafterModel(nn.Module):
@@ -46,9 +56,9 @@ class HeadDrafterModel(nn.Module):
     #: Prefix of the technique's tensors (``"hydra."``); the module holding them is the attribute without the dot.
     weights_prefix: ClassVar[str] = ""
 
-    spec: Any
+    spec: _HeadSpec
 
-    def __init__(self, vllm_config: Any) -> None:
+    def __init__(self, vllm_config: VllmConfig) -> None:
         super().__init__()
         model_config = getattr(vllm_config, "model_config", None)
         self.model_dtype: torch.dtype = getattr(model_config, "dtype", None) or torch.get_default_dtype()
@@ -74,7 +84,7 @@ class HeadDrafterModel(nn.Module):
         Raises:
             ConfigError: The target's depth differs from the export.
         """
-        inner: Any = target.model  # the language model of a vLLM causal LM (an nn.Module attribute)
+        inner = cast(_DecoderStack, target.model)
         layers = list(inner.layers)
         if len(layers) != self.spec.num_layers:
             raise ConfigError(f"the drafter was exported for {self.spec.num_layers} layers, the target has "
@@ -102,7 +112,7 @@ class HeadDrafterModel(nn.Module):
             return
         drafter = self
 
-        def load_weights(weights: Iterable[tuple[str, torch.Tensor]]) -> Any:
+        def load_weights(weights: Iterable[tuple[str, torch.Tensor]]) -> set[str] | None:
             own: list[tuple[str, torch.Tensor]] = []
 
             def to_target() -> Iterable[tuple[str, torch.Tensor]]:
@@ -118,8 +128,10 @@ class HeadDrafterModel(nn.Module):
             names = drafter.load_weights(own)
             return set(loaded or ()) | {SYNC_PREFIX + name for name in names}
 
+        # A marker attribute on the function object, and an instance attribute that nn.Module.__setattr__ types as
+        # tensors/modules only (setattr with a constant name would trip ruff B010).
         load_weights.economize_drafter = self  # type: ignore[attr-defined]
-        target.load_weights = load_weights  # type: ignore[assignment]  # nn.Module.__setattr__ types tensors/modules
+        target.load_weights = load_weights  # type: ignore[assignment]
 
     @property
     def target(self) -> TargetModules:
@@ -169,7 +181,9 @@ class HeadDrafterModel(nn.Module):
         """EAGLE-3 hook on the auxiliary states (one: the last hidden state); unchanged."""
         return hidden_states
 
-    def forward(self, input_ids: torch.Tensor, positions: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def forward(
+        self, input_ids: torch.Tensor, positions: torch.Tensor, *args: object, **kwargs: object
+    ) -> torch.Tensor:
         """Not used: economize's proposer drives the drafter."""
         raise NotImplementedError(f"{type(self).__name__} is driven by economize's {self.drafter_name} proposer")
 
