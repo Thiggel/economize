@@ -18,8 +18,9 @@ drafter that reads the same LM head (:class:`~economize.techniques.early_exit.Ea
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal, cast
 
 import torch
 from torch.utils.checkpoint import checkpoint
@@ -116,7 +117,9 @@ class LayerSkip(Objective):
         return self._loss(model, batch, dropout=True, enabled=self._enabled(num_layers))
 
     @torch.no_grad()
-    def evaluate(self, model: EfficientModel, batch: Batch, teacher: TeacherOutputs | None) -> dict[str, Any]:
+    def evaluate(
+        self, model: EfficientModel, batch: Batch, teacher: TeacherOutputs | None
+    ) -> dict[str, torch.Tensor | float]:
         """Next-token NLL of every exit, without layer dropout (the exits' hooks are installed for the call when
         :meth:`setup` has not run)."""
         temporary = not self._handles
@@ -157,9 +160,14 @@ class LayerSkip(Objective):
             return exits
         return tuple(l for l in exits if l == num_layers or (l - 1 - self._step) % self.rotation == 0)
 
-    def _hook(self, layer: int, rate: float, capture: bool) -> Any:
-        def hook(module: torch.nn.Module, args: tuple, kwargs: dict, output: Any) -> Any:
-            hidden_in = args[0] if args else kwargs["hidden_states"]
+    def _hook(self, layer: int, rate: float, capture: bool) -> Callable[..., torch.Tensor | tuple[object, ...]]:
+        def hook(
+            module: torch.nn.Module,
+            args: tuple[object, ...],
+            kwargs: dict[str, object],
+            output: torch.Tensor | tuple[torch.Tensor, ...],
+        ) -> torch.Tensor | tuple[object, ...]:
+            hidden_in = cast(torch.Tensor, args[0] if args else kwargs["hidden_states"])
             out = output[0] if isinstance(output, tuple) else output
             if self._dropping and rate > 0:
                 keep = torch.rand(out.shape[0], device=out.device) >= rate
