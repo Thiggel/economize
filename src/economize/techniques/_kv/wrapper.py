@@ -28,7 +28,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, field
-from typing import TypeVar
+from typing import Protocol, TypeVar, cast
 
 import torch
 from torch import nn
@@ -47,6 +47,15 @@ __all__ = [
 ]
 
 W = TypeVar("W", bound="CacheWrapper")
+
+
+class _BufferedCache(Protocol):
+    """A cache with per-layer K/V buffers and Hugging Face's ``get_seq_length``, as :class:`CacheWrapper` reads them
+    off the cache it wraps (the static caches have the buffers; ``KVCache`` declares neither)."""
+
+    keys: dict[int, torch.Tensor]
+    values: dict[int, torch.Tensor]
+    get_seq_length: Callable[..., int]
 
 
 @dataclass
@@ -195,27 +204,27 @@ class CacheWrapper(KVCache):
     @property
     def keys(self) -> dict[int, torch.Tensor]:
         """The wrapped cache's per-layer key buffers (the stored, possibly compressed K, as layers read them)."""
-        return self.inner.keys  # type: ignore[attr-defined]
+        return cast("_BufferedCache", self.inner).keys
 
     @keys.setter
     def keys(self, buffers: dict[int, torch.Tensor]) -> None:
-        self.inner.keys = buffers  # type: ignore[attr-defined]
+        cast("_BufferedCache", self.inner).keys = buffers
 
     @property
     def values(self) -> dict[int, torch.Tensor]:
         """The wrapped cache's per-layer value buffers."""
-        return self.inner.values  # type: ignore[attr-defined]
+        return cast("_BufferedCache", self.inner).values
 
     @values.setter
     def values(self, buffers: dict[int, torch.Tensor]) -> None:
-        self.inner.values = buffers  # type: ignore[attr-defined]
+        cast("_BufferedCache", self.inner).values = buffers
 
     @property
     def get_seq_length(self) -> Callable[..., int]:
         """The wrapped cache's ``get_seq_length`` (Hugging Face's cache API). Like an attribute lookup on the wrapped
         cache, it raises :class:`AttributeError` when that cache has none, so ``hasattr`` answers for the wrapped
         cache."""
-        return self.inner.get_seq_length  # type: ignore[attr-defined]
+        return cast("_BufferedCache", self.inner).get_seq_length
 
     def key_positions(self, device: torch.device) -> torch.Tensor:
         return self.inner.key_positions(device)
