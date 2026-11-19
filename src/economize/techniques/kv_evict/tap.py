@@ -18,8 +18,8 @@ function call in that window, which makes those passes slower. economize simulat
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
-from typing import Any, Protocol
+from collections.abc import Callable, Collection, Iterator
+from typing import Protocol, TypedDict, cast
 
 import torch
 import torch.nn.functional as F
@@ -30,6 +30,21 @@ __all__ = ["CHUNK_BYTES", "AttentionSink", "AttentionTap", "attention_probs", "i
 _SDPA = F.scaled_dot_product_attention
 #: Parameter order of ``scaled_dot_product_attention`` (a builtin without an inspectable signature).
 _SDPA_PARAMETERS = ("query", "key", "value", "attn_mask", "dropout_p", "is_causal", "scale", "enable_gqa")
+
+
+class _SdpaCall(TypedDict, total=False):
+    """The arguments of one ``scaled_dot_product_attention`` call, by name."""
+
+    query: torch.Tensor
+    key: torch.Tensor
+    value: torch.Tensor | None
+    attn_mask: torch.Tensor | None
+    dropout_p: float
+    is_causal: bool
+    scale: float | None
+    enable_gqa: bool
+
+
 #: Size bound of one chunk of fp32 probabilities the tap hands to its sink.
 CHUNK_BYTES = 1 << 28
 
@@ -60,7 +75,13 @@ class AttentionTap(TorchFunctionMode):
         super().__init__()
         self.sink = sink
 
-    def __torch_function__(self, func: Any, types: Any, args: tuple = (), kwargs: dict | None = None) -> Any:
+    def __torch_function__(
+        self,
+        func: Callable[..., object],
+        types: Collection[type],
+        args: tuple[object, ...] = (),
+        kwargs: dict[str, object] | None = None,
+    ) -> object:
         kwargs = kwargs or {}
         out = func(*args, **kwargs)
         if func is _SDPA and self.sink.wants_probs():
@@ -74,7 +95,7 @@ class AttentionTap(TorchFunctionMode):
         if self.sink.wants_probs():
             self._report({"query": query, "key": key, "attn_mask": attn_mask, "scale": scale})
 
-    def _report(self, bound: dict[str, Any]) -> None:
+    def _report(self, bound: _SdpaCall) -> None:
         start = self.sink.first_query(bound["query"].shape[-2])
         for offset, probs in iter_attention_probs(**bound, query_start=start, chunk_bytes=CHUNK_BYTES):
             self.sink.observe(probs, offset)
@@ -141,8 +162,8 @@ def iter_attention_probs(
         del logits
 
 
-def _bind(args: tuple, kwargs: dict) -> dict[str, Any]:
+def _bind(args: tuple[object, ...], kwargs: dict[str, object]) -> _SdpaCall:
     bound = dict(zip(_SDPA_PARAMETERS, args))
     bound.update({name: value for name, value in kwargs.items() if name in _SDPA_PARAMETERS})
-    return bound
+    return cast(_SdpaCall, bound)  # the names of an sdpa call, bound to its arguments
 

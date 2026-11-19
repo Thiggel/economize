@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from abc import ABC
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import torch
 import torch.nn.functional as F
@@ -120,7 +120,7 @@ class EvictionMethod(ABC):  # noqa: B024  (every hook has a default; ABC marks i
         must agree with :meth:`before_pass` and :meth:`after_pass`."""
         raise NotImplementedError(f"{type(self).__name__} is not a positional eviction method")
 
-    def describe(self) -> dict[str, Any]:
+    def describe(self) -> dict[str, object]:
         """The method's effective budget, for reports."""
         return {"method": self.config.method, "sinks": self.sinks}
 
@@ -181,7 +181,7 @@ class StreamingEviction(EvictionMethod):
     def window_cut(self, frontier: int) -> int:
         return frontier - self.config.recent
 
-    def describe(self) -> dict[str, Any]:
+    def describe(self) -> dict[str, object]:
         return {**super().describe(), "recent": self.config.recent}
 
 
@@ -202,7 +202,7 @@ class H2OEviction(EvictionMethod):
         old = candidates(keep, self.sinks, info.frontier - self.config.recent)
         keep_top(keep, old, scores, self.config.heavy)
 
-    def describe(self) -> dict[str, Any]:
+    def describe(self) -> dict[str, object]:
         return {**super().describe(), "recent": self.config.recent, "heavy": self.config.heavy}
 
 
@@ -233,7 +233,7 @@ class H2OPrefillEviction(EvictionMethod):
         prefix_end = info.end - self.config.recent
         keep_top(keep, candidates(keep, self.sinks, prefix_end), scores, self.config.heavy)
 
-    def describe(self) -> dict[str, Any]:
+    def describe(self) -> dict[str, object]:
         return {**super().describe(), "recent": self.config.recent, "heavy": self.config.heavy}
 
 
@@ -280,7 +280,7 @@ class SnapKVEviction(EvictionMethod):
             pooled = F.avg_pool1d(flat, k, stride=1, padding=k // 2)
         return pooled.reshape(scores.shape)
 
-    def describe(self) -> dict[str, Any]:
+    def describe(self) -> dict[str, object]:
         return {
             **super().describe(),
             "heavy": self.config.heavy,
@@ -339,5 +339,5 @@ class PyramidKVEviction(SnapKVEviction):
         step = (high - low) // (num_layers - 1) if num_layers > 1 else 0
         return high - layer * step
 
-    def describe(self) -> dict[str, Any]:
+    def describe(self) -> dict[str, object]:
         return {**super().describe(), "beta": self.config.beta}
