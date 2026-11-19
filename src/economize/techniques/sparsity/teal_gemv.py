@@ -21,12 +21,12 @@ from __future__ import annotations
 import functools
 import importlib.util
 from dataclasses import dataclass
-from typing import Any
 
 import torch
 from torch import Tensor
 
 from ...errors import ConfigError
+from .._triton import TritonKernel
 
 __all__ = ["GemvConfig", "default_config", "teal_gemv", "triton_available"]
 
@@ -80,7 +80,7 @@ def default_config(m: int, n: int, k: int, device: torch.device) -> GemvConfig:
 
 
 @functools.cache
-def _kernel() -> Any:
+def _kernel() -> TritonKernel:
     """The Triton kernel, compiled on first use (Triton is imported lazily)."""
     import triton
     import triton.language as tl

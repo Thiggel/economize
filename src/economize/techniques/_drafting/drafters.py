@@ -7,7 +7,7 @@ import inspect
 import weakref
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, overload, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, TypeAlias, TypeVar, cast, overload, runtime_checkable
 
 import torch
 from torch import nn
@@ -27,12 +27,29 @@ __all__ = [
     "GraphedStep",
     "ObserveCosts",
     "StepFn",
+    "StepWrap",
+    "TensorFn",
+    "graphed",
     "previous_states",
     "take_rows",
 ]
 
 #: A draft step: ``(tokens [B], positions [B], valid [B] | None) -> logits [B, V]``.
 StepFn = Callable[[torch.Tensor, torch.Tensor, "torch.Tensor | None"], torch.Tensor]
+
+#: A function of tensors that a CUDA graph can replay: tensors in, a tensor or a tuple of tensors out.
+TensorFn: TypeAlias = Callable[..., "torch.Tensor | tuple[torch.Tensor, ...]"]
+
+#: What :meth:`~economize.decoding.Drafter.enable_graphs` receives: turns a function of tensors into its graphed
+#: version, which takes and returns the same as the function.
+StepWrap: TypeAlias = Callable[[TensorFn], TensorFn]
+
+F = TypeVar("F", bound=TensorFn)
+
+
+def graphed(wrap: StepWrap, fn: F) -> F:
+    """``wrap(fn)`` with the type of ``fn``: a graphed function takes and returns what ``fn`` does."""
+    return cast(F, wrap(fn))
 
 
 @runtime_checkable
@@ -81,7 +98,7 @@ class GraphedStep:
             weakref.WeakMethod(step) if inspect.ismethod(step) else lambda: step
         )
         self._graph: Callable[..., torch.Tensor] | None = None
-        self._wrap: Callable[[Callable[..., Any]], Callable[..., Any]] | None = None
+        self._wrap: StepWrap | None = None
         self._all_valid: dict[tuple[int, torch.device], torch.Tensor] = {}
 
     @property
@@ -96,17 +113,17 @@ class GraphedStep:
         """Whether the step runs from CUDA graphs."""
         return self._graph is not None
 
-    def enable(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> None:
+    def enable(self, wrap: StepWrap) -> None:
         """Route the step through ``wrap(step)`` (see :meth:`~economize.decoding.Drafter.enable_graphs`)."""
-        self._graph = wrap(self._eager)
+        self._graph = graphed(wrap, self._eager)
         self._wrap = wrap
 
-    def graph(self, fn: Callable[..., Any]) -> Callable[..., Any]:
+    def graph(self, fn: F) -> F:
         """``fn`` (a function of tensors next to the step, e.g. several steps in a row) graphed by the same ``wrap``
         as the step, so the decoder resets it with the step's graphs; needs :meth:`enable` first."""
         if self._wrap is None:
             raise RuntimeError("GraphedStep.graph needs enable() first")
-        return self._wrap(fn)
+        return graphed(self._wrap, fn)
 
     def all_valid(self, batch_size: int, device: torch.device) -> torch.Tensor:
         """The cached all-true row mask ``[batch_size]`` the graphs read when every row drafts."""

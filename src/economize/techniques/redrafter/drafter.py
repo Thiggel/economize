@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from ...decoding.protocols import Verifier
     from ...decoding.request import DraftRequest
     from ...runtime import ExactPass, KVCache, LayerRunner
+    from .._drafting import StepWrap
     from .technique import RedrafterTechnique
 
 __all__ = ["RedrafterDrafter", "beam_tree"]
@@ -90,7 +91,7 @@ class RedrafterDrafter(Drafter):
     def begin(self, runner: LayerRunner, cache: KVCache, batch_size: int) -> None:
         self._context = None
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: StepWrap) -> bool:
         self._chain_step = wrap(self.technique.draft_step)
         self._beam_step = wrap(self.technique.beam_step)
         return True

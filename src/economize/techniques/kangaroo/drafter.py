@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -15,6 +14,7 @@ from .._drafting import BoundedDrafter, CommittedColumns, GraphedStep, ObserveCo
 if TYPE_CHECKING:
     from ...decoding.request import DraftRequest
     from ...runtime import ExactPass, KVCache, LayerRunner
+    from .._drafting import StepWrap
     from .technique import KangarooTechnique
 
 __all__ = ["ADAPTER_KIND", "KangarooDrafter"]
@@ -82,7 +82,7 @@ class KangarooDrafter(BoundedDrafter):
             self._buffers[key] = self._new_cache(batch_size)
         return self._buffers[key]
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: StepWrap) -> bool:
         self._step_fn.enable(wrap)
         return True
 

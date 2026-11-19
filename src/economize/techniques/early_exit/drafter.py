@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import torch
 
@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from ...decoding.cost import LayerFootprint
     from ...decoding.request import DraftRequest
     from ...runtime import ExactPass, KVCache, LayerContext, LayerRunner
+    from .._drafting import StepWrap
 
 __all__ = ["EarlyExitDrafter", "SelfDraftStep", "SelfDrafter"]
 
@@ -77,7 +78,7 @@ class SelfDrafter(AdapterHeadSlicing, Drafter):
     def observe(self, exact: ExactPass, columns: torch.Tensor) -> None:
         pass
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: StepWrap) -> bool:
         self._step_fn.enable(wrap)
         return True
 

@@ -31,7 +31,7 @@ import functools
 import importlib.util
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 import torch
@@ -39,6 +39,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from ...errors import ConfigError
+from .._triton import TritonKernel
 from .head import LinearSlice
 
 if TYPE_CHECKING:
@@ -176,7 +177,7 @@ MANY_ROWS_FP32 = HeadKernelConfig(block_n=64, block_k=128, num_warps=4, num_stag
 
 
 @functools.cache
-def _kernels() -> tuple[Any, Any]:
+def _kernels() -> tuple[TritonKernel, TritonKernel]:
     """The two Triton kernels, compiled on first use (Triton is imported lazily)."""
     import triton
     import triton.language as tl

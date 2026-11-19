@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +20,7 @@ from .merge import MergedTree, TreeBuilder, accepted_path, build_tree, leading_c
 if TYPE_CHECKING:
     from ...decoding.cost import LayerFootprint
     from ...runtime import ExactPass, KVCache, LayerRunner
+    from .._drafting import StepWrap
 
 __all__ = ["CascadeDrafter", "CycleRecord", "ForcedRequest", "UnionDrafter", "UnionStats"]
 
@@ -172,7 +173,7 @@ class UnionDrafter(Drafter):
     def draft_capacity(self, cycle_length: int) -> int:
         return sum(self._limit(i, member.draft_capacity(cycle_length)) for i, member in enumerate(self.members))
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: StepWrap) -> bool:
         return False  # the members draft eagerly: graph replay is not validated with the union's sub-requests
 
     def drafts_trees(self, verifier: Verifier) -> bool:

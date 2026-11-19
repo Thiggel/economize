@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import math
 from collections import deque
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -18,6 +17,7 @@ from .search import SearchStats, SearchTokens
 if TYPE_CHECKING:
     from ...decoding import Draft, DraftRequest
     from ...runtime import ExactPass, KVCache, LayerRunner
+    from .._drafting import StepWrap
     from .technique import KnapSpecTechnique
 
 __all__ = ["SEARCH_COST", "KnapSpecDrafter"]
@@ -53,7 +53,7 @@ class KnapSpecDrafter(SelfDrafter):
     def __init__(self, technique: KnapSpecTechnique, runner: LayerRunner) -> None:
         super().__init__(technique, runner)
         self._history: deque[SearchTokens] = deque(maxlen=technique.config.history)
-        self._wrap: Callable[[Callable[..., Any]], Callable[..., Any]] | None = None
+        self._wrap: StepWrap | None = None
         self._graphs: dict[tuple[tuple[int, ...], tuple[int, ...]], GraphedStep] = {}
         self._eager_step = GraphedStep(self._step)  # skip sets beyond ``max_graphs``
         self._searched_at: int | None = None
@@ -73,7 +73,7 @@ class KnapSpecDrafter(SelfDrafter):
         self.searches = 0
         self.technique.plan = None
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: StepWrap) -> bool:
         self._wrap = wrap
         self._step_fn.enable(wrap)  # the step before the first search (unused: a proposal searches first)
         return True

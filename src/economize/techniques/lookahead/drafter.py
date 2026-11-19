@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -13,11 +13,10 @@ from .pool import NgramPool, guess_tree
 from .window import JacobiWindow
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from ...decoding.protocols import Verifier
     from ...decoding.request import DraftRequest
     from ...runtime import ExactPass, KVCache, LayerRunner
+    from .._drafting import StepWrap
     from .config import LookaheadConfig
 
 __all__ = ["LookaheadDrafter", "window_capacity"]
@@ -101,7 +100,7 @@ class LookaheadDrafter(Drafter):
         nodes = max(window_capacity(c.window, c.ngram), full)
         return -(-nodes // WIDTH_STEP) * WIDTH_STEP
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: StepWrap) -> bool:
         self.graphed = True  # the drafter runs nothing itself; it only keeps the number of tree widths small
         return False
 

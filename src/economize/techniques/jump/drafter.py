@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from ...decoding.request import DraftRequest
     from ...modules import DraftKVCache
     from ...runtime import ExactPass, KVCache, LayerRunner
+    from .._drafting import StepWrap
     from .technique import JumpTechnique
 
 __all__ = ["JumpDrafter"]
@@ -97,7 +98,7 @@ class JumpDrafter(AdapterHeadSlicing, BoundedDrafter, ChainGraphs):
         if self._observe_costs is not None:
             self._observe_costs.reset()
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: StepWrap) -> bool:
         if self._predictor is not None:  # its cache is reallocated by reorder and read up to a varying limit
             return False
         self._step_fn.enable(wrap)

@@ -18,6 +18,7 @@ from .layer import DFlashLayer
 if TYPE_CHECKING:
     from ...decoding.request import DraftRequest
     from ...runtime import ExactPass, KVCache, LayerRunner
+    from .._drafting import StepWrap
     from .technique import DFlashTechnique
 
 __all__ = ["DFlashDrafter"]
@@ -94,7 +95,7 @@ class DFlashDrafter(Drafter):
             self._buffers[key] = self._new_cache(batch_size)
         return self._buffers[key]
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: StepWrap) -> bool:
         self._step_fn.enable(wrap)
         return True
 

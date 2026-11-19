@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
 import torch
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from ...decoding.cost import LayerFootprint
     from ...decoding.request import DraftRequest
     from ...runtime import ExactPass, KVCache, LayerRunner
+    from .drafters import StepWrap
 
 __all__ = [
     "DelegatingDrafter",
@@ -270,7 +271,7 @@ class DelegatingDrafter(Drafter):
     def draft_capacity(self, cycle_length: int) -> int:
         return self.inner.draft_capacity(cycle_length)
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: StepWrap) -> bool:
         return self.inner.enable_graphs(wrap)
 
     def drafts_trees(self, verifier: Verifier) -> bool:
