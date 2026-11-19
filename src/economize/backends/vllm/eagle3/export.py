@@ -26,16 +26,22 @@ output stays lossless and only the acceptance can change.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, cast
 
 import torch
+from torch import nn
 
 from ....errors import ConfigError
 from ...exporters import DrafterExporter, register_exporter
 
-__all__ = ["Eagle3VllmExporter"]
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
 
-ExportFormat = Literal["eagle3", "speculators"]
+    from ....techniques.eagle3.technique import Eagle3Technique
+    from ...exporters import ExportOptions
+
+__all__ = ["Eagle3VllmExporter"]
 
 #: Architecture of the flat layout (vLLM's ``EAGLEConfig`` prefixes ``Eagle3`` for ``method="eagle3"``).
 LAYER_ARCHITECTURE = "LlamaForCausalLM"
@@ -43,22 +49,22 @@ LAYER_ARCHITECTURE = "LlamaForCausalLM"
 SPECULATORS_ARCHITECTURE = "Eagle3Speculator"
 
 
-def _rope_parameters(technique: Any) -> dict[str, Any]:
+def _rope_parameters(technique: Eagle3Technique) -> dict[str, object]:
     """The ``rope_parameters`` of the draft layer (transformers 5 layout)."""
     config = technique.config
     if technique.rotary is not None:
-        params: dict[str, Any] = dict(config.rope_scaling or {})
+        params: dict[str, object] = dict(config.rope_scaling or {})
         params.setdefault("rope_type", params.pop("type", "default"))
-        params["rope_theta"] = float(config.rope_theta)
+        params["rope_theta"] = float(cast(float, config.rope_theta))  # the own rotary table exists only with it
         if config.partial_rotary_factor not in (None, 1.0):
             params["partial_rotary_factor"] = float(config.partial_rotary_factor)
         return params
     text = technique.adapter.config
     table = technique.rope_table
-    params = getattr(text, "rope_parameters", None) or {}
-    if isinstance(params.get(table), dict):  # one table per layer type (Gemma 3/4: full_attention, sliding_attention)
-        params = params[table]
-    params = dict(params)
+    tables: Mapping[str, object] = getattr(text, "rope_parameters", None) or {}
+    chosen = tables.get(table)
+    # one table per layer type (Gemma 3/4: full_attention, sliding_attention)
+    params = dict(cast("Mapping[str, object]", chosen) if isinstance(chosen, dict) else tables)
     if "rope_theta" not in params:
         params["rope_theta"] = float(getattr(text, "rope_theta", None) or 10000.0)
     params.setdefault("rope_type", "default")
@@ -68,7 +74,7 @@ def _rope_parameters(technique: Any) -> dict[str, Any]:
     return params
 
 
-def _final_norm_gain(technique: Any) -> torch.Tensor:
+def _final_norm_gain(technique: Eagle3Technique) -> torch.Tensor:
     """The per-channel gain ``g`` of the model's final norm as a plain RMSNorm ``g * x / rms(x)``.
 
     Read off the norm of the all-ones vector (``rms = sqrt(1 + eps)``), in float32 when the norm accepts it.
@@ -88,15 +94,15 @@ def _final_norm_gain(technique: Any) -> torch.Tensor:
 
 
 @register_exporter("vllm", "eagle3")
-class Eagle3VllmExporter(DrafterExporter):
+class Eagle3VllmExporter(DrafterExporter["Eagle3Technique"]):
     """An EAGLE-3 drafter as vLLM's EAGLE-3 draft model, see the module docstring."""
 
-    def config(self, model: Any, **options: Any) -> dict[str, Any]:
+    def config(self, model: nn.Module, **options: Unpack[ExportOptions]) -> dict[str, object]:
         """The ``config.json`` of the exported drafter (``options`` as in :meth:`build_config`)."""
         return self.build_config(model, **options)
 
-    def build_config(self, model: Any, *, format: ExportFormat = "eagle3", num_speculative_tokens: int = 4,
-                     verifier: str | None = None) -> dict[str, Any]:
+    def build_config(self, model: nn.Module, *, format: str = "eagle3", num_speculative_tokens: int = 4,
+                     verifier: str | None = None) -> dict[str, object]:
         """The ``config.json`` of the exported drafter.
 
         Args:
@@ -108,13 +114,13 @@ class Eagle3VllmExporter(DrafterExporter):
         Raises:
             ConfigError: An unknown format.
         """
-        technique: Any = self.technique_of(model)
+        technique = self.technique_of(model)
         adapter = technique.adapter
         text = adapter.config
         layer = technique.layer
         hidden = int(adapter.hidden_size)
         attention = layer.self_attn
-        layer_config: dict[str, Any] = {
+        layer_config: dict[str, object] = {
             "architectures": [LAYER_ARCHITECTURE],
             "model_type": "llama",
             "num_hidden_layers": 1,
@@ -164,9 +170,9 @@ class Eagle3VllmExporter(DrafterExporter):
             **top,
         }
 
-    def live_tensors(self, model: Any) -> dict[str, torch.Tensor]:
+    def live_tensors(self, model: nn.Module) -> dict[str, torch.Tensor]:
         """The drafter's tensors under their official names, as they live in the model (detached)."""
-        technique: Any = self.technique_of(model)
+        technique = self.technique_of(model)
         out: dict[str, torch.Tensor] = {}
         for name, tensor in technique.state_dict().items():
             if name.startswith("rotary."):
@@ -186,6 +192,6 @@ class Eagle3VllmExporter(DrafterExporter):
             out["norm.weight"] = _final_norm_gain(technique).to(out["fc.weight"])
         return out
 
-    def tensors(self, model: Any) -> dict[str, torch.Tensor]:
+    def tensors(self, model: nn.Module) -> dict[str, torch.Tensor]:
         """:meth:`live_tensors` on the CPU, contiguous, in their own dtype (``d2t`` int64, ``t2d`` bool)."""
         return {name: tensor.to("cpu").contiguous() for name, tensor in self.live_tensors(model).items()}

@@ -8,7 +8,7 @@ the state after layer ``l`` as the only auxiliary state, and the adapter's tenso
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import torch
 from torch import nn
@@ -18,6 +18,9 @@ from ....techniques.kangaroo.export import CONFIG_KEY, WEIGHTS_PREFIX, KangarooD
 from ...exporters import register_exporter
 from ..jump.export import JumpVllmExporter
 from .model import DRAFTER_ARCHITECTURE
+
+if TYPE_CHECKING:
+    from ....core.technique import Technique
 
 __all__ = ["KangarooVllmExporter"]
 
@@ -36,8 +39,8 @@ class KangarooVllmExporter(JumpVllmExporter):
     def drafter_state(self, technique: nn.Module) -> dict[str, torch.Tensor]:
         return adapter_state(technique)
 
-    def config_block(self, technique: nn.Module, spec: JumpDrafterSpec) -> dict[str, Any]:
-        adapter: Any = technique.adapter  # the ArchAdapter of the technique (an nn.Module attribute)
+    def config_block(self, technique: Technique, spec: JumpDrafterSpec) -> dict[str, object]:
+        adapter = technique.adapter
         shared = [*(adapter.layer(index) for index in spec.jump_layers), adapter.embed_tokens, adapter.lm_head]
         return KangarooDrafterSpec.of(technique).to_dict() | {
             "shared_with_target": [adapter.module_path(module) for module in shared],
@@ -47,6 +50,6 @@ class KangarooVllmExporter(JumpVllmExporter):
         """The state after layer ``l``: the adapter's K/V of verified tokens is computed from it."""
         return [spec.exit_layer]
 
-    def live_tensors(self, model: Any) -> dict[str, torch.Tensor]:
+    def live_tensors(self, model: nn.Module) -> dict[str, torch.Tensor]:
         """The adapter's tensors as they live in the model (detached), keyed ``kangaroo.<name>``."""
         return {WEIGHTS_PREFIX + name: tensor for name, tensor in self.drafter_state(self.technique_of(model)).items()}

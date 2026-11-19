@@ -32,7 +32,7 @@ import json
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, ClassVar, TypeVar
+from typing import TYPE_CHECKING, ClassVar, Generic, TypedDict, TypeVar, cast
 
 import torch
 from torch import nn
@@ -40,9 +40,15 @@ from torch import nn
 from ..errors import ConfigError, EconomizeError
 from ..registry import Registry
 
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
+    from ..core.technique import Technique
+
 __all__ = [
     "EXPORTERS",
     "DrafterExporter",
+    "ExportOptions",
     "UnsupportedBackendError",
     "export_drafter",
     "exporter_for",
@@ -55,11 +61,30 @@ class UnsupportedBackendError(EconomizeError, NotImplementedError):
     """A backend is registered for a technique but cannot serve it yet."""
 
 
-class DrafterExporter(ABC):
+class ExportOptions(TypedDict, total=False):
+    """The export options a backend's exporters accept (each exporter reads the ones it knows and ignores the rest).
+
+    Attributes:
+        format: The layout of the exported folder (vLLM: ``"eagle3"``, ``"speculators"`` or ``"dflash"``).
+        num_speculative_tokens: Draft tokens per verification, recorded in the exported config.
+        verifier: Name or path of the target recorded in a ``speculators`` config.
+    """
+
+    format: str
+    num_speculative_tokens: int
+    verifier: str | None
+
+
+#: The technique class an exporter writes (covariant: it only comes out of :meth:`DrafterExporter.technique_of`).
+_T_co = TypeVar("_T_co", bound="Technique", covariant=True)
+
+
+class DrafterExporter(ABC, Generic[_T_co]):
     """Writes the drafter of one technique for one serving backend.
 
     Subclasses implement :meth:`config` and :meth:`tensors`; :meth:`export` writes both. The class attributes are
-    set by :func:`register_exporter`.
+    set by :func:`register_exporter`. The type parameter is the exported technique's class
+    (``DrafterExporter[JumpTechnique]``), which :meth:`technique_of` returns.
 
     Attributes:
         backend: The serving backend (``"vllm"``).
@@ -73,28 +98,31 @@ class DrafterExporter(ABC):
     config_file: ClassVar[str] = "config.json"
     weights_file: ClassVar[str] = "model.safetensors"
 
-    def technique_of(self, model: Any) -> nn.Module:
+    def technique_of(self, model: nn.Module) -> _T_co:
         """The exported technique of an EfficientModel (or ``model`` itself if it is that technique).
+
+        The technique is the one registered under :attr:`technique`, so it is an instance of the exporter's type
+        parameter; that is not checked at run time (a technique of another package may stand in for it).
 
         Raises:
             ConfigError: The model has no such technique.
         """
         if getattr(model, "name", None) == self.technique and not hasattr(model, "techniques"):
-            return model
+            return cast("_T_co", model)
         techniques = getattr(model, "techniques", None) or {}
         if self.technique not in techniques:
             raise ConfigError(f"the model has no {self.technique} technique to export for {self.backend}")
-        return techniques[self.technique]
+        return cast("_T_co", techniques[self.technique])
 
     @abstractmethod
-    def config(self, model: Any, **options: Any) -> dict[str, Any]:
-        """The content of :attr:`config_file`. ``options`` are the backend's export options."""
+    def config(self, model: nn.Module, **options: Unpack[ExportOptions]) -> dict[str, object]:
+        """The content of :attr:`config_file` (written as JSON). ``options`` are the backend's export options."""
 
     @abstractmethod
-    def tensors(self, model: Any) -> dict[str, torch.Tensor]:
+    def tensors(self, model: nn.Module) -> dict[str, torch.Tensor]:
         """The drafter-owned tensors written to :attr:`weights_file`, by their name in that file."""
 
-    def live_tensors(self, model: Any) -> dict[str, torch.Tensor]:
+    def live_tensors(self, model: nn.Module) -> dict[str, torch.Tensor]:
         """The tensors of :meth:`tensors` under the same names, as they live in the model (detached, no copy and
         no dtype or device change), for a weight sync into a running engine. The default returns :meth:`tensors`;
         an exporter whose :meth:`tensors` converts overrides it."""
@@ -104,7 +132,7 @@ class DrafterExporter(ABC):
         """The ``safetensors`` metadata of :attr:`weights_file`."""
         return {"format": "pt"}
 
-    def export(self, model: Any, path: str | Path, **options: Any) -> Path:
+    def export(self, model: nn.Module, path: str | Path, **options: Unpack[ExportOptions]) -> Path:
         """Write :attr:`config_file` and :attr:`weights_file` to the folder ``path`` (created if missing).
 
         Returns:
@@ -122,9 +150,9 @@ class DrafterExporter(ABC):
 
 
 #: Exporter classes by ``"<backend>/<technique>"`` (see :func:`exporter_key`). Built as ``cls()``.
-EXPORTERS: Registry[type[DrafterExporter]] = Registry("drafter exporter", "economize.exporters")
+EXPORTERS: Registry[type[DrafterExporter[Technique]]] = Registry("drafter exporter", "economize.exporters")
 
-_E = TypeVar("_E", bound=type[DrafterExporter])
+_E = TypeVar("_E", bound="type[DrafterExporter[Technique]]")
 
 
 def exporter_key(backend: str, technique: str) -> str:
@@ -143,7 +171,7 @@ def register_exporter(backend: str, technique: str, *, override: bool = False) -
     return add
 
 
-def _technique_names(model: Any) -> list[str]:
+def _technique_names(model: nn.Module) -> list[str]:
     techniques = getattr(model, "techniques", None)
     if isinstance(techniques, (Mapping, nn.ModuleDict)):
         return list(techniques.keys())
@@ -151,7 +179,7 @@ def _technique_names(model: Any) -> list[str]:
     return [name] if isinstance(name, str) else []
 
 
-def exporter_for(model: Any, backend: str, technique: str | None = None) -> DrafterExporter:
+def exporter_for(model: nn.Module, backend: str, technique: str | None = None) -> DrafterExporter[Technique]:
     """The exporter of the model's drafter technique for ``backend``.
 
     Args:
@@ -176,8 +204,8 @@ def exporter_for(model: Any, backend: str, technique: str | None = None) -> Draf
     return EXPORTERS.get(exporter_key(backend, found[0]))()
 
 
-def export_drafter(model: Any, path: str | Path, *, backend: str, technique: str | None = None,
-                   **options: Any) -> Path:
+def export_drafter(model: nn.Module, path: str | Path, *, backend: str, technique: str | None = None,
+                   **options: Unpack[ExportOptions]) -> Path:
     """Export the model's drafter for ``backend`` to the folder ``path`` (see :func:`exporter_for`).
 
     ``options`` go to the exporter (for vLLM: ``format``, ``num_speculative_tokens``, ``verifier``).

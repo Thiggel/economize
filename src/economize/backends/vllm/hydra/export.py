@@ -8,43 +8,46 @@ hidden state) and the technique's tensors keyed ``hydra.*``.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import torch
 from torch import nn
 
 from ....techniques.hydra.export import CONFIG_KEY, WEIGHTS_PREFIX, HydraDrafterSpec, drafter_state
 from ...exporters import register_exporter
-from ..jump.export import JumpVllmExporter
+from ..jump.export import JumpFormatExporter
 from .model import DRAFTER_ARCHITECTURE
+
+if TYPE_CHECKING:
+    from ....core.technique import Technique
 
 __all__ = ["HydraVllmExporter"]
 
 
 @register_exporter("vllm", "hydra")
-class HydraVllmExporter(JumpVllmExporter):
+class HydraVllmExporter(JumpFormatExporter[HydraDrafterSpec]):
     """Writes the ``hydra`` technique for
     :class:`~economize.backends.vllm.hydra.model.EconomizeHydraEagle3ForCausalLM`."""
 
     architecture = DRAFTER_ARCHITECTURE
     config_key = CONFIG_KEY
 
-    def spec(self, technique: nn.Module) -> HydraDrafterSpec:  # type: ignore[override]
+    def spec(self, technique: Technique) -> HydraDrafterSpec:
         return HydraDrafterSpec.of(technique)
 
-    def drafter_state(self, technique: nn.Module) -> dict[str, torch.Tensor]:
+    def drafter_state(self, technique: Technique) -> dict[str, torch.Tensor]:
         return drafter_state(technique)
 
-    def config_block(self, technique: nn.Module, spec: HydraDrafterSpec) -> dict[str, Any]:  # type: ignore[override]
-        adapter: Any = technique.adapter  # the ArchAdapter of the technique (an nn.Module attribute)
+    def config_block(self, technique: Technique, spec: HydraDrafterSpec) -> dict[str, object]:
+        adapter = technique.adapter
         shared = [adapter.module_path(module) for module in (adapter.final_norm, adapter.embed_tokens,
                                                               adapter.lm_head)]
         return spec.to_dict() | {"shared_with_target": shared}
 
-    def aux_layers(self, technique: nn.Module, spec: HydraDrafterSpec) -> list[int]:  # type: ignore[override]
+    def aux_layers(self, technique: Technique, spec: HydraDrafterSpec) -> list[int]:
         """The target's last hidden state (layer ``L``, before the final norm)."""
         return [spec.num_layers]
 
-    def live_tensors(self, model: Any) -> dict[str, torch.Tensor]:
+    def live_tensors(self, model: nn.Module) -> dict[str, torch.Tensor]:
         """The technique's state dict as it lives in the model (detached), keyed ``hydra.<name>``."""
         return {WEIGHTS_PREFIX + name: tensor for name, tensor in self.drafter_state(self.technique_of(model)).items()}

@@ -26,12 +26,21 @@ uncapped logits in vLLM: greedy drafts are the same, probabilistic ones change, 
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import torch
+from torch import nn
 
 from ....errors import ConfigError
 from ...exporters import DrafterExporter, register_exporter
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
+    from ....techniques.dflash.config import DFlashConfig
+    from ....techniques.dflash.layer import DFlashLayer
+    from ....techniques.dflash.technique import DFlashTechnique
+    from ...exporters import ExportOptions
 
 __all__ = ["DFlashVllmExporter", "ExportFormat", "layout_problem"]
 
@@ -41,9 +50,9 @@ ExportFormat = Literal["dflash", "speculators"]
 ARCHITECTURE = "DFlashDraftModel"
 
 
-def _rope_parameters(config: Any) -> dict[str, Any]:
+def _rope_parameters(config: DFlashConfig) -> dict[str, object]:
     """The ``rope_parameters`` of the draft layers (transformers 5 layout) from a :class:`DFlashConfig`."""
-    params: dict[str, Any] = dict(config.rope_scaling or {})
+    params: dict[str, object] = dict(config.rope_scaling or {})
     params.setdefault("rope_type", params.pop("type", "default"))
     params["rope_theta"] = float(config.rope_theta)
     if config.partial_rotary_factor not in (None, 1.0):
@@ -51,7 +60,7 @@ def _rope_parameters(config: Any) -> dict[str, Any]:
     return params
 
 
-def layout_problem(technique: Any, format: str) -> str | None:
+def layout_problem(technique: DFlashTechnique, format: str) -> str | None:
     """Why ``technique`` cannot be written in ``format`` faithfully (``None``: it can)."""
     if format == "dflash":
         return None
@@ -67,15 +76,15 @@ def layout_problem(technique: Any, format: str) -> str | None:
 
 
 @register_exporter("vllm", "dflash")
-class DFlashVllmExporter(DrafterExporter):
+class DFlashVllmExporter(DrafterExporter["DFlashTechnique"]):
     """A DFlash drafter as vLLM's DFlash draft model, see the module docstring."""
 
-    def config(self, model: Any, **options: Any) -> dict[str, Any]:
+    def config(self, model: nn.Module, **options: Unpack[ExportOptions]) -> dict[str, object]:
         """The ``config.json`` of the exported drafter (``options`` as in :meth:`build_config`)."""
         return self.build_config(model, **options)
 
-    def build_config(self, model: Any, *, format: ExportFormat = "dflash", num_speculative_tokens: int | None = None,
-                     verifier: str | None = None) -> dict[str, Any]:
+    def build_config(self, model: nn.Module, *, format: str = "dflash", num_speculative_tokens: int | None = None,
+                     verifier: str | None = None) -> dict[str, object]:
         """The ``config.json`` of the exported drafter.
 
         Args:
@@ -87,18 +96,18 @@ class DFlashVllmExporter(DrafterExporter):
         Raises:
             ConfigError: An unknown format, or a drafter the ``speculators`` layout cannot hold.
         """
-        technique: Any = self.technique_of(model)
+        technique = self.technique_of(model)
         problem = layout_problem(technique, format)
         if problem is not None:
             raise ConfigError(problem)
         config = technique.config
         adapter = technique.adapter
         text = adapter.config
-        layer = technique.layers[0]
+        layer = cast("DFlashLayer", technique.layers[0])
         attention = layer.self_attn
         hidden = int(adapter.hidden_size)
         types = list(technique.layer_types)
-        layer_config: dict[str, Any] = {
+        layer_config: dict[str, object] = {
             "architectures": [ARCHITECTURE],
             "model_type": "qwen3",
             "num_hidden_layers": len(technique.layers),
@@ -162,17 +171,17 @@ class DFlashVllmExporter(DrafterExporter):
             "torch_dtype": layer_config["torch_dtype"],
         }
 
-    def live_tensors(self, model: Any) -> dict[str, torch.Tensor]:
+    def live_tensors(self, model: nn.Module) -> dict[str, torch.Tensor]:
         """The drafter's tensors under their official names, as they live in the model (detached)."""
-        technique: Any = self.technique_of(model)
+        technique = self.technique_of(model)
         out = {name: tensor.detach() for name, tensor in technique.state_dict().items()
                if not name.startswith("rotary.")}  # a cos/sin cache, rebuilt by vLLM from rope_parameters
         scale = float(technique.config.embed_scale)
         if scale != 1.0:
-            weight = technique.adapter.embed_tokens.weight.detach()
+            weight = cast(torch.Tensor, technique.adapter.embed_tokens.weight).detach()
             out["embed_tokens.weight"] = (weight.float() * scale).to(technique.dtype)
         return out
 
-    def tensors(self, model: Any) -> dict[str, torch.Tensor]:
+    def tensors(self, model: nn.Module) -> dict[str, torch.Tensor]:
         """:meth:`live_tensors` on the CPU and contiguous."""
         return {name: tensor.to("cpu").contiguous() for name, tensor in self.live_tensors(model).items()}

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 from ...validation import check_positive
 from .drafters import drafter_for_architectures
@@ -20,7 +19,7 @@ __all__ = ["serve_args", "speculative_config", "verl_engine_kwargs"]
 
 
 def speculative_config(drafter: str | Path, num_speculative_tokens: int = 4, *, sampling: bool = True,
-                       **extra: Any) -> dict[str, Any]:
+                       **extra: object) -> dict[str, object]:
     """vLLM's ``speculative_config`` for an exported drafter.
 
     The ``method`` is that of the registered :class:`~.drafters.VllmDrafter` whose architecture the folder's
@@ -37,7 +36,7 @@ def speculative_config(drafter: str | Path, num_speculative_tokens: int = 4, *, 
         extra: Further ``speculative_config`` fields (vLLM validates them).
     """
     check_positive("num_speculative_tokens", num_speculative_tokens)
-    config: dict[str, Any] = {
+    config: dict[str, object] = {
         "method": _method(drafter),
         "model": str(drafter),
         "num_speculative_tokens": num_speculative_tokens,
@@ -48,13 +47,13 @@ def speculative_config(drafter: str | Path, num_speculative_tokens: int = 4, *, 
 
 
 def serve_args(drafter: str | Path, num_speculative_tokens: int = 4, *, sampling: bool = True,
-               flag: str = "--speculative-config", **extra: Any) -> list[str]:
+               flag: str = "--speculative-config", **extra: object) -> list[str]:
     """Command-line arguments for ``vllm serve`` (or ``flag="--speculative_config"`` for ``trl vllm-serve``)."""
     return [flag, json.dumps(speculative_config(drafter, num_speculative_tokens, sampling=sampling, **extra))]
 
 
 def verl_engine_kwargs(drafter: str | Path, num_speculative_tokens: int = 4, *, sampling: bool = True,
-                       **extra: Any) -> dict[str, Any]:
+                       **extra: object) -> dict[str, object]:
     """``actor_rollout_ref.rollout.engine_kwargs`` for verl's vLLM rollout."""
     return {"vllm": {"speculative_config": speculative_config(drafter, num_speculative_tokens, sampling=sampling,
                                                               **extra)}}

@@ -10,7 +10,7 @@ states and the maps keyed ``hidden_transfer.transfers.{i}.weight``.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import torch
 from torch import nn
@@ -25,6 +25,9 @@ from ....techniques.jump.export import JumpDrafterSpec
 from ...exporters import register_exporter
 from ..jump.export import JumpVllmExporter
 from .model import DRAFTER_ARCHITECTURE
+
+if TYPE_CHECKING:
+    from ....core.technique import Technique
 
 __all__ = ["HiddenTransferVllmExporter"]
 
@@ -43,8 +46,8 @@ class HiddenTransferVllmExporter(JumpVllmExporter):
     def drafter_state(self, technique: nn.Module) -> dict[str, torch.Tensor]:
         return drafter_state(technique)
 
-    def config_block(self, technique: nn.Module, spec: JumpDrafterSpec) -> dict[str, Any]:
-        adapter: Any = technique.adapter  # the ArchAdapter of the technique (an nn.Module attribute)
+    def config_block(self, technique: Technique, spec: JumpDrafterSpec) -> dict[str, object]:
+        adapter = technique.adapter
         shared = [*(adapter.layer(index) for index in spec.jump_layers), adapter.final_norm, adapter.embed_tokens,
                   adapter.lm_head]
         return HiddenTransferDrafterSpec.of(technique).to_dict() | {
@@ -55,6 +58,6 @@ class HiddenTransferVllmExporter(JumpVllmExporter):
         """The states after the distinct transfer layers, ascending (a round reads them at ``P`` only)."""
         return list(HiddenTransferDrafterSpec.of(technique).source_layers)
 
-    def live_tensors(self, model: Any) -> dict[str, torch.Tensor]:
+    def live_tensors(self, model: nn.Module) -> dict[str, torch.Tensor]:
         """The maps as they live in the model (detached), keyed ``hidden_transfer.<name>``."""
         return {WEIGHTS_PREFIX + name: tensor for name, tensor in self.drafter_state(self.technique_of(model)).items()}

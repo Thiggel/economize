@@ -17,12 +17,20 @@ of each head).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, cast
 
 import torch
+from torch import nn
 
 from ....errors import ConfigError
 from ...exporters import DrafterExporter, register_exporter
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
+    from ....techniques.medusa.heads import MedusaHead, ResBlock
+    from ....techniques.medusa.technique import MedusaTechnique
+    from ...exporters import ExportOptions
 
 __all__ = ["ARCHITECTURE", "MODEL_TYPE", "MedusaVllmExporter"]
 
@@ -32,11 +40,16 @@ MODEL_TYPE = "medusa"
 ARCHITECTURE = "MedusaModel"
 
 
+def _projection(head: nn.Module) -> nn.Linear:
+    """The own LM head of a Medusa head (``head="own"``, which :meth:`MedusaVllmExporter.own_heads` checks)."""
+    return cast(nn.Linear, cast("MedusaHead", head).proj)
+
+
 @register_exporter("vllm", "medusa")
-class MedusaVllmExporter(DrafterExporter):
+class MedusaVllmExporter(DrafterExporter["MedusaTechnique"]):
     """Medusa heads (``head="own"``) as vLLM's Medusa draft model, see the module docstring."""
 
-    def own_heads(self, model: Any) -> Any:
+    def own_heads(self, model: nn.Module) -> MedusaTechnique:
         """The model's Medusa technique.
 
         Raises:
@@ -51,10 +64,10 @@ class MedusaVllmExporter(DrafterExporter):
             )
         return technique
 
-    def config(self, model: Any, **options: Any) -> dict[str, Any]:
+    def config(self, model: nn.Module, **options: Unpack[ExportOptions]) -> dict[str, object]:
         """The ``config.json`` vLLM's ``MedusaConfig`` reads (``options`` are accepted and ignored)."""
         technique = self.own_heads(model)
-        vocab = int(technique.heads[0].proj.weight.shape[0])
+        vocab = int(_projection(technique.heads[0]).weight.shape[0])
         return {
             "model_type": MODEL_TYPE,
             "architectures": [ARCHITECTURE],
@@ -66,18 +79,19 @@ class MedusaVllmExporter(DrafterExporter):
             "medusa_fc_bias": True,
         }
 
-    def live_tensors(self, model: Any) -> dict[str, torch.Tensor]:
+    def live_tensors(self, model: nn.Module) -> dict[str, torch.Tensor]:
         """The heads' tensors as they live in the model, under vLLM's parameter names."""
         technique = self.own_heads(model)
         out: dict[str, torch.Tensor] = {}
         for h, head in enumerate(technique.heads):
-            for i, block in enumerate(head.blocks):
-                out[f"blocks.{h}.layers.{i}.weight"] = block.linear.weight.detach()
-                out[f"blocks.{h}.layers.{i}.bias"] = block.linear.bias.detach()
-            out[f"lm_heads.{h}.weight"] = head.proj.weight.detach()
+            for i, block in enumerate(cast("MedusaHead", head).blocks):
+                linear = cast("ResBlock", block).linear
+                out[f"blocks.{h}.layers.{i}.weight"] = linear.weight.detach()
+                out[f"blocks.{h}.layers.{i}.bias"] = linear.bias.detach()
+            out[f"lm_heads.{h}.weight"] = _projection(head).weight.detach()
         return out
 
-    def tensors(self, model: Any) -> dict[str, torch.Tensor]:
+    def tensors(self, model: nn.Module) -> dict[str, torch.Tensor]:
         """:meth:`live_tensors` in float32 on the CPU."""
         return {name: tensor.to("cpu", torch.float32).contiguous()
                 for name, tensor in self.live_tensors(model).items()}
