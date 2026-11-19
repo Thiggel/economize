@@ -34,13 +34,18 @@ differs from the HF prompt's.
 
 from __future__ import annotations
 
-from torch import nn
+from typing import TYPE_CHECKING, cast
 
+from ....core.technique import Technique
 from ...exporters import UnsupportedBackendError
 from ..linear.teal import DENSE, MODES, row_mode
 from . import linear as _linear  # noqa: F401  (registers the linear method's fp8 KV scales)
 from .base import PlanBuilder, Role, Support, VllmTechnique, register_vllm_technique
 from .lowrank import factored_modules
+
+if TYPE_CHECKING:
+    from ....techniques.sparsity.config import TealConfig
+    from ....techniques.sparsity.technique import TealTechnique
 
 __all__ = ["SECTION", "TealVllm", "teal_rows", "teal_thresholds"]
 
@@ -48,14 +53,14 @@ __all__ = ["SECTION", "TealVllm", "teal_rows", "teal_thresholds"]
 SECTION = "teal"
 
 
-def teal_rows(technique: nn.Module, builder: PlanBuilder) -> tuple[str, str]:
+def teal_rows(technique: Technique, builder: PlanBuilder) -> tuple[str, str]:
     """The modes of the single-token rows and of the other rows on vLLM, from the technique's phase policy.
 
     Raises:
         UnsupportedBackendError: A mode vLLM cannot apply per row, or a policy whose exact passes differ while a
             drafter serves (vLLM cannot tell a prompt from a verification pass inside the target's forward).
     """
-    policy = technique.config.policy
+    policy = cast("TealConfig", technique.config).policy
     if Role.DRAFTER in builder.roles:
         if policy.prefill != policy.refresh:
             raise UnsupportedBackendError(
@@ -71,7 +76,7 @@ def teal_rows(technique: nn.Module, builder: PlanBuilder) -> tuple[str, str]:
     return ("all" if single == "second_half" else single), multi
 
 
-def teal_thresholds(technique: nn.Module, builder: PlanBuilder) -> tuple[dict[str, float], dict[str, float]]:
+def teal_thresholds(technique: Technique, builder: PlanBuilder) -> tuple[dict[str, float], dict[str, float]]:
     """TEAL's positive thresholds by the HF module name of each map (the names of the served checkpoint).
 
     Returns:
@@ -87,10 +92,11 @@ def teal_thresholds(technique: nn.Module, builder: PlanBuilder) -> tuple[dict[st
     names = {id(module): name for name, module in builder.base.named_modules()}
     served = factored_modules(builder)
     factored = list(dense_modules(builder.base))
-    values = technique.threshold_map()
+    teal = cast("TealTechnique", technique)
+    values = teal.threshold_map()
     found: dict[str, float] = {}
     latent: dict[str, float] = {}
-    for key, module in teal_modules(technique.adapter, technique.config).items():
+    for key, module in teal_modules(teal.adapter, teal.config).items():
         value = float(values[key])
         if value <= 0:
             continue
@@ -120,12 +126,12 @@ class TealVllm(VllmTechnique):
               "thresholded per row class (decoding rows / other rows), with TEAL's sparse GEMV for passes of at most "
               "16 rows")
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
-        if not technique.calibrated:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
+        if not cast("TealTechnique", technique).calibrated:
             raise UnsupportedBackendError("TEAL has no thresholds yet: calibrate it (economize.apply with "
                                           "calibration data) or load a calibrated checkpoint before serving")
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         if builder.weight_writer is not None:
             owner = builder.weight_writer_owner
             raise UnsupportedBackendError(

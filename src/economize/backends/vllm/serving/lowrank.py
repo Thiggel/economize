@@ -28,10 +28,16 @@ have no linear method), are multiplied out on their own.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from torch import nn
 
+from ....core.technique import Technique
 from ...exporters import UnsupportedBackendError
 from .base import PlanBuilder, Role, Support, VllmTechnique, adapter_for, register_vllm_technique
+
+if TYPE_CHECKING:
+    from ....techniques.lowrank.module import LowRankLinear
 
 __all__ = ["LowRankVllm", "dense_reasons", "factored_modules"]
 
@@ -57,7 +63,7 @@ def dense_reasons(builder: PlanBuilder) -> list[str]:
     return reasons
 
 
-def factored_modules(builder: PlanBuilder) -> dict[str, nn.Module]:
+def factored_modules(builder: PlanBuilder) -> dict[str, LowRankLinear]:
     """The ``LowRankLinear`` modules that vLLM serves factored, by module name (outermost only).
 
     Empty when ``lowrank`` is not attached or falls back to the dense product (:func:`dense_reasons`). A module whose
@@ -82,7 +88,7 @@ class LowRankVllm(VllmTechnique):
     reason = ("economize's linear method: each factored map runs x @ down^T @ up^T on its two factors (fused maps "
               "hold factored and dense shards side by side); the dense product up @ down next to a quantized base")
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         from .weights import _dense_dtype, dense_modules, quantized_inside
 
         builder.rewrite_base = True

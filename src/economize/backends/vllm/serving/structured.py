@@ -11,11 +11,10 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from torch import nn
-
+from ....core.technique import Technique
 from ....techniques.width_prune.serving import EngineArchitectures, merged_lora_state, serving_obstacle
 from ...exporters import UnsupportedBackendError
-from .base import PlanBuilder, Role, Support, VllmTechnique, register_vllm_technique
+from .base import Configured, PlanBuilder, Role, Support, VllmTechnique, register_vllm_technique
 
 __all__ = ["SliceGPTVllm", "WidthPruneVllm"]
 
@@ -33,11 +32,11 @@ class SliceGPTVllm(VllmTechnique):
     #: hidden width may differ from ``heads * head_dim``).
     head_dim_types: ClassVar[frozenset[str]] = frozenset({"llama", "mistral", "qwen3"})
 
-    def level(self, technique: nn.Module) -> Support:
+    def level(self, technique: Configured) -> Support:
         config = getattr(technique, "config", None)
         return Support.NATIVE if getattr(config, "rotation", None) == "global" else Support.UNSUPPORTED
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
         if self.level(technique) is Support.UNSUPPORTED:
             raise UnsupportedBackendError(
                 "vLLM cannot serve slicegpt(rotation='per_block'): every residual connection of the sliced model "
@@ -51,7 +50,7 @@ class SliceGPTVllm(VllmTechnique):
                 f"{sorted(self.head_dim_types)}"
             )
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         builder.rewrite_base = True
         builder.note(self.technique, f"hidden width {getattr(builder.base.config, 'hidden_size', '?')} after slicing")
 
@@ -72,16 +71,16 @@ class WidthPruneVllm(VllmTechnique):
         "vLLM 0.30", head_dim=frozenset({"llama", "mistral", "qwen3"}), output_bias=frozenset({"llama", "mistral"}),
         mlp_bias=frozenset({"llama"}))
 
-    def level(self, technique: nn.Module) -> Support:
+    def level(self, technique: Configured) -> Support:
         config = getattr(technique, "config", None)
         return Support.NATIVE if getattr(config, "uniform_widths", False) else Support.UNSUPPORTED
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
         obstacle = serving_obstacle(technique, builder.base, self.architectures)
         if obstacle is not None:
             raise UnsupportedBackendError(f"vLLM cannot serve this width_prune: {obstacle}")
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         builder.rewrite_base = True
         builder.dense.update(merged_lora_state(technique, builder.base))
         summary = getattr(technique, "summary", {})
