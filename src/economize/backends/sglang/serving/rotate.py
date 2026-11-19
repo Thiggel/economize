@@ -7,13 +7,16 @@ folded back (:class:`~economize.backends.vllm.serving.rotate.RotateVllm`), so th
 
 from __future__ import annotations
 
-from torch import nn
+from typing import TYPE_CHECKING
 
 from ...exporters import UnsupportedBackendError
 from ...vllm.serving.rotate import RotateVllm, rotation_sites
 from ...vllm.serving.weights import quantized_inside
 from .base import Role, SglangPlanBuilder, Support, register_sglang_technique
 from .weights import DelegatedSglang
+
+if TYPE_CHECKING:
+    from ....core.technique import Technique
 
 __all__ = ["RotateSglang"]
 
@@ -29,7 +32,7 @@ class RotateSglang(DelegatedSglang):
               "no online Hadamard transform for a quantized map")
     vllm = RotateVllm
 
-    def check(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
+    def check(self, technique: Technique, builder: SglangPlanBuilder) -> None:
         for name in rotation_sites(builder.base):
             if quantized_inside(builder.base.get_submodule(name)) is not None:
                 raise UnsupportedBackendError(

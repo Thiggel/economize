@@ -25,17 +25,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, TypeVar, overload
 
-from torch import nn
-
 from ...._compat import require_engine
 from ....core.metadata import Simulation
 from ....errors import ConfigError, IncompatibleTechniquesError
 from ....registry import Registry
 from ...exporters import UnsupportedBackendError
-from ...vllm.serving.base import PlanBuilder, Role, Support, _ordered, _write_base
+from ...vllm.serving.base import Configured, PlanBuilder, Role, Support, _ordered, _write_base
 
 if TYPE_CHECKING:
     from sglang import Engine
+
+    from ....core.model import EfficientModel
+    from ....core.technique import Technique
 
 __all__ = [
     "EXCLUSIVE_ROLES",
@@ -85,11 +86,11 @@ class SglangTechnique:
     #: simulated). ``DENSIFIED`` adapters need not set it.
     simulation: ClassVar[Simulation | None] = None
 
-    def level(self, technique: nn.Module) -> Support:
+    def level(self, technique: Configured) -> Support:
         """The support level of this configured technique."""
         return self.support
 
-    def simulation_of(self, technique: nn.Module) -> Simulation | None:
+    def simulation_of(self, technique: Configured) -> Simulation | None:
         """What SGLang leaves unrealized of this configured technique (default: :attr:`simulation`).
 
         Args:
@@ -100,15 +101,15 @@ class SglangTechnique:
         """
         return self.simulation
 
-    def check(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
+    def check(self, technique: Technique, builder: SglangPlanBuilder) -> None:
         """Raise :class:`UnsupportedBackendError` when SGLang cannot serve this configured technique."""
         if self.level(technique) is Support.UNSUPPORTED:
             raise UnsupportedBackendError(f"SGLang cannot serve the {self.technique!r} technique: {self.reason}")
 
-    def contribute(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: SglangPlanBuilder) -> None:
         """Record server arguments, notes and weight rewrites in ``builder`` (nothing is written yet)."""
 
-    def export(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
+    def export(self, technique: Technique, builder: SglangPlanBuilder) -> None:
         """Write the technique's files under ``builder.out_dir`` (after the base checkpoint is written)."""
 
 
@@ -290,10 +291,10 @@ class SglangPlan:
                    techniques=dict(data.get("techniques") or {}), notes=dict(data.get("notes") or {}))
 
 
-def _build(model: nn.Module, out_dir: Path | None, num_speculative_tokens: int,
-           ) -> tuple[SglangPlanBuilder, list[tuple[SglangTechnique, nn.Module]]]:
+def _build(model: EfficientModel, out_dir: Path | None, num_speculative_tokens: int,
+           ) -> tuple[SglangPlanBuilder, list[tuple[SglangTechnique, Technique]]]:
     builder = SglangPlanBuilder(model, out_dir, num_speculative_tokens, sampling=False)
-    steps: list[tuple[SglangTechnique, nn.Module]] = []
+    steps: list[tuple[SglangTechnique, Technique]] = []
     for name, technique in _ordered(builder.techniques):
         adapter = adapter_for(name)
         adapter.check(technique, builder)
@@ -307,7 +308,7 @@ def _build(model: nn.Module, out_dir: Path | None, num_speculative_tokens: int,
     return builder, steps
 
 
-def check_servable(model: nn.Module, *, num_speculative_tokens: int = 4) -> dict[str, Support]:
+def check_servable(model: EfficientModel, *, num_speculative_tokens: int = 4) -> dict[str, Support]:
     """Run every adapter's checks without writing anything; returns the support level per technique.
 
     Raises:
@@ -318,7 +319,7 @@ def check_servable(model: nn.Module, *, num_speculative_tokens: int = 4) -> dict
     return dict(builder.supports)
 
 
-def to_sglang(model: nn.Module, out_dir: str | Path, *, num_speculative_tokens: int = 4,
+def to_sglang(model: EfficientModel, out_dir: str | Path, *, num_speculative_tokens: int = 4,
               dtype: str | None = None) -> SglangPlan:
     """Write ``model`` (an :class:`~economize.EfficientModel`) as an SGLang-servable folder; returns the plan.
 
@@ -352,7 +353,7 @@ def to_sglang(model: nn.Module, out_dir: str | Path, *, num_speculative_tokens: 
     return plan
 
 
-def serve(model: nn.Module, out_dir: str | Path, *, num_speculative_tokens: int = 4, dtype: str | None = None,
+def serve(model: EfficientModel, out_dir: str | Path, *, num_speculative_tokens: int = 4, dtype: str | None = None,
           **overrides: object) -> Engine:
     """:func:`to_sglang`, then start an offline ``sglang.Engine`` on the folder."""
     return to_sglang(model, out_dir, num_speculative_tokens=num_speculative_tokens, dtype=dtype).engine(**overrides)

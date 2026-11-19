@@ -10,9 +10,7 @@ is served (densified weight techniques included).
 from __future__ import annotations
 
 import json
-from typing import Any, ClassVar
-
-from torch import nn
+from typing import TYPE_CHECKING, ClassVar, cast
 
 from ...exporters import UnsupportedBackendError
 from ...vllm.serving.drafters import DRAFTER_DIR, _ct_quantized
@@ -24,6 +22,9 @@ from ..export import (
     LayerSkipSglangExporter,
 )
 from .base import Role, SglangPlanBuilder, SglangTechnique, Support, register_sglang_technique
+
+if TYPE_CHECKING:
+    from ....core.technique import Technique
 
 __all__ = ["DmtdSglang", "EarlyExitSglang", "FreeSglang", "JumpFormatSglang", "JumpSglang", "LayerSkipSglang"]
 
@@ -56,7 +57,7 @@ class JumpFormatSglang(SglangTechnique):
         """A fresh instance of :attr:`exporter_class`."""
         return self.exporter_class()
 
-    def check(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
+    def check(self, technique: Technique, builder: SglangPlanBuilder) -> None:
         spec = self.exporter().check(technique)
         if _ct_quantized(builder) and str(spec.config.adaptation) != "full":
             raise UnsupportedBackendError(
@@ -64,14 +65,14 @@ class JumpFormatSglang(SglangTechnique):
                 "draft path's layers, and the served base holds packed codes; quantize with format='fake' "
                 "(densified) or serve on vLLM, whose drafter shares the quantized target layers")
 
-    def contribute(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: SglangPlanBuilder) -> None:
         builder.set_speculative("EAGLE3", None, owner=self.technique)
         builder.note(self.technique, "the draft model holds its own copy of the draft path's layers (SGLang's draft "
                                      "worker cannot share target layers); the embedding and LM head are shared")
-        if int(builder.engine.get("tp_size", 1) or 1) > 1:
+        if int(cast("int | str", builder.engine.get("tp_size", 1) or 1)) > 1:  # an engine argument as given
             builder.note(self.technique, "tensor parallelism: the drafter's predictor and readout run replicated")
 
-    def export(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
+    def export(self, technique: Technique, builder: SglangPlanBuilder) -> None:
         from safetensors.torch import save_file
 
         exporter = self.exporter()
@@ -82,7 +83,7 @@ class JumpFormatSglang(SglangTechnique):
             base_state = serving_state(builder)
         target = builder.path(DRAFTER_DIR)
         target.mkdir(parents=True, exist_ok=True)
-        config: dict[str, Any] = exporter.config(technique)
+        config = exporter.config(technique)
         (target / exporter.config_file).write_text(json.dumps(config, indent=2, sort_keys=True, default=str) + "\n")
         save_file(exporter.tensors(technique, base_state), str(target / exporter.weights_file),
                   metadata=exporter.metadata())

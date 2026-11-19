@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
-
-from torch import nn
+from typing import TYPE_CHECKING, cast
 
 from ...exporters import UnsupportedBackendError
 from .base import Role, SglangPlanBuilder, SglangTechnique, Support, register_sglang_technique
+
+if TYPE_CHECKING:
+    from ....core.technique import Technique
+    from ....techniques.kv_quant.fp8 import FP8KVConfig
 
 __all__ = ["FP8KVSglang", "FusedFP8KVSglang", "kv_cache_dtype"]
 
@@ -49,15 +51,15 @@ class FP8KVSglang(SglangTechnique):
     reason = ("kv_cache_dtype fp8_e4m3 / fp8_e5m2 with unscaled casts in all layers (no per-token scales, "
               "calibrated scales or layer subsets)")
 
-    def _dtype(self, technique: nn.Module, builder: SglangPlanBuilder) -> str:
-        config: Any = technique.config
+    def _dtype(self, technique: Technique, builder: SglangPlanBuilder) -> str:
+        config = cast("FP8KVConfig", technique.config)
         return kv_cache_dtype(str(config.format), str(config.scale), tuple(config.layers),
                               int(builder.model.adapter.num_layers))
 
-    def check(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
+    def check(self, technique: Technique, builder: SglangPlanBuilder) -> None:
         self._dtype(technique, builder)
 
-    def contribute(self, technique: nn.Module, builder: SglangPlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: SglangPlanBuilder) -> None:
         builder.set_engine("kv_cache_dtype", self._dtype(technique, builder), owner=self.technique)
         builder.note(self.technique, "SGLang casts K and V to fp8 when it writes the cache and back when attention "
                                      "reads it (its attention backends also read the fp8 cache directly)")
