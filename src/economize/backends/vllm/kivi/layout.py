@@ -28,19 +28,18 @@ token (vLLM's Triton kernels and the full-precision residual read them) and appe
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TypedDict
 
 import torch
 
 from ....attention.kivi import pack_codes
 from ....errors import ConfigError
 from ....techniques.kv_quant.kivi import quantize
-from ..engine_settings import EngineSettings
+from ..engine_settings import EngineConfig, EngineSettings
 
-__all__ = ["CONFIG_KEY", "FLAG_DENSE", "FLAG_OVERFLOW", "FLAG_PACKED", "SETTINGS", "CellLayout", "KIVISettings",
-           "cell_layout", "read_cells", "reference_quantize", "settings_of", "write_cells"]
+__all__ = ["CONFIG_KEY", "FLAG_DENSE", "FLAG_OVERFLOW", "FLAG_PACKED", "SETTINGS", "CellLayout", "KIVIEntry",
+           "KIVISettings", "cell_layout", "read_cells", "reference_quantize", "settings_of", "write_cells"]
 
 #: The ``additional_config`` key of an engine that serves KIVI.
 CONFIG_KEY = "economize_kivi"
@@ -48,6 +47,21 @@ FLAG_DENSE, FLAG_PACKED, FLAG_OVERFLOW = 0, 1, 2
 _FP16_MAX = float(torch.finfo(torch.float16).max)
 #: vLLM's Triton kernels need pages of a multiple of 16 tokens.
 _TRITON_BLOCK = 16
+
+
+class _KIVIRequired(TypedDict):
+    bits: int
+    group_size: int
+    residual_length: int
+
+
+class KIVIEntry(_KIVIRequired, total=False):
+    """The ``additional_config`` entry of an engine that serves KIVI (the fields of :class:`KIVISettings`, with
+    ``layers`` as a list)."""
+
+    layers: list[int]
+    num_layers: int
+    fused: bool
 
 
 @dataclass(frozen=True)
@@ -96,13 +110,13 @@ class KIVISettings:
             return False
         return not self.layers or layer0 + 1 in self.layers
 
-    def as_config(self) -> dict[str, Any]:
+    def as_config(self) -> KIVIEntry:
         """The ``additional_config`` entry (JSON-serializable)."""
         return {"bits": self.bits, "group_size": self.group_size, "residual_length": self.residual_length,
                 "layers": sorted(self.layers), "num_layers": self.num_layers, "fused": self.fused}
 
 
-def _parse(entry: Mapping[str, Any], vllm_config: Any) -> KIVISettings:
+def _parse(entry: KIVIEntry, vllm_config: EngineConfig) -> KIVISettings:
     return KIVISettings(bits=int(entry["bits"]), group_size=int(entry["group_size"]),
                         residual_length=int(entry["residual_length"]),
                         layers=frozenset(int(layer) for layer in entry.get("layers") or ()),
@@ -110,7 +124,7 @@ def _parse(entry: Mapping[str, Any], vllm_config: Any) -> KIVISettings:
 
 
 #: The KIVI settings of the engine (see :class:`~economize.backends.vllm.engine_settings.EngineSettings`).
-SETTINGS: EngineSettings[KIVISettings] = EngineSettings(CONFIG_KEY, _parse)
+SETTINGS: EngineSettings[KIVIEntry, KIVISettings] = EngineSettings(CONFIG_KEY, _parse)
 #: The KIVI settings ``vllm_config`` (or a plain ``additional_config`` mapping) asks for, or ``None``.
 settings_of = SETTINGS.of
 

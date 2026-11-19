@@ -11,16 +11,30 @@ Importing the package does not import vLLM.
 
 from __future__ import annotations
 
+from typing import TypedDict
+
 from .. import custom_attention
 from ..extensions import register_vllm_extension
 
-__all__ = ["BACKEND_PATH", "CONFIG_KEY", "install"]
+__all__ = ["BACKEND_PATH", "CONFIG_KEY", "StreamingEntry", "install"]
 
 #: The qualified name of the streaming backend class.
 BACKEND_PATH = "economize.backends.vllm.kv_evict.backend.EconomizeStreamingBackend"
 #: The ``additional_config`` key that selects it (the same as ``backend.CONFIG_KEY``).
 CONFIG_KEY = "economize_kv_evict"
 custom_attention.register_custom_backend(CONFIG_KEY, BACKEND_PATH)
+
+
+class _StreamingRequired(TypedDict):
+    method: str
+    sinks: int
+    recent: int
+
+
+class StreamingEntry(_StreamingRequired, total=False):
+    """The ``additional_config`` entry under :data:`CONFIG_KEY` (``method`` is ``"streaming"``)."""
+
+    layers: list[int]
 
 
 @register_vllm_extension("kv_evict")
