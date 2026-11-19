@@ -4,6 +4,9 @@
 
 ### Changed
 
+- The sdist and wheel ship a `NOTICE` file that names the third-party code and data the distribution contains (the
+  Medusa tree, vLLM's Marlin packing, and the MInference, SmoothQuant, KVCache-Factory and TriForce transcriptions
+  that the tests use as references) with their licenses and copyright notices.
 - Checkpoints record a `schema_version` in `economize_config.json`. Loading upgrades older checkpoints through the
   registered steps of `economize.core.serialization.MIGRATIONS` (checkpoints without a version, including effkit
   ones, are version 0) and refuses a newer schema with the release to install.

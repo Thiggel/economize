@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -59,3 +61,23 @@ def test_ci_tests_every_python_version_of_the_classifiers() -> None:
     declared = {c.removeprefix(prefix) for c in classifiers if c.startswith(prefix) and c.count(".") == 1}
     tested = set(_workflow("ci.yml")["jobs"]["tests"]["strategy"]["matrix"]["python-version"])
     assert declared == tested
+
+
+#: Markers of code or data taken from another project (a transcription of a paper's equations is not); a file that
+#: uses one must be named in NOTICE.
+COPIED = re.compile(
+    r"verbatim|transcriptions? of the official|transcribed (with|from (?!the paper))|reimplements? vLLM", re.IGNORECASE
+)
+
+
+def test_notice_ships_and_names_every_file_with_third_party_material() -> None:
+    project = read_pyproject()
+    assert "NOTICE" in project["project"]["license-files"]
+    assert "NOTICE" in project["tool"]["hatch"]["build"]["targets"]["sdist"]["include"]
+    root = PYPROJECT.parent
+    notice = (root / "NOTICE").read_text()
+    sources = [p for d in ("src", "tests") for p in sorted((root / d).rglob("*.py")) if p != Path(__file__)]
+    copied = {p.relative_to(root).as_posix() for p in sources if COPIED.search(p.read_text())}
+    assert copied, "the marker no longer matches anything: update COPIED"
+    missing = sorted(path for path in copied if path not in notice)
+    assert not missing, f"add the upstream source and license of {missing} to NOTICE"

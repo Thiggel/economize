@@ -10,7 +10,7 @@ description = "Composable efficiency techniques (speculative decoding, early exi
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Filipe Laitenberger", email = "f.laitenberger@gmail.com" }]
 keywords = [
     "llm", "inference", "efficiency", "speculative-decoding", "early-exit", "layer-skipping", "quantization",
@@ -108,7 +108,7 @@ path = "src/economize/_version.py"
 packages = ["src/economize"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/economize", "tests", "docs", "README.md", "CHANGELOG.md", "LICENSE", "pyproject.toml"]
+include = ["src/economize", "tests", "docs", "README.md", "CHANGELOG.md", "LICENSE", "NOTICE", "pyproject.toml"]
 exclude = ["__pycache__", "*.pyc"]
 
 [tool.pytest.ini_options]
