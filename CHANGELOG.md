@@ -8,8 +8,10 @@
   `huggingface_hub<3`), since economize relies on transformers' cache and modeling classes and on torch custom ops
   that a major release may change.
 - The sdist and wheel ship a `NOTICE` file that names the third-party code and data the distribution contains (the
-  Medusa tree, vLLM's Marlin packing, and the MInference, SmoothQuant, KVCache-Factory and TriForce transcriptions
-  that the tests use as references) with their licenses and copyright notices.
+  Medusa tree, vLLM's Marlin packing, and the MInference, SmoothQuant and KVCache-Factory transcriptions that the
+  tests use as references) with their licenses and copyright notices.
+- The TriForce chunk-selection test compares with a reference written from the paper (Sun et al., 2024, Section 4.1)
+  instead of a transcription of the official code, whose repository publishes no license.
 - Checkpoints record a `schema_version` in `economize_config.json`. Loading upgrades older checkpoints through the
   registered steps of `economize.core.serialization.MIGRATIONS` (checkpoints without a version, including effkit
   ones, are version 0) and refuses a newer schema with the release to install.
@@ -32,6 +34,14 @@
   and checkpointed.
 - `fit` draws past batches in which no next-token prediction counts (logged as `skipped_batches`), and `evaluate`
   leaves them out instead of averaging a 0/0. A source that only yields such batches raises `ConfigError`.
+- The base model's own `generate` raises `ConfigError` while a lossy technique that acts only in economize's decoding
+  loop is attached (a KV-cache technique or dynamic depth): it used to decode the unmodified model without any error.
+  Call `generate` on the `EfficientModel`, or `detach()` it first.
+- `EffTrainer` handles a NaN or infinite loss like `fit`: it raises `NonFiniteLossError` before the optimizer applies
+  the step (`transformers` applied it and only hid the NaN from the logs), and `nonfinite="skip"` or `"warn"`
+  (an `EffTrainer` argument or an `EffTrainingArguments` field) drops the step's gradients or applies it with a
+  warning. A micro-batch in which no prediction counts is logged as `skipped_batches` with a warning, an optimizer
+  step made only of such batches leaves the parameters unchanged, and 1000 of them in a row raise `ConfigError`.
 - `larger_teacher` keeps the teacher in evaluation mode, so dropout in the larger model no longer perturbs the
   distillation targets.
 - `economize_training_args` sets the objective's schedule with its `min_lr_ratio` floor as `economize_schedule`,

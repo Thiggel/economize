@@ -251,39 +251,44 @@ def test_the_retrieval_view_matches_the_rule(position: int, chunk: int, sets: in
         assert keep[0, h, 0, num_keys:].all()
 
 
-def _official_triforce_chunks(query: torch.Tensor, prefill_keys: torch.Tensor, chunk_size: int,
-                              select_sets: int) -> torch.Tensor:
-    """The chunk selection of the official TriForce code, transcribed with its tensor layout.
+def _paper_chunk_selection(query: torch.Tensor, prefill_keys: torch.Tensor, chunk_size: int,
+                           select_sets: int) -> list[set[int]]:
+    """The chunk selection of retrieval-based drafting, written from the TriForce paper (Sun et al., 2024,
+    arXiv:2404.11912, Section 4.1): the prompt's KV cache is cut into chunks, each chunk is scored by the attention of
+    the query with the chunk's average key, and the best-scoring chunks fill a fixed budget of ``select_sets`` chunks.
+    economize pins the first chunk (the attention sinks) and fills the rest by score, so chunk 0 is taken first here.
 
-    Infini-AI-Lab/TriForce @ 164c8c0, ``models/cache.py``, ``RetrievalCache.init_graph_cache`` (lines 146-175):
-    ``query_states`` is ``[1, 1, H, D]`` and the prefill keys are ``[1, prefill, H, D]`` (multi-head attention, one
-    query head per key head). Returns the selected chunk indices, ``[1, H, select_sets]``.
+    ``query`` is ``[H, D]`` and ``prefill_keys`` ``[prefill, H, D]`` (one query head per KV head). Returns the chosen
+    chunk indices per head.
     """
-    num_heads, head_dim = prefill_keys.shape[2], prefill_keys.shape[3]
-    chunks = prefill_keys.shape[1] // chunk_size
-    chunk_k = prefill_keys.view(1, chunks, chunk_size, num_heads, head_dim).mean(dim=-3)
-    chunk_attn = torch.matmul(query.permute(0, 2, 1, 3), chunk_k.permute(0, 2, 3, 1)).squeeze(2)
-    _, topk_idx_rest = torch.topk(chunk_attn[:, :, 1:], k=select_sets - 1, dim=-1)
-    topk_idx_rest += 1
-    topk_idx_first = torch.zeros((topk_idx_rest.shape[0], topk_idx_rest.shape[1], 1), dtype=topk_idx_rest.dtype)
-    return torch.cat([topk_idx_first, topk_idx_rest], dim=-1)
+    chunks = prefill_keys.shape[0] // chunk_size
+    selected = []
+    for h in range(query.shape[0]):
+        score = {}
+        for c in range(1, chunks):
+            average_key = prefill_keys[c * chunk_size:(c + 1) * chunk_size, h].mean(0)
+            score[c] = float(query[h] @ average_key)
+        ranked = sorted(score, key=lambda c: score[c], reverse=True)
+        selected.append({0, *ranked[: select_sets - 1]})
+    return selected
 
 
 @pytest.mark.parametrize(("prefill", "chunk", "sets"), [(64, 8, 4), (96, 16, 2), (40, 4, 10), (128, 8, 2)])
-def test_the_retrieval_view_matches_the_official_triforce_selection(prefill: int, chunk: int, sets: int) -> None:
-    """With one query head per KV head and a prompt of whole chunks, the kept prompt slots are exactly the chunks of
-    the official ``init_graph_cache``; the generated slots after the prompt are kept (TriForce appends them too)."""
+def test_the_retrieval_view_matches_the_paper_selection(prefill: int, chunk: int, sets: int) -> None:
+    """With one query head per KV head and a prompt of whole chunks, the kept prompt slots are exactly the chunks
+    that retrieval-based drafting selects (TriForce paper, Section 4.1); the generated slots after the prompt are
+    kept."""
     generator = torch.Generator().manual_seed(prefill + chunk)
     heads, dim, generated = 4, 16, 5
-    query = torch.randn(1, 1, heads, dim, generator=generator)  # official layout [bsz, 1, H, D]
-    keys = torch.randn(1, prefill + generated, heads, dim, generator=generator)  # official layout [bsz, seq, H, D]
-    official = _official_triforce_chunks(query, keys[:, :prefill], chunk, sets)
-    keep = retrieval_keep(query.permute(0, 2, 1, 3), keys.permute(0, 2, 1, 3), torch.tensor([prefill]), None,
-                          chunk_size=chunk, select_sets=sets, groups=1, width=prefill + generated)
+    query = torch.randn(1, heads, 1, dim, generator=generator)
+    keys = torch.randn(1, heads, prefill + generated, dim, generator=generator)
+    expected = _paper_chunk_selection(query[0, :, 0], keys[0, :, :prefill].transpose(0, 1), chunk, sets)
+    keep = retrieval_keep(query, keys, torch.tensor([prefill]), None, chunk_size=chunk, select_sets=sets, groups=1,
+                          width=prefill + generated)
     for h in range(heads):
         kept = keep[0, h, 0]
-        chosen = sorted({s // chunk for s in range(prefill) if kept[s]})
-        assert chosen == sorted(official[0, h].tolist()), h
+        chosen = {s // chunk for s in range(prefill) if kept[s]}
+        assert chosen == expected[h], h
         assert all(kept[s] == (s // chunk in chosen) for s in range(prefill))
         assert kept[prefill:].all()
 

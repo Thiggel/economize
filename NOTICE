@@ -30,10 +30,6 @@ tests/techniques/test_kv_evict.py
   The per-layer budget of PyramidKVCluster.update_kv from Zefan-Cai/KVCache-Factory, used as a test reference.
   MIT License. Copyright (c) 2024 Zefan Cai.
 
-tests/unit/test_sparse_kv_draft.py
-  The chunk selection of RetrievalCache.init_graph_cache from Infini-AI-Lab/TriForce @ 164c8c0 (models/cache.py),
-  used as a test reference. The upstream repository publishes no license file.
-
 -------------------------------------------------------------------------------------------------------------------
 The MIT License (text shared by the MIT-licensed entries above):
 
