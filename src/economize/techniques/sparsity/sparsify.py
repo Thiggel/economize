@@ -12,9 +12,8 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Iterable, Mapping
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, fields
-from typing import Any
 
 import torch
 from torch import Tensor, nn
@@ -122,14 +121,25 @@ def track_layer_tokens(layers: Iterable[nn.Module]) -> list[RemovableHandle]:
     stop). The maps inside a layer see it also when their input is flattened to ``[B * S, D]``."""
     handles: list[RemovableHandle] = []
     for layer in layers:
-        tokens: list[Any] = []
+        tokens: list[Token[tuple[int, int] | None]] = []
 
-        def enter(_module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any], stack: list[Any] = tokens) -> None:
+        def enter(
+            _module: nn.Module,
+            args: tuple[object, ...],
+            kwargs: dict[str, object],
+            stack: list[Token[tuple[int, int] | None]] = tokens,
+        ) -> None:
             hidden = args[0] if args else kwargs.get("hidden_states")
-            layout = tuple(hidden.shape[:2]) if isinstance(hidden, Tensor) and hidden.dim() == 3 else None
-            stack.append(_LAYER_TOKENS.set(layout))  # type: ignore[arg-type]
+            layout = (hidden.shape[0], hidden.shape[1]) if isinstance(hidden, Tensor) and hidden.dim() == 3 else None
+            stack.append(_LAYER_TOKENS.set(layout))
 
-        def leave(_module: nn.Module, _args: Any, _kwargs: Any, _output: Any, stack: list[Any] = tokens) -> None:
+        def leave(
+            _module: nn.Module,
+            _args: object,
+            _kwargs: object,
+            _output: object,
+            stack: list[Token[tuple[int, int] | None]] = tokens,
+        ) -> None:
             if stack:
                 _LAYER_TOKENS.reset(stack.pop())
 

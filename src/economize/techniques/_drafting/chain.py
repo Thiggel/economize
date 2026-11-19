@@ -14,7 +14,7 @@ with different budgets) run step by step as before.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, TypeAlias
 
 import torch
 
@@ -24,6 +24,9 @@ if TYPE_CHECKING:
     from ...decoding.request import DraftRequest
     from .drafters import GraphedStep
     from .greedy_head import GreedyHead
+
+#: A graphed chain: ``(tokens, positions, valid)`` to the drafted tokens and their top probabilities.
+ChainFn: TypeAlias = Callable[[torch.Tensor, torch.Tensor, torch.Tensor], tuple[torch.Tensor, ...]]
 
 __all__ = ["ChainGraphs"]
 
@@ -67,9 +70,9 @@ class ChainGraphs(Drafter):
         request.extend_tokens(tokens, top if request.record_confidence else None)
         return request.draft()
 
-    def _chain(self, steps: int) -> Callable[..., Any]:
+    def _chain(self, steps: int) -> ChainFn:
         """The graphed chain of ``steps`` draft steps."""
-        chains: dict[tuple[int, bool], Callable[..., Any]] = self.__dict__.setdefault("_chains", {})
+        chains: dict[tuple[int, bool], ChainFn] = self.__dict__.setdefault("_chains", {})
         key = (steps, self.fused_head)
         if key not in chains:
             head = self.greedy_head(self.fused_head)

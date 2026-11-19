@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Sequence
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from torch import Tensor
 
@@ -14,8 +14,11 @@ from ...registry import Registry
 from .._weights.technique import CalibratedWeightTransform
 from ..prune.config import PruneConfig
 from .config import LowRankConfig
-from .factorize import FACTORIZERS
+from .factorize import FACTORIZERS, Factorizer
 from .model import lowrank_model
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
 
 __all__ = ["LowRankTechnique"]
 
@@ -34,7 +37,7 @@ class LowRankTechnique(CalibratedWeightTransform):
     capabilities: ClassVar[Capability] = Capability.WEIGHTS
     order: ClassVar[int] = 20
     draft_copies: ClassVar[DraftCopies | None] = DraftCopies.OWNED
-    methods: ClassVar[Registry[Any]] = FACTORIZERS
+    methods: ClassVar[Registry[type[Factorizer]]] = FACTORIZERS
     config: LowRankConfig
 
     def plain_save_issue(self) -> str:
@@ -52,5 +55,5 @@ class LowRankTechnique(CalibratedWeightTransform):
                 stacklevel=2,
             )
 
-    def transform(self, adapter: Any, batches: Sequence[Tensor] | None) -> dict[str, Any]:
+    def transform(self, adapter: ArchAdapter, batches: Sequence[Tensor] | None) -> dict[str, object]:
         return lowrank_model(adapter, self.config, batches)

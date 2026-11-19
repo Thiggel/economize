@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable, Iterator
-from typing import TYPE_CHECKING, Any
+from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -15,6 +15,7 @@ from ..draft_model.drafter import DraftModelDrafter
 if TYPE_CHECKING:
     from ...decoding.request import DraftRequest
     from ...runtime import KVCache, LayerRunner
+    from .._drafting import StepWrap
 
 __all__ = ["PlacedDraftModelDrafter"]
 
@@ -40,7 +41,7 @@ class PlacedDraftModelDrafter(DraftModelDrafter):
         super().__init__(runner, vocab_size)
         self.home = torch.device(home)
         self.draft_device = runner.adapter.device
-        self._pool: Any = None
+        self._pool: tuple[int, int] | None = None  # torch.cuda.graph_pool_handle()
 
     @contextlib.contextmanager
     def _on_draft(self) -> Iterator[None]:
@@ -51,7 +52,7 @@ class PlacedDraftModelDrafter(DraftModelDrafter):
         else:
             yield
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: StepWrap) -> bool:
         if static_cache_class(self.draft_runner.adapter.cache_kind) is None or self.draft_device.type != "cuda":
             return False
         with self._on_draft():

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from ...core.config import TechniqueConfig
 from ...validation import (
@@ -100,7 +100,7 @@ class TealConfig(TechniqueConfig):
     def validate(self, adapter: ArchAdapter) -> None:
         check_layers(self.layers, adapter)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         data = super().to_dict()
         if not isinstance(self.prefill, str):
             data["prefill"] = self.policy.to_dict()

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import warnings
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Protocol
 
 import torch
 from torch import nn
@@ -17,12 +17,20 @@ from .config import DraftModelConfig
 from .drafter import DraftModelDrafter
 
 if TYPE_CHECKING:
+    from transformers import PreTrainedModel
+
     from ...arch import ArchAdapter
     from ...runtime import LayerRunner
 
-__all__ = ["DraftModelTechnique", "check_vocabularies", "load_draft_model", "load_local_tokenizer"]
+__all__ = ["DraftModelTechnique", "Vocabulary", "check_vocabularies", "load_draft_model", "load_local_tokenizer"]
 
 logger = logging.getLogger(__name__)
+
+
+class Vocabulary(Protocol):
+    """What :func:`check_vocabularies` reads of a tokenizer: its token-to-id map."""
+
+    def get_vocab(self) -> dict[str, int]: ...
 
 
 def load_draft_model(config: DraftModelConfig, device: torch.device, dtype: torch.dtype) -> nn.Module:
@@ -43,7 +51,9 @@ def load_draft_model(config: DraftModelConfig, device: torch.device, dtype: torc
 CAPTURABLE_EXPERTS = "economize_capturable"
 
 
-def _capturable_experts_forward(self: nn.Module, *args: Any, **kwargs: Any) -> torch.Tensor:
+def _capturable_experts_forward(
+    self: nn.Module, hidden_states: torch.Tensor, top_k_index: torch.Tensor, top_k_weights: torch.Tensor
+) -> torch.Tensor:
     """``batched_mm`` experts while a CUDA graph is being captured, ``grouped_mm`` otherwise.
 
     ``batched_mm`` gathers the weights of every selected expert per token (``gate_up_proj[expert_ids]``), about
@@ -53,11 +63,11 @@ def _capturable_experts_forward(self: nn.Module, *args: Any, **kwargs: Any) -> t
     from transformers.integrations.moe import batched_mm_experts_forward, grouped_mm_experts_forward
 
     if torch.cuda.is_current_stream_capturing():
-        return batched_mm_experts_forward(self, *args, **kwargs)
-    return grouped_mm_experts_forward(self, *args, **kwargs)
+        return batched_mm_experts_forward(self, hidden_states, top_k_index, top_k_weights)
+    return grouped_mm_experts_forward(self, hidden_states, top_k_index, top_k_weights)
 
 
-def _capturable_experts(model: nn.Module, device: torch.device) -> None:
+def _capturable_experts(model: PreTrainedModel, device: torch.device) -> None:
     """Make a mixture-of-experts draft LM capturable in CUDA graphs below sm90.
 
     On A100s (sm80) torch's ``grouped_mm`` fails inside a CUDA graph capture ("operation not permitted when stream is
@@ -77,13 +87,13 @@ def _capturable_experts(model: nn.Module, device: torch.device) -> None:
 
         if CAPTURABLE_EXPERTS not in ALL_EXPERTS_FUNCTIONS:
             ALL_EXPERTS_FUNCTIONS.register(CAPTURABLE_EXPERTS, _capturable_experts_forward)
-        model.set_experts_implementation(CAPTURABLE_EXPERTS)  # type: ignore[operator]
+        model.set_experts_implementation(CAPTURABLE_EXPERTS)
     except (ImportError, AttributeError, ValueError, RuntimeError) as error:
         logger.warning("economize: kept grouped_mm experts for the draft LM (%s: %s); CUDA graphs may fail to capture",
                        type(error).__name__, error)
 
 
-def load_local_tokenizer(source: str) -> Any | None:
+def load_local_tokenizer(source: str) -> Vocabulary | None:
     """The tokenizer of a Hub id or directory if it is available without downloading (``None`` otherwise, with a
     logged warning: not cached or no such id (``OSError``), no loadable tokenizer files (``ValueError``), an empty
     vocabulary or a missing tokenizer dependency (``ImportError``))."""
@@ -104,7 +114,7 @@ def load_local_tokenizer(source: str) -> Any | None:
     return tokenizer
 
 
-def check_vocabularies(model_tokenizer: Any | None, draft_tokenizer: Any | None, vocab_size: int,
+def check_vocabularies(model_tokenizer: Vocabulary | None, draft_tokenizer: Vocabulary | None, vocab_size: int,
                        draft_vocab: int, *, draft: str = "the draft LM") -> None:
     """Check that the draft LM can read and propose the model's tokens.
 
@@ -148,7 +158,7 @@ def check_vocabularies(model_tokenizer: Any | None, draft_tokenizer: Any | None,
         )
 
 
-def _covering(tokenizer: Any | None, rows: int, name: str) -> Any | None:
+def _covering(tokenizer: Vocabulary | None, rows: int, name: str) -> Vocabulary | None:
     """``tokenizer`` unless it defines fewer than half of the ``rows`` ids of its LM head (a folder that holds the
     weights without the tokenizer files loads as a tokenizer of a few special tokens), which is then ignored."""
     if tokenizer is None or 2 * len(tokenizer.get_vocab()) >= rows:

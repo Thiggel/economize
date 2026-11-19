@@ -168,6 +168,7 @@ def auto_choice(
         return _AUTO_CACHE[key]
     inputs = [torch.randn(m, weight.shape[1], device=device, dtype=weight.dtype) for m in tokens]
     timings: dict[str, float] = {}
+    stored: torch.Tensor | None
     for name in candidates:
         kernel = SEMI_STRUCTURED_KERNELS.get(name)
         if not kernel.available(device):

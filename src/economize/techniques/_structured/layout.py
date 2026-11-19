@@ -13,12 +13,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING
 
 from torch import nn
 
 from ...errors import UnsupportedModelError
 from ...registry import Registry
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
+    from ...arch.config import HFConfig
 
 __all__ = ["DECODER_LAYOUTS", "DecoderLayout", "LayerShape", "layout_for"]
 
@@ -109,14 +113,14 @@ class DecoderLayout:
             found[name] = self.linear(layer, name)
         return found
 
-    def check(self, adapter: Any, technique: str) -> None:
+    def check(self, adapter: ArchAdapter, technique: str) -> None:
         """Refuse the variants of the family that ``technique`` cannot handle with this layout (none here).
 
         Raises:
             UnsupportedModelError: In a subclass, for a model the layout does not describe.
         """
 
-    def write_widths(self, config: Any, shapes: Sequence[LayerShape]) -> bool:
+    def write_widths(self, config: HFConfig, shapes: Sequence[LayerShape]) -> bool:
         """Write the per-layer widths ``shapes`` (in layer order) into ``config`` where it can describe them.
 
         An explicit ``head_dim`` is always written (it otherwise follows ``hidden_size // num_attention_heads``);
@@ -141,7 +145,7 @@ DECODER_LAYOUTS: Registry[DecoderLayout] = Registry("decoder layout", "economize
 DECODER_LAYOUTS.register("llama", DecoderLayout())
 
 
-def layout_for(adapter: Any, technique: str, *, residual: bool = False) -> DecoderLayout:
+def layout_for(adapter: ArchAdapter, technique: str, *, residual: bool = False) -> DecoderLayout:
     """The layout registered for the adapter's ``config.model_type``, else for its ``layer_layout``, after its
     :meth:`~DecoderLayout.check`.
 

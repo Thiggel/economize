@@ -15,8 +15,8 @@ It needs one layer's latent factors and optimizer state on the device instead of
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
-from typing import Any
+from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Protocol
 
 import torch
 import torch.nn.functional as F
@@ -25,20 +25,32 @@ from torch import Tensor, nn
 from .factorize import LittleBitFactors
 from .module import LittleBitLinear
 
+if TYPE_CHECKING:
+    from ...core.calibration import LayerCall
+
 __all__ = ["LatentLittleBitLinear", "SmoothSign", "smooth_sign", "train_block"]
+
+
+class _SignContext(Protocol):
+    """The autograd context of :class:`SmoothSign`: the saved input and the slope ``k``."""
+
+    k: float
+    saved_tensors: tuple[Tensor, ...]
+
+    def save_for_backward(self, *tensors: Tensor) -> None: ...
 
 
 class SmoothSign(torch.autograd.Function):
     """``sign(x)`` (with ``sign(0) = +1``) whose backward is ``d/dx tanh(k x) = k (1 - tanh(k x)^2)``."""
 
     @staticmethod
-    def forward(ctx: Any, x: Tensor, k: float) -> Tensor:  # type: ignore[override]
+    def forward(ctx: _SignContext, x: Tensor, k: float) -> Tensor:
         ctx.save_for_backward(x)
         ctx.k = k
         return torch.where(x >= 0, 1.0, -1.0).to(x.dtype)
 
     @staticmethod
-    def backward(ctx: Any, grad: Tensor) -> tuple[Tensor, None]:  # type: ignore[override]
+    def backward(ctx: _SignContext, grad: Tensor) -> tuple[Tensor, None]:
         (x,) = ctx.saved_tensors
         return grad * ctx.k * (1 - torch.tanh(ctx.k * x).square()), None
 
@@ -54,6 +66,13 @@ class LatentLittleBitLinear(nn.Module):
     The forward computes ``sum_p ((((x * g_p) s(V_p)^T) * l_p) s(U_p)^T) * h_p + bias`` with ``s`` the SmoothSign,
     in the dtype of ``x``; the bias stays frozen.
     """
+
+    u: nn.Parameter
+    v: nn.Parameter
+    h: nn.Parameter
+    g: nn.Parameter
+    l: nn.Parameter
+    bias: Tensor | None
 
     def __init__(self, factors: LittleBitFactors, bias: Tensor | None, smooth_k: float = 100.0) -> None:
         super().__init__()
@@ -84,12 +103,12 @@ class LatentLittleBitLinear(nn.Module):
         return LittleBitLinear.from_factors(self.factors(), self.bias, like, backend)
 
 
-def _call(layer: nn.Module, hidden: Tensor, call: Any) -> Tensor:
+def _call(layer: nn.Module, hidden: Tensor, call: LayerCall) -> Tensor:
     out = layer(hidden, *call.args, **call.kwargs)
     return out[0] if isinstance(out, (tuple, list)) else out
 
 
-def _schedule(total: int, warmup: float) -> Any:
+def _schedule(total: int, warmup: float) -> Callable[[int], float]:
     warm = max(1, round(warmup * total))
 
     def factor(step: int) -> float:
@@ -104,7 +123,7 @@ def train_block(
     layer: nn.Module,
     latents: Mapping[str, LatentLittleBitLinear],
     inputs: Sequence[Tensor],
-    calls: Sequence[Any],
+    calls: Sequence[LayerCall],
     targets: Sequence[Tensor],
     device: torch.device,
     *,

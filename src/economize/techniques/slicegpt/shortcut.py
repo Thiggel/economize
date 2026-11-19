@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import inspect
 from types import MethodType
-from typing import Any
 
 import torch
 from torch import Tensor, nn
@@ -30,11 +29,11 @@ def _shortcut(x: Tensor, matrix: Tensor | None) -> Tensor:
     return x if matrix is None else x @ matrix
 
 
-def _named_arguments(signature: inspect.Signature, hidden: Tensor, args: tuple[Any, ...], kwargs: dict[str, Any]
-                     ) -> dict[str, Any]:
+def _named_arguments(signature: inspect.Signature, hidden: Tensor, args: tuple[object, ...], kwargs: dict[str, object]
+                     ) -> dict[str, object]:
     """The layer's call arguments other than the hidden state, as keywords (``**kwargs`` merged in)."""
     bound = signature.bind(hidden, *args, **kwargs)
-    named: dict[str, Any] = {}
+    named: dict[str, object] = {}
     for name, value in bound.arguments.items():
         kind = signature.parameters[name].kind
         if kind is inspect.Parameter.VAR_KEYWORD:
@@ -59,7 +58,7 @@ def install_shortcuts(layer: nn.Module, layout: DecoderLayout) -> None:
     for name in (ATTN_SHORTCUT, MLP_SHORTCUT):
         layer.register_buffer(name, None, persistent=False)
 
-    def forward(self: nn.Module, hidden_states: Tensor, *args: Any, **kwargs: Any) -> Tensor:
+    def forward(self: nn.Module, hidden_states: Tensor, *args: object, **kwargs: object) -> Tensor:
         named = _named_arguments(signature, hidden_states, args, kwargs)
         attention = self.get_submodule(layout.attention)(
             hidden_states=self.get_submodule(layout.attn_norm)(hidden_states), **named

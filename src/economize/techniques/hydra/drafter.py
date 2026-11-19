@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -12,12 +12,13 @@ from ...decoding.cost import CostKind, LayerFootprint
 from ...decoding.protocols import Draft, Drafter
 from ...modules import DraftKVCache
 from ...runtime.transfer import device_tensor
-from .._drafting import CommittedColumns, ObserveCosts, take_rows
+from .._drafting import CommittedColumns, ObserveCosts, graphed, take_rows
 
 if TYPE_CHECKING:
     from ...decoding.protocols import Verifier
     from ...decoding.request import DraftRequest
     from ...runtime import ExactPass, KVCache, LayerRunner
+    from .._drafting import StepWrap
     from ..medusa.trees import TreePlan
     from .technique import HydraTechnique
 
@@ -123,8 +124,8 @@ class HydraDrafter(Drafter):
             dtype=technique.dtype,
         )
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
-        self._head = wrap(self.technique.head_logits)
+    def enable_graphs(self, wrap: StepWrap) -> bool:
+        self._head = graphed(wrap, self.technique.head_logits)
         return True
 
     def observe(self, exact: ExactPass, columns: torch.Tensor) -> None:

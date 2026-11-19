@@ -22,12 +22,18 @@ The tensors are keyed ``hydra.<name>`` as in the technique's ``state_dict`` (``p
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, cast
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, cast
 
 import torch
 
 from ...errors import ConfigError
+
+if TYPE_CHECKING:
+    from torch import nn
+
+    from ...arch import ArchAdapter
+    from .._drafting.formats import JSONObject
 
 __all__ = ["CONFIG_KEY", "FORMAT_VERSION", "WEIGHTS_PREFIX", "HydraDrafterSpec", "drafter_state"]
 
@@ -99,7 +105,7 @@ class HydraDrafterSpec:
         if not 1 <= self.rope_layer <= self.num_layers:
             raise ConfigError(f"rope_layer {self.rope_layer} is outside the model's {self.num_layers} layers")
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "format_version": FORMAT_VERSION,
             "num_layers": self.num_layers,
@@ -120,7 +126,7 @@ class HydraDrafterSpec:
         }
 
     @classmethod
-    def from_dict(cls, block: dict[str, Any]) -> HydraDrafterSpec:
+    def from_dict(cls, block: JSONObject) -> HydraDrafterSpec:
         version = int(block.get("format_version", 1))
         if version > FORMAT_VERSION:
             raise ConfigError(f"the {CONFIG_KEY!r} block has format version {version}; this economize reads up to "
@@ -144,7 +150,7 @@ class HydraDrafterSpec:
         )
 
     @classmethod
-    def from_hf_config(cls, config: Any) -> HydraDrafterSpec:
+    def from_hf_config(cls, config: object) -> HydraDrafterSpec:
         """Read the block from a configuration object or dict (top level, or in ``transformer_layer_config``)."""
         data = config if isinstance(config, dict) else getattr(config, "__dict__", {})
         nested = data.get("transformer_layer_config") or {}
@@ -154,24 +160,29 @@ class HydraDrafterSpec:
         return cls.from_dict(block)
 
     @classmethod
-    def of(cls, technique: Any) -> HydraDrafterSpec:
+    def of(cls, technique: nn.Module) -> HydraDrafterSpec:
         """The spec of an attached :class:`~economize.techniques.hydra.HydraTechnique`."""
+        from .._export import technique_as
+        from .heads import HydraHead
+        from .technique import HydraTechnique
+
+        technique = technique_as(technique, HydraTechnique)
         adapter, config = technique.adapter, technique.config
         lm_weight = cast(torch.Tensor, adapter.lm_head.weight)
-        common: dict[str, Any] = {
-            "num_layers": adapter.num_layers,
-            "hidden_size": adapter.hidden_size,
-            "vocab_size": int(lm_weight.shape[0]),
-            "num_heads": int(config.num_heads),
-            "head_layers": len(technique.heads[0].blocks),
-            "head": str(config.head),
-            "param_dtype": str(config.param_dtype),
-        }
+        spec = cls(
+            num_layers=adapter.num_layers,
+            hidden_size=adapter.hidden_size,
+            vocab_size=int(lm_weight.shape[0]),
+            num_heads=int(config.num_heads),
+            head_layers=len(cast(HydraHead, technique.heads[0]).blocks),
+            head=str(config.head),
+            param_dtype=str(config.param_dtype),
+        )
         prefix = technique.prefix
         if prefix is None:
-            return cls(**common)
-        return cls(
-            **common,
+            return spec
+        return replace(
+            spec,
             prefix=True,
             num_attention_heads=prefix.num_heads,
             num_kv_heads=prefix.num_kv_heads,
@@ -183,12 +194,12 @@ class HydraDrafterSpec:
         )
 
 
-def _last_full_attention_layer(adapter: Any) -> int | None:
+def _last_full_attention_layer(adapter: ArchAdapter) -> int | None:
     from ..eagle3.technique import _last_full_attention_layer as find
 
     return find(adapter)
 
 
-def drafter_state(technique: Any) -> dict[str, torch.Tensor]:
+def drafter_state(technique: nn.Module) -> dict[str, torch.Tensor]:
     """The technique's tensors (detached), keyed as in its ``state_dict`` (``prefix.*``, ``heads.*``)."""
     return {name: tensor.detach() for name, tensor in technique.state_dict().items()}

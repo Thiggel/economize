@@ -74,7 +74,7 @@ class TritonBackend(LittleBitBackend):
         )
         if not usable:
             return reference_forward(module, x)
-        scales = [getattr(module, name).to(x.dtype) for name in ("g", "l", "h")]
+        g, l, h = (module.g.to(x.dtype), module.l.to(x.dtype), module.h.to(x.dtype))
         bias = module.bias.to(x.dtype) if module.bias is not None else None
-        y = littlebit_matmul(x.reshape(-1, module.in_features), module.v_bits, module.u_bits, *scales, bias)
+        y = littlebit_matmul(x.reshape(-1, module.in_features), module.v_bits, module.u_bits, g, l, h, bias)
         return y.reshape(*x.shape[:-1], module.out_features)

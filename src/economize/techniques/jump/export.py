@@ -20,7 +20,7 @@ import json
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 import torch
 from torch import nn
@@ -30,6 +30,9 @@ from ...modules import ReadoutAdapter
 from .config import JumpConfig
 from .mixer import MIXERS
 from .predictor import PREDICTORS, SequencePredictor
+
+if TYPE_CHECKING:
+    from .._drafting.formats import JSONObject
 
 __all__ = [
     "CONFIG_FILE",
@@ -103,8 +106,8 @@ class JumpDrafterSpec:
         skip = set(self.skip_layers)
         return tuple(i for i in range(self.target_layer + 1, self.exit_layer + 1) if i not in skip)
 
-    def to_dict(self) -> dict[str, Any]:
-        holes = {"skip_layers": list(self.skip_layers)} if self.skip_layers else {}
+    def to_dict(self) -> dict[str, object]:
+        holes: dict[str, object] = {"skip_layers": list(self.skip_layers)} if self.skip_layers else {}
         return {
             "format_version": 2 if self.skip_layers else 1,
             "num_layers": self.num_layers,
@@ -115,7 +118,7 @@ class JumpDrafterSpec:
         } | holes
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> JumpDrafterSpec:
+    def from_dict(cls, data: JSONObject) -> JumpDrafterSpec:
         version = int(data.get("format_version", FORMAT_VERSION))
         if version > FORMAT_VERSION:
             raise ConfigError(f"exported drafter format {version} is newer than this economize ({FORMAT_VERSION})")
@@ -123,7 +126,7 @@ class JumpDrafterSpec:
                    version, tuple(int(layer) for layer in data.get("skip_layers", ())))
 
     @classmethod
-    def from_hf_config(cls, config: Any) -> JumpDrafterSpec:
+    def from_hf_config(cls, config: object) -> JumpDrafterSpec:
         """Read the block from a configuration object or dict (top level, or in ``transformer_layer_config``)."""
         data = config if isinstance(config, dict) else getattr(config, "__dict__", {})
         nested = data.get("transformer_layer_config") or {}
@@ -133,12 +136,16 @@ class JumpDrafterSpec:
         return cls.from_dict(block)
 
     @classmethod
-    def of(cls, technique: Any) -> JumpDrafterSpec:
+    def of(cls, technique: nn.Module) -> JumpDrafterSpec:
         """The spec of an attached :class:`~economize.techniques.jump.JumpTechnique`.
 
         Raises:
             ConfigError: The technique's predictor attends to earlier positions, which no backend serves yet.
         """
+        from .._export import technique_as
+        from .technique import JumpTechnique
+
+        technique = technique_as(technique, JumpTechnique)
         if isinstance(technique.predictor, SequencePredictor):
             raise ConfigError(f"the {technique.config.predictor!r} predictor cannot be exported yet: no backend keeps "
                               "its memory of earlier positions")

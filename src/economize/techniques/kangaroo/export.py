@@ -20,13 +20,19 @@ The jump block is nested (and never written at the top level) so that an engine 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING
 
 import torch
 
 from ...errors import ConfigError
 from ..jump.config import JumpConfig
 from ..jump.export import JumpDrafterSpec
+
+if TYPE_CHECKING:
+    from torch import nn
+
+    from ...arch import ArchAdapter
+    from .._drafting.formats import JSONObject
 
 __all__ = ["CONFIG_KEY", "FORMAT_VERSION", "WEIGHTS_PREFIX", "KangarooDrafterSpec", "adapter_state"]
 
@@ -77,7 +83,7 @@ class KangarooDrafterSpec:
         """``l``, the last model layer of a draft step."""
         return self.path.exit_layer
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "format_version": FORMAT_VERSION,
             "jump": self.path.to_dict(),
@@ -90,7 +96,7 @@ class KangarooDrafterSpec:
         }
 
     @classmethod
-    def from_dict(cls, block: dict[str, Any]) -> KangarooDrafterSpec:
+    def from_dict(cls, block: JSONObject) -> KangarooDrafterSpec:
         version = int(block.get("format_version", 1))
         if version > FORMAT_VERSION:
             raise ConfigError(f"the {CONFIG_KEY!r} block has format version {version}; this economize reads up to "
@@ -106,7 +112,7 @@ class KangarooDrafterSpec:
         )
 
     @classmethod
-    def from_hf_config(cls, config: Any) -> KangarooDrafterSpec:
+    def from_hf_config(cls, config: object) -> KangarooDrafterSpec:
         """Read the block from a configuration object or dict (top level, or in ``transformer_layer_config``)."""
         data = config if isinstance(config, dict) else getattr(config, "__dict__", {})
         nested = data.get("transformer_layer_config") or {}
@@ -116,8 +122,12 @@ class KangarooDrafterSpec:
         return cls.from_dict(block)
 
     @classmethod
-    def of(cls, technique: Any) -> KangarooDrafterSpec:
+    def of(cls, technique: nn.Module) -> KangarooDrafterSpec:
         """The spec of an attached :class:`~economize.techniques.kangaroo.KangarooTechnique`."""
+        from .._export import technique_as
+        from .technique import KangarooTechnique
+
+        technique = technique_as(technique, KangarooTechnique)
         adapter, net = technique.adapter, technique.adapter_net
         full = _last_full_attention_layer(adapter)
         return cls(
@@ -131,12 +141,16 @@ class KangarooDrafterSpec:
         )
 
 
-def _last_full_attention_layer(adapter: Any) -> int | None:
+def _last_full_attention_layer(adapter: ArchAdapter) -> int | None:
     from .technique import _last_full_attention_layer as find
 
     return find(adapter)
 
 
-def adapter_state(technique: Any) -> dict[str, torch.Tensor]:
+def adapter_state(technique: nn.Module) -> dict[str, torch.Tensor]:
     """The adapter's tensors (detached), keyed as in :class:`~economize.techniques.kangaroo.KangarooAdapter`."""
-    return {name: tensor.detach() for name, tensor in technique.adapter_net.state_dict().items()}
+    from .._export import technique_as
+    from .technique import KangarooTechnique
+
+    net = technique_as(technique, KangarooTechnique).adapter_net
+    return {name: tensor.detach() for name, tensor in net.state_dict().items()}

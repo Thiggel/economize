@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 from torch import Tensor, nn
@@ -39,7 +39,7 @@ class InputHadamard:
     block: int
     kernel: str = "auto"
 
-    def __call__(self, module: nn.Module, args: tuple[Any, ...]) -> tuple[Any, ...]:
+    def __call__(self, module: nn.Module, args: tuple[Tensor, ...]) -> tuple[Tensor, ...]:
         return (hadamard_transform(args[0], self.block, self.kernel), *args[1:])
 
 
@@ -112,7 +112,7 @@ def _install(module: nn.Linear, block: int, kernel: str) -> None:
 
 
 @torch.no_grad()
-def rotate_model(adapter: ArchAdapter, config: RotateConfig) -> dict[str, Any]:
+def rotate_model(adapter: ArchAdapter, config: RotateConfig) -> dict[str, object]:
     """Apply the rotations of ``config`` to the model of ``adapter`` in place and return a summary.
 
     The value rotation of a layer is fused into its ``v_proj`` and into the ``o_proj`` of every layer that reads

@@ -34,7 +34,7 @@ from collections.abc import Callable, Collection, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 from torch import nn
@@ -140,7 +140,7 @@ class SinglePassCache(KVCache):
         return table
 
     def update(
-        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: Any, **kwargs: Any
+        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: object, **kwargs: object
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if key_states.shape[-2] != self.capacity:
             raise ConfigError(f"a single-pass cache of {self.capacity} tokens got {key_states.shape[-2]} keys")
@@ -268,7 +268,7 @@ class GatedPass:
             if adapter.kv_source(index) != index
         }
         self._length = 0
-        self._masks: dict[torch.device, Any] = {}
+        self._masks: dict[torch.device, torch.Tensor | BandMask] = {}
         self._actions: dict[int, Callable[[torch.Tensor], torch.Tensor | None]] = {}
         self._handles: list[RemovableHandle] = []
         for index in self.gate_of:
@@ -347,13 +347,13 @@ class GatedPass:
         """``call`` with the streaming mask in place of the layer's causal mask (built outside any checkpointed
         region, so that the recomputation in the backward pass reuses it)."""
 
-        def run(hidden: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        def run(hidden: torch.Tensor, *args: object, **kwargs: object) -> torch.Tensor:
             kwargs["attention_mask"] = self.streaming_mask(hidden.device)
             return call(hidden, *args, **kwargs)
 
         return run
 
-    def streaming_mask(self, device: torch.device) -> Any:
+    def streaming_mask(self, device: torch.device) -> torch.Tensor | BandMask:
         """The streaming heads' mask over the current pass's length, in the model's attention implementation's
         format (cached per device; every row of a batch shares it), or a :class:`~economize.attention.BandMask`
         with :attr:`structured_masks`."""
@@ -374,7 +374,7 @@ class GatedPass:
         """
         layer = self.adapter.layer(index)
 
-        def run(hidden: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        def run(hidden: torch.Tensor, *args: object, **kwargs: object) -> torch.Tensor:
             with self._active(index, action):
                 return layer(hidden, *args, **kwargs)
 
@@ -395,14 +395,19 @@ class GatedPass:
     def _mix(self, index: int, full: torch.Tensor, streaming: torch.Tensor) -> torch.Tensor:
         return self.mix(index, streaming, full)
 
-    def _pre_hook(self, index: int, module: nn.Module, args: tuple[Any, ...]) -> tuple[Any, ...] | None:
+    def _pre_hook(self, index: int, module: nn.Module, args: tuple[object, ...]) -> tuple[object, ...] | None:
         action = self._actions.get(index)
         if action is None:
             return None
-        out = action(args[0])
+        out = action(cast(torch.Tensor, args[0]))  # the output projection's input
         return None if out is None else (out, *args[1:])
 
 
-def _checkpointed(call: Callable[..., torch.Tensor], hidden: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+def _checkpointed(
+    call: Callable[..., torch.Tensor],
+    hidden: torch.Tensor,
+    *args: object,
+    **kwargs: Any,  # torch's checkpoint takes its own options as keywords, so keywords it forwards must be Any
+) -> torch.Tensor:
     out = checkpoint(call, hidden, *args, use_reentrant=False, **kwargs)
     return out[0] if isinstance(out, tuple) else out

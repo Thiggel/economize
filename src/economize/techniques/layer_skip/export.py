@@ -13,11 +13,11 @@ the last run layer goes straight into the final norm, as in the technique.
 
 from __future__ import annotations
 
-from typing import Any
-
 import torch
+from torch import nn
 
 from ...modules import ReadoutAdapter
+from .._export import technique_as
 from ..jump.config import JumpConfig
 from ..jump.export import JumpDrafterSpec
 
@@ -30,17 +30,30 @@ def jump_config(run_layers: tuple[int, ...]) -> JumpConfig:
                       adaptation="frozen")
 
 
-def jump_spec(technique: Any) -> JumpDrafterSpec:
+def jump_spec(technique: nn.Module) -> JumpDrafterSpec:
     """The exported specification of an attached :class:`~economize.techniques.layer_skip.LayerSkipTechnique`."""
+    from .technique import LayerSkipTechnique
+
+    technique = technique_as(technique, LayerSkipTechnique)
     adapter = technique.adapter
     run = technique.run_layers
     holes = tuple(layer for layer in technique.skip_layers if layer < max(run))
     return JumpDrafterSpec(jump_config(run), adapter.num_layers, adapter.hidden_size, skip_layers=holes)
 
 
-def jump_state_dict(technique: Any) -> dict[str, torch.Tensor]:
-    """The drafter's tensors under the jump technique's names: an identity ``readout.*`` when ``r < L``, else none."""
-    if max(technique.run_layers) == technique.adapter.num_layers:
+def jump_state_dict(technique: nn.Module) -> dict[str, torch.Tensor]:
+    """The drafter's tensors under the jump technique's names: an identity ``readout.*`` when ``r < L``, else none.
+
+    ``technique`` is a :class:`~economize.techniques.layer_skip.LayerSkipTechnique` or a
+    :class:`~economize.techniques.knapspec.KnapSpecTechnique` (whose current skip set is written).
+    """
+    from ..knapspec.technique import KnapSpecTechnique
+    from .technique import LayerSkipTechnique
+
+    skipping = technique
+    # the exporter is registered for these two classes only
+    assert isinstance(skipping, (LayerSkipTechnique, KnapSpecTechnique)), f"got {type(skipping)}"
+    if max(skipping.run_layers) == skipping.adapter.num_layers:
         return {}
-    identity = ReadoutAdapter(technique.adapter.hidden_size)
+    identity = ReadoutAdapter(skipping.adapter.hidden_size)
     return {"readout." + name: tensor.detach() for name, tensor in identity.state_dict().items()}

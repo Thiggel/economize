@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -16,6 +15,7 @@ from .._drafting import GraphedStep, tree_step_context
 if TYPE_CHECKING:
     from ...decoding.request import DraftRequest
     from ...runtime import ExactPass, KVCache, LayerRunner
+    from .._drafting import StepWrap
 
 __all__ = ["DraftModelDrafter"]
 
@@ -81,7 +81,7 @@ class DraftModelDrafter(Drafter):
         return 0 if self._clamped is None else int(self._clamped)
 
     # ---- generation lifecycle ----------------------------------------------------------------------------------
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: StepWrap) -> bool:
         if static_cache_class(self.draft_runner.adapter.cache_kind) is None:
             return False
         self._step_fn.enable(wrap)
@@ -104,6 +104,7 @@ class DraftModelDrafter(Drafter):
             self._clamped = torch.zeros((), dtype=torch.long, device=device)
             self._step_fn.reset()
         else:
+            # core types static_cache_class as type[KVCache], and only the static caches have activate
             self._cache.activate(batch_size)  # type: ignore[attr-defined]
         assert self._clamped is not None
         self._clamped.zero_()

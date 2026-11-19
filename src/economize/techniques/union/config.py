@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, ClassVar, Literal
+from typing import ClassVar, Literal
 
 from ...core.config import TechniqueConfig, nested_config, nested_dict
 from ...errors import ConfigError
@@ -103,7 +103,7 @@ class UnionConfig(WrappingConfig):
         """Most tokens member ``index`` drafts per row and cycle (``None``: the cycle's budget)."""
         return None if self.max_drafts is None else self.max_drafts[index]
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         data = TechniqueConfig.to_dict(self)
         data["members"] = [nested_dict(member) for member in self.members]
         return data

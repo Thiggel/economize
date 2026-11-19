@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 
 from ...core.config import TechniqueConfig
 from ...core.metadata import Family, Saving, TechniqueInfo
@@ -16,6 +16,9 @@ from .._weights.technique import CalibratedWeightTransform
 from .config import SliceGPTConfig
 from .rotate import RotationStore, rotate_global, rotate_per_block
 
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
+
 __all__ = ["SliceGPTTechnique"]
 
 #: Families whose techniques run a subset of the layers or read the residual stream between layers, which the
@@ -23,7 +26,7 @@ __all__ = ["SliceGPTTechnique"]
 _PER_BLOCK_EXCLUDES = (Family.DRAFTING, Family.DYNAMIC_DEPTH)
 
 
-def _parameters(model: Any) -> int:
+def _parameters(model: nn.Module) -> int:
     return sum(p.numel() for p in model.parameters())
 
 
@@ -52,7 +55,7 @@ class SliceGPTTechnique(CalibratedWeightTransform):
     head_rotation: Tensor
     fitted: Tensor
 
-    def __init__(self, config: SliceGPTConfig, adapter: Any) -> None:
+    def __init__(self, config: SliceGPTConfig, adapter: ArchAdapter) -> None:
         super().__init__(config, adapter)
         hidden, width = adapter.hidden_size, config.width(adapter.hidden_size)
         points = 2 * adapter.num_layers + 1 if config.rotation == "per_block" else 1
@@ -65,7 +68,7 @@ class SliceGPTTechnique(CalibratedWeightTransform):
         """Calibration data is read unless the bases were loaded from a checkpoint."""
         return not bool(self.fitted)
 
-    def transform(self, adapter: Any, batches: Sequence[Tensor] | None) -> dict[str, Any]:
+    def transform(self, adapter: ArchAdapter, batches: Sequence[Tensor] | None) -> dict[str, object]:
         config, layout = self.config, layout_for(adapter, self.name, residual=True)
         hidden, width, before = adapter.hidden_size, config.width(adapter.hidden_size), _parameters(adapter.model)
         store = RotationStore(self.rotations, self.head_rotation, fitting=not bool(self.fitted))

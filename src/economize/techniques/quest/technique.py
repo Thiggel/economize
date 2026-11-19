@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import torch
 
@@ -312,7 +312,7 @@ class QuestTechnique(KVCacheTechnique):
     order: ClassVar[int] = 40
     config: QuestConfig
 
-    def __init__(self, config: QuestConfig, adapter: Any) -> None:
+    def __init__(self, config: QuestConfig, adapter: ArchAdapter) -> None:
         super().__init__(config, adapter)
         self.covered = quest_layers(config, adapter)
 

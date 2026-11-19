@@ -29,7 +29,6 @@ Dequantized values equal those of the simulated storage bit for bit, so both sto
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 import torch
 
@@ -232,7 +231,7 @@ class PackedKIVICache(KIVICache):
 
     # ---- K/V traffic -----------------------------------------------------------------------------------------
     def update(
-        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: Any, **kwargs: Any
+        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: object, **kwargs: object
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if not self.covers(layer_idx):
             return super().update(key_states, value_states, layer_idx, *args, **kwargs)

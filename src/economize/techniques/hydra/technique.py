@@ -109,8 +109,8 @@ class HydraTechnique(StepDrafterDefaults, Technique):
 
     def rotary_table(self, positions: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """``(cos, sin)`` ``[B, S, D']`` of the prefix layer for positions ``[B, S]``, in :attr:`dtype`."""
-        table = self.adapter.position_embeddings(cast(torch.Tensor, self.heads[0].blocks[0].linear.weight),
-                                                 positions.to(self.device), self.rope_table)
+        weight = cast(InputBlock, cast(HydraHead, self.heads[0]).blocks[0]).linear.weight
+        table = self.adapter.position_embeddings(weight, positions.to(self.device), self.rope_table)
         if not (isinstance(table, tuple) and len(table) == 2):
             raise UnsupportedModelError(f"{self.adapter.model_type!r} has no (cos, sin) rotary table for the Hydra "
                                         "prefix layer; use prefix=False")

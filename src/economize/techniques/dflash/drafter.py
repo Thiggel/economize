@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import weakref
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -18,6 +18,7 @@ from .layer import DFlashLayer
 if TYPE_CHECKING:
     from ...decoding.request import DraftRequest
     from ...runtime import ExactPass, KVCache, LayerRunner
+    from .._drafting import StepWrap
     from .technique import DFlashTechnique
 
 __all__ = ["DFlashDrafter"]
@@ -58,7 +59,8 @@ class DFlashDrafter(Drafter):
         self._limit = 1  # eager mode: context slots a proposal reads (the batch's largest anchor position)
         self._observe_costs = ObserveCosts(self.footprint)
         self._step_fn = GraphedStep(self._full_block)
-        self._graphs: dict[int, Callable[..., Any]] = {}  # graph mode: one replay per number of drafts
+        # graph mode: one replay per number of drafts
+        self._graphs: dict[int, Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = {}
         self._buffers: dict[tuple[int, int], DraftKVCache] = {}  # graph mode: cache per (batch size, capacity)
         self._observed = False
 
@@ -94,7 +96,7 @@ class DFlashDrafter(Drafter):
             self._buffers[key] = self._new_cache(batch_size)
         return self._buffers[key]
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: StepWrap) -> bool:
         self._step_fn.enable(wrap)
         return True
 
@@ -135,9 +137,13 @@ class DFlashDrafter(Drafter):
         else:
             if drafts not in self._graphs:
                 block = weakref.WeakMethod(self._block)  # as GraphedStep holds the step: no reference cycle
-                self._graphs[drafts] = self._step_fn.graph(
-                    lambda tokens, positions, n=drafts: block()(tokens, positions, n)  # type: ignore[misc]
-                )
+
+                def drafted(tokens: torch.Tensor, positions: torch.Tensor, n: int = drafts) -> torch.Tensor:
+                    run = block()
+                    assert run is not None  # the graph lives on the drafter, so the drafter is alive
+                    return run(tokens, positions, n)
+
+                self._graphs[drafts] = self._step_fn.graph(drafted)
             logits = self._graphs[drafts](tokens, positions)
         for i in range(drafts):
             if not request.drafting:

@@ -31,6 +31,13 @@ class LittleBitLinear(nn.Module):
         dtype: dtype of the scales and the bias.
     """
 
+    v_bits: Tensor
+    u_bits: Tensor
+    g: Tensor
+    l: Tensor
+    h: Tensor
+    bias: nn.Parameter | None
+
     def __init__(
         self,
         in_features: int,
@@ -44,14 +51,14 @@ class LittleBitLinear(nn.Module):
     ) -> None:
         super().__init__()
         self.in_features, self.out_features, self.rank, self.paths = in_features, out_features, rank, paths
-        words = dict(dtype=torch.int32, device=device)
-        scales = dict(dtype=dtype, device=device)
-        self.register_buffer("v_bits", torch.zeros(paths, rank, packed_width(in_features), **words))
-        self.register_buffer("u_bits", torch.zeros(paths, out_features, packed_width(rank), **words))
-        self.register_buffer("g", torch.ones(paths, in_features, **scales))
-        self.register_buffer("l", torch.ones(paths, rank, **scales))
-        self.register_buffer("h", torch.ones(paths, out_features, **scales))
-        self.bias = nn.Parameter(torch.zeros(out_features, **scales), requires_grad=False) if bias else None
+        words = torch.int32
+        self.register_buffer("v_bits", torch.zeros(paths, rank, packed_width(in_features), dtype=words, device=device))
+        self.register_buffer("u_bits", torch.zeros(paths, out_features, packed_width(rank), dtype=words, device=device))
+        self.register_buffer("g", torch.ones(paths, in_features, dtype=dtype, device=device))
+        self.register_buffer("l", torch.ones(paths, rank, dtype=dtype, device=device))
+        self.register_buffer("h", torch.ones(paths, out_features, dtype=dtype, device=device))
+        self.bias = (nn.Parameter(torch.zeros(out_features, dtype=dtype, device=device), requires_grad=False) if bias
+                     else None)
         self.set_backend(backend)
 
     @classmethod
@@ -67,6 +74,7 @@ class LittleBitLinear(nn.Module):
         for name in ("g", "l", "h"):
             getattr(module, name).copy_(getattr(factors, name))
         if bias is not None:
+            assert module.bias is not None  # built with a bias above
             module.bias.copy_(bias)
         return module
 

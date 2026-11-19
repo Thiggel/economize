@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 from torch import Tensor, nn
@@ -32,7 +32,7 @@ __all__ = ["lowrank_model"]
 @torch.no_grad()
 def lowrank_model(
     adapter: ArchAdapter, config: LowRankConfig, batches: Sequence[Tensor] | None = None
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Replace the selected linear maps by :class:`LowRankLinear` factors in place and return a summary.
 
     SVD-LLM profiles ``X X^T`` of every map layer by layer on the original model's activations (or, with

@@ -152,7 +152,7 @@ class SuffixIndex:
         return f"SuffixIndex(tokens={len(self)}, records={self.num_records}, depth={self.depth})"
 
     # ---- lookups -----------------------------------------------------------------------------------------------
-    def find(self, patterns: Sequence[Sequence[int]]) -> tuple[np.ndarray, np.ndarray]:
+    def find(self, patterns: Sequence[Sequence[int] | np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
         """The suffix ranges ``[lo, hi)`` that begin with each pattern (all patterns at once).
 
         Args:

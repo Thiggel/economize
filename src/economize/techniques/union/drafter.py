@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -18,8 +18,10 @@ from ...runtime.transfer import device_tensor
 from .merge import MergedTree, TreeBuilder, accepted_path, build_tree, leading_counts, merge_drafts, path_source
 
 if TYPE_CHECKING:
-    from ...decoding.cost import LayerFootprint
+    from ...decoding.cost import CostLog, LayerFootprint
+    from ...decoding.protocols import TokenSelector
     from ...runtime import ExactPass, KVCache, LayerRunner
+    from .._drafting import StepWrap
 
 __all__ = ["CascadeDrafter", "CycleRecord", "ForcedRequest", "UnionDrafter", "UnionStats"]
 
@@ -63,7 +65,7 @@ class UnionStats:
         """Forget every recorded cycle."""
         self.cycles.clear()
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self) -> dict[str, object]:
         """Means over the recorded cycles: accepted tokens, every member's leading tokens (``E[member]``), the best
         member per cycle (``E[max]``), tree nodes, and the count of every source."""
         n = len(self.cycles)
@@ -172,7 +174,7 @@ class UnionDrafter(Drafter):
     def draft_capacity(self, cycle_length: int) -> int:
         return sum(self._limit(i, member.draft_capacity(cycle_length)) for i, member in enumerate(self.members))
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: StepWrap) -> bool:
         return False  # the members draft eagerly: graph replay is not validated with the union's sub-requests
 
     def drafts_trees(self, verifier: Verifier) -> bool:
@@ -235,8 +237,29 @@ class ForcedRequest(DraftRequest):
         *args, **kwargs: As for :class:`~economize.decoding.DraftRequest`.
     """
 
-    def __init__(self, forced: torch.Tensor, forced_lengths: Sequence[int], *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        forced: torch.Tensor,
+        forced_lengths: Sequence[int],
+        seq: torch.Tensor,
+        ends: Sequence[int],
+        budgets: Sequence[int],
+        *,
+        selector: TokenSelector,
+        verifier: Verifier,
+        policy: DraftPolicy,
+        costs: Sequence[CostLog],
+        footprint: LayerFootprint | None = None,
+        layer_span: tuple[int, int] | None = None,
+        selectors: Sequence[TokenSelector] | None = None,
+        record_confidence: bool = False,
+        record_distributions: bool = False,
+        draft_loop_graph: bool = False,
+    ) -> None:
+        super().__init__(seq, ends, budgets, selector=selector, verifier=verifier, policy=policy, costs=costs,
+                         footprint=footprint, layer_span=layer_span, selectors=selectors,
+                         record_confidence=record_confidence, record_distributions=record_distributions,
+                         draft_loop_graph=draft_loop_graph)
         self.forced = forced.to(self.device)
         self.forced_lengths = list(forced_lengths)
         width = max(max(self.budgets, default=0), 1)

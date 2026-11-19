@@ -90,6 +90,10 @@ def _graph_ms(fn: Callable[[], object], reps: int) -> float:
     return statistics.median(times)
 
 
+#: Value lists ``(block_n, block_k, split_k, num_warps)`` whose product is a search grid.
+GridAxes = tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]]
+
+
 def _grid(
     block_n: Sequence[int], block_k: Sequence[int], split_k: Sequence[int], num_warps: Sequence[int], k: int
 ) -> list[GemvConfig]:
@@ -115,8 +119,8 @@ class AutotuneTritonBackend(TritonBackend):
         reps: Graph replays per config (the median counts).
     """
 
-    grid_one_row: tuple[tuple[int, ...], ...] = ((32, 64, 128, 256), (64, 128), (4, 8, 16, 32, 64), (2, 4))
-    grid_many_rows: tuple[tuple[int, ...], ...] = ((64, 128), (32, 64), (2, 4, 8, 16, 32), (4,))
+    grid_one_row: GridAxes = ((32, 64, 128, 256), (64, 128), (4, 8, 16, 32, 64), (2, 4))
+    grid_many_rows: GridAxes = ((64, 128), (32, 64), (2, 4, 8, 16, 32), (4,))
     probe_rows: int = 8
     calls: int = 8
     reps: int = 7

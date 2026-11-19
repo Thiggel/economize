@@ -24,6 +24,7 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
+from .._triton import TritonKernel
 from .pack import WORD_BITS
 
 __all__ = ["KernelConfig", "default_config", "littlebit_matmul", "triton_available"]
@@ -81,7 +82,7 @@ def default_config(m: int, in_features: int, rank: int, paths: int, device: torc
 
 
 @functools.cache
-def _kernels():  # type: ignore[no-untyped-def]
+def _kernels() -> tuple[TritonKernel, TritonKernel]:
     """The two Triton kernels, compiled on first use (Triton is imported lazily)."""
     import triton
     import triton.language as tl

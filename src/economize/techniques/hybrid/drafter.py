@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -15,6 +14,7 @@ from ..lookup.proposal import one_hot_probs
 
 if TYPE_CHECKING:
     from ...runtime import ExactPass, KVCache, LayerRunner
+    from .._drafting import StepWrap
 
 __all__ = ["HybridDrafter", "merge_drafts"]
 
@@ -68,7 +68,7 @@ class HybridDrafter(DelegatingDrafter):
         """Whether the fallback drafts trees (the primary's chains then become single-branch trees)."""
         return self.fallback.drafts_trees(verifier)
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: StepWrap) -> bool:
         return False  # the fallback runs eagerly: graph replay is not validated with the hybrid's sub-requests
 
     def step(self, tokens: torch.Tensor, positions: torch.Tensor, valid: torch.Tensor | None) -> torch.Tensor:

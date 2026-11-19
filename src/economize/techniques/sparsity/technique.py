@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import math
-from typing import Any, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import torch
 from torch import nn
 
 from ...core.calibration import calibration_source, token_batches
 from ...core.metadata import Family, KernelChoice, Saving, Simulation, TechniqueInfo
-from ...core.technique import Capability, DraftCopies, Technique, register_technique
+from ...core.technique import AttachContext, Capability, DraftCopies, Technique, register_technique
 from .backends import TEAL_BACKENDS, Installed
 from .config import TealConfig
 from .model import TealCalibration, calibrate_teal, install_teal, teal_modules
 from .sparsify import block_sparsity
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
 
 __all__ = ["TealTechnique"]
 
@@ -44,7 +47,7 @@ class TealTechnique(Technique):
     sparsities: torch.Tensor
     thresholds: torch.Tensor
 
-    def __init__(self, config: TealConfig, adapter: Any) -> None:
+    def __init__(self, config: TealConfig, adapter: ArchAdapter) -> None:
         super().__init__(config, adapter)
         modules = teal_modules(adapter, config)
         self.keys = list(modules)
@@ -61,7 +64,7 @@ class TealTechnique(Technique):
         """Whether every map has a threshold (computed by :meth:`attach` or loaded from a checkpoint)."""
         return bool(torch.isfinite(self.thresholds).all())
 
-    def attach(self, model: Any, adapter: Any, context: Any = None) -> None:
+    def attach(self, model: nn.Module, adapter: ArchAdapter, context: AttachContext | None = None) -> None:
         self.config.validate(adapter)
         TEAL_BACKENDS.get(self.config.backend)().check(teal_modules(adapter, self.config))  # before calibrating
         if not self.calibrated:
@@ -100,7 +103,7 @@ class TealTechnique(Technique):
         return dict(zip(self.keys, self.sparsities.tolist()))
 
     @property
-    def summary(self) -> dict[str, Any]:
+    def summary(self) -> dict[str, object]:
         """Target and calibrated model-level sparsity (parameter-weighted), and the number of sparsified maps."""
         weighted = block_sparsity(self.sparsity_map(), self._sizes)
         return {
@@ -127,7 +130,7 @@ class TealTechnique(Technique):
             live.fill_(thresholds[key])
 
 
-def _refresh_installed(module: nn.Module, incompatible: Any) -> None:
+def _refresh_installed(module: nn.Module, incompatible: object) -> None:
     """Load-state-dict post hook: :meth:`TealTechnique.refresh_thresholds` (a checkpoint loaded after attach)."""
     assert isinstance(module, TealTechnique)
     module.refresh_thresholds()

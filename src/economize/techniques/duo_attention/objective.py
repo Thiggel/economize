@@ -53,9 +53,11 @@ from ...train.objective import (
 from ...validation import check_number, check_positive
 from .gates import GatedPass, HeadGates, gated_layers
 from .pattern import write_pattern
-from .technique import DuoAttentionConfig
+from .technique import DuoAttentionConfig, DuoAttentionFields
 
 if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
     from ...core.model import EfficientModel
     from ...train.loop import TrainConfig, TrainResult
 
@@ -199,22 +201,23 @@ class TrainedPattern:
     path: Path | None
     train: TrainResult
 
-    def config(self, **fields: Any) -> DuoAttentionConfig:
+    def config(self, **fields: Unpack[DuoAttentionFields]) -> DuoAttentionConfig:
         """A :class:`DuoAttentionConfig` with these gates inline and the training's sinks, window and layers
         (``fields`` override them, e.g. ``sparsity``)."""
-        settings: dict[str, Any] = {"sinks": self.sinks, "recent": self.recent, "layers": self.layers}
-        return DuoAttentionConfig(pattern=tuple(tuple(row) for row in self.scores), **{**settings, **fields})
+        settings: DuoAttentionFields = {"sinks": self.sinks, "recent": self.recent, "layers": self.layers}
+        merged: DuoAttentionFields = {**settings, **fields}
+        return DuoAttentionConfig(pattern=tuple(tuple(row) for row in self.scores), **merged)
 
 
 def train_pattern(
     model: EfficientModel | nn.Module,
-    data: Any,
+    data: object,
     out_dir: str | Path | None = None,
     *,
     objective: DuoAttentionGates | None = None,
     config: TrainConfig | None = None,
-    settings: Mapping[str, Any] | None = None,
-    **overrides: Any,
+    settings: Mapping[str, object] | None = None,
+    **overrides: Any,  # TrainConfig fields; train/ exports no TypedDict of them (fit takes them as Any too)
 ) -> TrainedPattern:
     """Train DuoAttention's gates on ``model`` and write the pattern directory the reference writes.
 

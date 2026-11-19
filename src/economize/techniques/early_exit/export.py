@@ -11,14 +11,19 @@ The tensors keep their names with the ``path.`` prefix dropped (``readout.*``, `
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import torch
+from torch import nn
 
 from ...modules import ReadoutAdapter
+from .._export import technique_as
 from ..jump.config import JumpConfig
 from ..jump.export import JumpDrafterSpec
 from .config import EarlyExitConfig
+
+if TYPE_CHECKING:
+    from .technique import EarlyExitTechnique
 
 __all__ = ["jump_config", "jump_spec", "jump_state_dict"]
 
@@ -32,20 +37,28 @@ def jump_config(config: EarlyExitConfig) -> JumpConfig:
     )
 
 
-def jump_spec(technique: Any) -> JumpDrafterSpec:
+def jump_spec(technique: nn.Module) -> JumpDrafterSpec:
     """The exported specification of an attached :class:`~economize.techniques.early_exit.EarlyExitTechnique`."""
+    technique = _early_exit(technique)
     adapter = technique.adapter
     return JumpDrafterSpec(jump_config(technique.config), adapter.num_layers, adapter.hidden_size)
 
 
-def jump_state_dict(technique: Any) -> dict[str, torch.Tensor]:
+def jump_state_dict(technique: nn.Module) -> dict[str, torch.Tensor]:
     """The technique's tensors under the jump technique's names (detached, where they live).
 
     ``readout.*`` is the trained readout adapter, or an identity adapter for ``head="shared"``; ``lora.*`` and
     ``blocks.*`` are the draft path's LoRA factors or layer copies.
     """
+    technique = _early_exit(technique)
     state = {name.removeprefix("path."): tensor.detach() for name, tensor in technique.state_dict().items()}
     if technique.readout is None:
         identity = ReadoutAdapter(technique.adapter.hidden_size)
         state.update({"readout." + name: tensor for name, tensor in identity.state_dict().items()})
     return state
+
+
+def _early_exit(technique: nn.Module) -> EarlyExitTechnique:
+    from .technique import EarlyExitTechnique
+
+    return technique_as(technique, EarlyExitTechnique)

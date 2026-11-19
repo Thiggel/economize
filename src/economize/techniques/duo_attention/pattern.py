@@ -21,7 +21,6 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import torch
 
@@ -111,7 +110,7 @@ def write_pattern(
     sinks: int,
     recent: int,
     layers: Sequence[int] = (),
-    settings: Mapping[str, Any] | None = None,
+    settings: Mapping[str, object] | None = None,
 ) -> Path:
     """Write a pattern directory that :func:`read_pattern` and the reference read.
 

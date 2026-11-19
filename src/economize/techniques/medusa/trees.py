@@ -108,8 +108,8 @@ class TreePlan:
         """:meth:`layout` as long tensors on ``device``, built once per depth and device (no transfer per draft)."""
         key = (depth, torch.device(device))
         if key not in self._indices:
-            self._indices[key] = tuple(torch.tensor(v, dtype=torch.long, device=device)  # type: ignore[assignment]
-                                       for v in self.layout(depth))
+            depths, tokens, parents = (torch.tensor(v, dtype=torch.long, device=device) for v in self.layout(depth))
+            self._indices[key] = (depths, tokens, parents)
         return self._indices[key]
 
     def tokens(self, candidates: torch.Tensor, depth: int) -> torch.Tensor:

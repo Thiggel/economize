@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from torch import nn
 
@@ -39,7 +39,7 @@ class LittleBitMethod(ABC):
         ranks: Mapping[str, int],
         step: CalibrationStep | None,
         config: LittleBitConfig,
-    ) -> tuple[dict[str, LittleBitFactors], dict[str, Any]]:
+    ) -> tuple[dict[str, LittleBitFactors], Mapping[str, object]]:
         """The factors of every map in ``modules`` (keyed like it) and per-layer statistics for the summary.
 
         The layer must be left as it was found: the caller swaps the packed maps in.
@@ -60,7 +60,7 @@ class DualSVIDMethod(LittleBitMethod):
         ranks: Mapping[str, int],
         step: CalibrationStep | None,
         config: LittleBitConfig,
-    ) -> tuple[dict[str, LittleBitFactors], dict[str, Any]]:
+    ) -> tuple[dict[str, LittleBitFactors], Mapping[str, object]]:
         factors = {
             name: littlebit_init(module.weight.data, ranks[name], residual=config.residual)
             for name, module in modules.items()
@@ -86,7 +86,7 @@ class BlockwiseMethod(LittleBitMethod):
         ranks: Mapping[str, int],
         step: CalibrationStep | None,
         config: LittleBitConfig,
-    ) -> tuple[dict[str, LittleBitFactors], dict[str, Any]]:
+    ) -> tuple[dict[str, LittleBitFactors], Mapping[str, object]]:
         assert step is not None, "blockwise LittleBit needs a calibration step"
         targets = step.first_outputs if step.first_outputs is not None else step.forward()
         latents = {

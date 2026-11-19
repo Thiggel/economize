@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Sequence
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from torch import Tensor
 
@@ -14,8 +14,11 @@ from ...core.technique import Capability, Technique, register_technique
 from ...registry import Registry
 from .._weights.technique import CalibratedWeightTransform
 from .config import RotateConfig
-from .methods import ROTATIONS
+from .methods import ROTATIONS, RotationMethod
 from .model import rotate_model
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
 
 __all__ = ["RotateTechnique"]
 
@@ -47,7 +50,7 @@ class RotateTechnique(CalibratedWeightTransform):
     )
     capabilities: ClassVar[Capability] = Capability.WEIGHTS
     order: ClassVar[int] = 29
-    methods: ClassVar[Registry[Any]] = ROTATIONS
+    methods: ClassVar[Registry[type[RotationMethod]]] = ROTATIONS
     config: RotateConfig
 
     def plain_save_issue(self) -> str | None:
@@ -89,7 +92,7 @@ class RotateTechnique(CalibratedWeightTransform):
                 return reason
         return super().conflict(config, other, other_config)
 
-    def transform(self, adapter: Any, batches: Sequence[Tensor] | None) -> dict[str, Any]:
+    def transform(self, adapter: ArchAdapter, batches: Sequence[Tensor] | None) -> dict[str, object]:
         return rotate_model(adapter, self.config)
 
 
