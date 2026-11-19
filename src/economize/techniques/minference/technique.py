@@ -15,7 +15,7 @@ layers attend densely in any case, as their window already bounds the work.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import torch.nn as nn
 
@@ -153,7 +153,7 @@ class MInferenceTechnique(Technique):
     )
     config: MInferenceConfig
 
-    def __init__(self, config: MInferenceConfig, adapter: Any) -> None:
+    def __init__(self, config: MInferenceConfig, adapter: ArchAdapter) -> None:
         super().__init__(config, adapter)
         self.covered = minference_layers(config, adapter)
         rows = config.patterns(adapter)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import torch
 
@@ -16,6 +16,9 @@ from ...errors import ConfigError, IncompatibleTechniquesError
 from ...runtime import KVCache
 from .._kv import CacheWrapper, innermost, layer_indices
 from ..kv_quant.kivi import _FP16_MAX, KIVICache, KIVIConfig, KIVITechnique, quantize, value_group
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
 
 __all__ = ["FusedKIVICache", "FusedKIVIConfig", "FusedKIVITechnique"]
 
@@ -37,7 +40,7 @@ class FusedKIVIConfig(KIVIConfig):
     technique: ClassVar[str] = "kivi_fused"
     packable: ClassVar[bool] = False  # keeps the dense buffers next to the codes
 
-    def validate(self, adapter: Any) -> None:
+    def validate(self, adapter: ArchAdapter) -> None:
         super().validate(adapter)
         implementation = str(getattr(adapter.config, "_attn_implementation", None) or "eager")
         if not accepts_packed_kv(implementation, FORMAT):
@@ -136,7 +139,7 @@ class FusedKIVICache(KIVICache):
                     self._store(layer_idx)
         self._sync_counts()
 
-    def own_graph_state(self) -> Any:
+    def own_graph_state(self) -> object:
         return (self._packable, bool(self._stores))
 
     def on_restart(self) -> None:

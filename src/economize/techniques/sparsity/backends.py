@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from typing import Any, ClassVar
+from typing import ClassVar, Protocol
 
 from torch import Tensor, nn
 from torch.utils.hooks import RemovableHandle
@@ -22,7 +22,13 @@ from ...core.metadata import Saving, Simulation, WeightAccess
 from ...registry import Registry
 from .sparsify import PhasePolicy, sparsify_tokens
 
-__all__ = ["TEAL_BACKENDS", "DenseBackend", "Installed", "TealBackend"]
+__all__ = ["TEAL_BACKENDS", "DenseBackend", "Installed", "Removable", "TealBackend"]
+
+
+class Removable(Protocol):
+    """A hook or patch that undoes itself (a :class:`~torch.utils.hooks.RemovableHandle`, a kernel patch)."""
+
+    def remove(self) -> None: ...
 
 
 class Installed:
@@ -38,12 +44,12 @@ class Installed:
 
     def __init__(
         self,
-        handles: list[RemovableHandle],
+        handles: list[Removable],
         support: list[RemovableHandle] | None = None,
         masked: tuple[str, ...] = (),
     ) -> None:
         self.handles = handles
-        self.support = support or []
+        self.support: list[RemovableHandle] = support or []
         self.masked = masked
 
     def remove(self) -> None:
@@ -92,12 +98,12 @@ class DenseBackend(TealBackend):
         self, modules: Mapping[str, nn.Module], thresholds: Mapping[str, Tensor], policy: PhasePolicy | str
     ) -> Installed:
         policy = PhasePolicy.coerce(policy)
-        handles = []
+        handles: list[Removable] = []
         for name, module in modules.items():
 
             def hook(
-                _module: nn.Module, args: tuple[Any, ...], threshold: Tensor = thresholds[name]
-            ) -> tuple[Any, ...]:
+                _module: nn.Module, args: tuple[Tensor, ...], threshold: Tensor = thresholds[name]
+            ) -> tuple[Tensor, ...]:
                 return (sparsify_tokens(args[0], threshold, policy), *args[1:])
 
             handles.append(module.register_forward_pre_hook(hook))

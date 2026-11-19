@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import torch
 
@@ -28,6 +28,11 @@ from ...errors import ConfigError
 from ...runtime import KVCache
 from ...validation import check_choice, check_layers
 from .._kv import CacheWrapper, KVCacheTechnique, SlotStore, check_positional, layer_indices
+
+if TYPE_CHECKING:
+    from torch import nn
+
+    from ...arch import ArchAdapter
 
 __all__ = [
     "FP8_FORMATS",
@@ -68,7 +73,7 @@ class FP8KVConfig(TechniqueConfig):
         check_choice("scale", self.scale, FP8_SCALES)
         check_layers(self.layers)
 
-    def validate(self, adapter: Any) -> None:
+    def validate(self, adapter: ArchAdapter) -> None:
         check_layers(self.layers, adapter)
         check_positional(adapter, self.technique)
 
@@ -93,7 +98,7 @@ def token_scale(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
 
 
 @torch.no_grad()
-def calibrate_kv_absmax(adapter: Any, batches: Sequence[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+def calibrate_kv_absmax(adapter: ArchAdapter, batches: Sequence[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
     """Per-layer absolute maxima of the keys and of the values the model writes into its cache on ``batches``.
 
     The model runs each batch with a ``transformers`` ``DynamicCache`` whose ``update`` records the states it
@@ -103,21 +108,22 @@ def calibrate_kv_absmax(adapter: Any, batches: Sequence[torch.Tensor]) -> tuple[
     Returns:
         ``(keys, values)``, float32 tensors of shape ``[num_layers]`` on the CPU.
     """
-    from transformers import DynamicCache
+    from transformers import DynamicCache, PreTrainedConfig
 
     keys = torch.zeros(adapter.num_layers)
     values = torch.zeros(adapter.num_layers)
 
     class Recording(DynamicCache):
-        def update(self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: Any,
-                   **kwargs: Any) -> tuple[torch.Tensor, torch.Tensor]:
+        def update(self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: object,
+                   **kwargs: object) -> tuple[torch.Tensor, torch.Tensor]:
             keys[layer_idx] = torch.maximum(keys[layer_idx], key_states.detach().abs().amax().float().cpu())
             values[layer_idx] = torch.maximum(values[layer_idx], value_states.detach().abs().amax().float().cpu())
             return super().update(key_states, value_states, layer_idx, *args, **kwargs)
 
     model = adapter.model
+    config = cast(PreTrainedConfig, model.config)
     for batch in batches:
-        model(input_ids=batch.to(adapter.device), past_key_values=Recording(config=model.config), use_cache=True)
+        model(input_ids=batch.to(adapter.device), past_key_values=Recording(config=config), use_cache=True)
     return keys, values
 
 
@@ -175,6 +181,8 @@ class FP8Cache(CacheWrapper):
         if not self.covers(layer_idx):
             return keys, values
         out = self.dtypes[layer_idx]
+        key_scale: torch.Tensor | None
+        value_scale: torch.Tensor | None
         if self.config.scale == "token":
             key_scale = self.key_scales.view(layer_idx, self.active_rows)
             value_scale = self.value_scales.view(layer_idx, self.active_rows)
@@ -218,8 +226,10 @@ class FP8KVTechnique(KVCacheTechnique):
     info = TechniqueInfo(family=Family.KV_QUANTIZATION, saves=Saving.KV_MEMORY, lossless=False)
     order: ClassVar[int] = 11
     config: FP8KVConfig
+    key_scale: torch.Tensor  # buffers of scale="tensor" only
+    value_scale: torch.Tensor
 
-    def __init__(self, config: FP8KVConfig, adapter: Any) -> None:
+    def __init__(self, config: FP8KVConfig, adapter: ArchAdapter) -> None:
         super().__init__(config, adapter)
         if config.scale == "tensor":  # saved with the technique, so a loaded recipe skips the calibration
             self.register_buffer("key_scale", torch.full((adapter.num_layers,), float("nan")))
@@ -232,7 +242,7 @@ class FP8KVTechnique(KVCacheTechnique):
             return True
         return bool(torch.isfinite(self.key_scale).all() and torch.isfinite(self.value_scale).all())
 
-    def attach(self, model: Any, adapter: Any, context: AttachContext | None = None) -> None:
+    def attach(self, model: nn.Module, adapter: ArchAdapter, context: AttachContext | None = None) -> None:
         super().attach(model, adapter, context)
         if not self.calibrated:
             self.calibrate(token_batches(calibration_source(context, self.name)))

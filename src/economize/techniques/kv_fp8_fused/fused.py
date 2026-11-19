@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import torch
 
@@ -14,6 +14,9 @@ from ...errors import ConfigError, IncompatibleTechniquesError
 from ...runtime import KVCache
 from .._kv import CacheWrapper, layer_indices
 from ..kv_quant.fp8 import FP8Cache, FP8KVConfig, FP8KVTechnique
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
 
 __all__ = ["FusedFP8Cache", "FusedFP8KVConfig", "FusedFP8KVTechnique"]
 
@@ -35,7 +38,7 @@ class FusedFP8KVConfig(FP8KVConfig):
         if self.scale != "none":
             raise ConfigError("kv_fp8_fused supports scale='none' only; use kv_fp8 for per-token scales")
 
-    def validate(self, adapter: Any) -> None:
+    def validate(self, adapter: ArchAdapter) -> None:
         super().validate(adapter)
         implementation = str(getattr(adapter.config, "_attn_implementation", None) or "eager")
         if not accepts_fp8_kv(implementation):
@@ -51,7 +54,7 @@ class FusedFP8Cache(FP8Cache):
     the stored buffers as fp8 views. :meth:`read`, used outside attention, still returns the model's dtype."""
 
     def update(
-        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: Any, **kwargs: Any
+        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: object, **kwargs: object
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if not self.covers(layer_idx):
             return super().update(key_states, value_states, layer_idx, *args, **kwargs)
@@ -65,7 +68,7 @@ class FusedFP8KVTechnique(FP8KVTechnique):
     """KV cache in 8-bit floats, decoded inside the attention kernel (see :class:`FusedFP8KVConfig`)."""
 
     name: ClassVar[str] = FusedFP8KVConfig.technique
-    config_class: ClassVar[type[FusedFP8KVConfig]] = FusedFP8KVConfig  # type: ignore[assignment]
+    config_class: ClassVar[type[FusedFP8KVConfig]] = FusedFP8KVConfig
     info = TechniqueInfo(family=Family.KV_QUANTIZATION, saves=Saving.KV_MEMORY | Saving.LATENCY, lossless=False)
     graph_safe: ClassVar[bool] = True  # scale="none": layers get fp8 views of the fixed buffers, no side state
     config: FusedFP8KVConfig

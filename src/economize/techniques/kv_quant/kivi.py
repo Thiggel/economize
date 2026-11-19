@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, overload
+from typing import TYPE_CHECKING, ClassVar, overload
 
 import torch
 from torch import nn
@@ -102,7 +102,7 @@ class KIVIConfig(TechniqueConfig):
             return self.storage
         return "packed" if self.packable else "simulated"
 
-    def validate(self, adapter: Any) -> None:
+    def validate(self, adapter: ArchAdapter) -> None:
         check_layers(self.layers, adapter)
         check_positional(adapter, self.technique)
 
@@ -160,8 +160,8 @@ def kivi_bytes(tokens: int, keys_quantized: int, values_quantized: int, heads: i
 @overload
 def kivi_bytes(tokens: torch.Tensor, keys_quantized: torch.Tensor, values_quantized: torch.Tensor, heads: int,
                dim: int, element: int, config: KIVIConfig, scale_bytes: int = 2) -> torch.Tensor: ...
-def kivi_bytes(tokens: Any, keys_quantized: Any, values_quantized: Any, heads: int, dim: int, element: int,
-               config: KIVIConfig, scale_bytes: int = 2) -> Any:
+def kivi_bytes(tokens: int | torch.Tensor, keys_quantized: int | torch.Tensor, values_quantized: int | torch.Tensor,
+               heads: int, dim: int, element: int, config: KIVIConfig, scale_bytes: int = 2) -> float | torch.Tensor:
     """Bytes of one layer's K and V for ``tokens`` entries of which the first ``keys_quantized`` keys and
     ``values_quantized`` values are quantized (integers, or per-row tensors computed elementwise), with
     ``scale_bytes`` bytes per scale and per zero point (2 for fp16, 4 for the fp32 fallback)."""

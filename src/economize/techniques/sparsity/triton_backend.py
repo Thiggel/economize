@@ -25,16 +25,15 @@ much and wins whatever overlap the rows have; ``scripts/bench_teal_kernel.py`` m
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any, cast
+from typing import cast
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
-from torch.utils.hooks import RemovableHandle
 
 from ...core.metadata import WeightAccess
 from ...runtime.phase import current_phase
-from .backends import TEAL_BACKENDS, DenseBackend, Installed, TealBackend
+from .backends import TEAL_BACKENDS, DenseBackend, Installed, Removable, TealBackend
 from .sparsify import PhasePolicy, layer_tokens, sparsify, sparsify_tokens
 from .teal_gemv import MAX_ROWS, GemvConfig, teal_gemv, triton_available
 
@@ -87,7 +86,7 @@ class _KernelPatch:
         weight = module.weight
         weight.data = weight.data.t().contiguous().t()  # [out, in] view of a row-major [in, out] buffer
         self._storage_ptr = weight.data.data_ptr()
-        module.forward = self._make_forward(module, threshold, policy)  # type: ignore[method-assign]
+        module.__dict__["forward"] = self._make_forward(module, threshold, policy)  # instance attribute over the method
 
     def _make_forward(self, module: nn.Linear, threshold: Tensor, policy: PhasePolicy) -> Callable[..., Tensor]:
         def forward(x: Tensor) -> Tensor:
@@ -110,7 +109,7 @@ class _KernelPatch:
     def remove(self) -> None:
         module = self.module
         if self._had_forward:
-            module.forward = self._previous_forward  # type: ignore[method-assign, assignment]
+            module.__dict__["forward"] = self._previous_forward
         else:
             module.__dict__.pop("forward", None)
         weight = module.weight
@@ -140,14 +139,14 @@ class TritonBackend(TealBackend):
         usable = triton_available()
         patched = {name: m for name, m in modules.items() if usable and kernel_eligible(m)}
         rest = {name: m for name, m in modules.items() if name not in patched}
-        handles: list[Any] = []
+        handles: list[Removable] = []
         for name, module in patched.items():
             patch = _KernelPatch(cast(nn.Linear, module), thresholds[name], policy, max_rows)
             self.configure(patch)
             handles.append(patch)
         if rest:
             handles += DenseBackend().install(rest, thresholds, policy).handles
-        return Installed(cast(list[RemovableHandle], handles), masked=tuple(rest))
+        return Installed(handles, masked=tuple(rest))
 
     def configure(self, patch: _KernelPatch) -> None:
         """Choose the launch parameters of one installed map (:attr:`_KernelPatch.configs`,

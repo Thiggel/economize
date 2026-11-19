@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import torch
 
@@ -199,7 +199,7 @@ class FusedEvictionCache(EvictionCache):
     def masks_attention(self) -> bool:
         return self.evicted or self._static
 
-    def own_graph_state(self) -> Any:
+    def own_graph_state(self) -> object:
         return (self._capacity, self._stale) if self._static else None
 
     def pass_begin(self, frontier: list[int | None]) -> None:
@@ -345,5 +345,5 @@ class FusedKVEvictTechnique(KVEvictTechnique):
     def make_wrapper(self, cache: KVCache) -> CacheWrapper:
         return FusedEvictionCache(cache, self)
 
-    def describe(self) -> dict[str, Any]:
+    def describe(self) -> dict[str, object]:
         return {**super().describe(), "compacted": True}
