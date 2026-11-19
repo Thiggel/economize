@@ -160,8 +160,6 @@ src/economize/backends/vllm/serving/weights.py: "Tensor" not callable  [operator
 src/economize/backends/vllm/serving/weights.py: "Tensor" not callable  [operator]
 src/economize/backends/vllm/serving/weights.py: Item "Tensor" of "Tensor | Module" has no attribute "backend"  [union-attr]
 src/economize/backends/vllm/serving/weights.py: Item "Tensor" of "Tensor | Module" has no attribute "backend"  [union-attr]
-src/economize/decoding/passes.py: Argument 5 to "exact" of "DecodeGraphs" has incompatible type "list[int]"; expected "list[int | None]"  [arg-type]
-src/economize/decoding/passes.py: Argument 5 to "tree" of "DecodeGraphs" has incompatible type "list[int]"; expected "list[int | None]"  [arg-type]
 src/economize/techniques/dynamic_depth/dmtd.py: "JumpConfig" has no attribute "cycle_length"  [attr-defined]
 src/economize/techniques/dynamic_depth/free.py: "Tensor" not callable  [operator]
 src/economize/techniques/dynamic_depth/free.py: Argument 1 to "layer" of "ArchAdapter" has incompatible type "Tensor | Module"; expected "int"  [arg-type]
