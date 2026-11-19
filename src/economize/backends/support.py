@@ -21,7 +21,7 @@ a recipe or on the model are raised by the engine's own checks when a model is s
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import ClassVar, Protocol, TypeVar
 
 from ..core.compatibility import BackendSupport, SupportStatus
 from ..core.config import TechniqueConfig
@@ -40,8 +40,23 @@ class _Configured:
     config: TechniqueConfig
 
 
+class _Adapter(Protocol):
+    """What :func:`serving_support` reads of an engine's technique adapter (a vLLM or SGLang ``*Technique``).
+
+    ``simulation_of`` and ``reason_of`` are optional and looked up with :func:`getattr`.
+    """
+
+    support: ClassVar[Support]
+    reason: ClassVar[str]
+
+    def level(self, technique: _Configured, /) -> Support: ...
+
+
+_A = TypeVar("_A", bound=_Adapter)
+
+
 def serving_support(
-    engine: str, adapters: Registry[Any], technique: type[Technique], config: TechniqueConfig | None
+    engine: str, adapters: Registry[type[_A]], technique: type[Technique], config: TechniqueConfig | None
 ) -> BackendSupport:
     """How ``engine``, whose adapters by technique name are ``adapters``, runs ``technique`` with ``config``."""
     if technique.name not in adapters:
