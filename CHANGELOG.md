@@ -8,8 +8,10 @@
   `huggingface_hub<3`), since economize relies on transformers' cache and modeling classes and on torch custom ops
   that a major release may change.
 - The sdist and wheel ship a `NOTICE` file that names the third-party code and data the distribution contains (the
-  Medusa tree, vLLM's Marlin packing, and the MInference, SmoothQuant, KVCache-Factory and TriForce transcriptions
-  that the tests use as references) with their licenses and copyright notices.
+  Medusa tree, vLLM's Marlin packing, and the MInference, SmoothQuant and KVCache-Factory transcriptions that the
+  tests use as references) with their licenses and copyright notices.
+- The TriForce chunk-selection test compares with a reference written from the paper (Sun et al., 2024, Section 4.1)
+  instead of a transcription of the official code, whose repository publishes no license.
 - Checkpoints record a `schema_version` in `economize_config.json`. Loading upgrades older checkpoints through the
   registered steps of `economize.core.serialization.MIGRATIONS` (checkpoints without a version, including effkit
   ones, are version 0) and refuses a newer schema with the release to install.

@@ -85,9 +85,9 @@ the kernel's blocks; smaller chunks select more finely and skip less.
 - The official TriForce scores the chunks with the query of the first single-token decode step after the prefill and
   rescores at every later exact step (`update_graph_cache_retrieval`). economize scores once per generation with the
   query of the first draft step, which is the query of the first generated token, and keeps the selection for the
-  whole generation. The selection rule itself (mean chunk keys, the first chunk plus the top `select_sets - 1`
-  others) equals the official one for multi-head attention; `tests/unit/test_sparse_kv_draft.py` compares it with a
-  transcription of `RetrievalCache.init_graph_cache` (Infini-AI-Lab/TriForce @ 164c8c0, `models/cache.py`).
+  whole generation. The selection rule (the first chunk plus the `select_sets - 1` other chunks whose mean key
+  scores highest against the query) follows Section 4.1 of the paper; `tests/unit/test_sparse_kv_draft.py`
+  compares it with a reference written from that section.
 - The official code keeps a separate compacted cache of `max_budget` slots and appends the generated tokens to it.
   economize gathers the chunks and the tail from the shared cache at every draft layer, so the draft reads `budget`
   prompt slots plus the tail (the generated slots and the prompt rest after the last whole chunk) and no second
