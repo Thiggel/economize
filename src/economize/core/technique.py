@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
+from typing import TYPE_CHECKING, ClassVar, TypeVar
 
 from torch import nn
 
@@ -85,8 +85,8 @@ class AttachContext:
     """
 
     techniques: tuple[Technique, ...] = ()
-    calibration: Any = None
-    options: dict[str, Any] = field(default_factory=dict)
+    calibration: object = None
+    options: dict[str, object] = field(default_factory=dict)
 
     def layer_copies(self) -> dict[int, list[nn.Module]]:
         """The :meth:`Technique.layer_copies` of every technique of the recipe, by 1-based layer index."""
@@ -138,7 +138,7 @@ class Technique(nn.Module):
     #: whose default is :meth:`attach` on the view's adapter (see :class:`DraftCopies`).
     draft_copies: ClassVar[DraftCopies | None] = None
 
-    def __init_subclass__(cls, **kwargs: Any) -> None:
+    def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
         info = getattr(cls, "info", None)
         if info is not None:

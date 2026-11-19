@@ -19,7 +19,6 @@ from __future__ import annotations
 import sys
 import warnings
 from collections.abc import Mapping, Sequence
-from typing import Any
 
 import torch
 
@@ -74,7 +73,7 @@ def attach_techniques(
     *,
     states: States | None = None,
     calibration: object = None,
-    options: Mapping[str, Any] | None = None,
+    options: Mapping[str, object] | None = None,
 ) -> list[Technique]:
     """Build the techniques of ``configs``, load ``states`` (before anything attaches) and attach them in order.
 
@@ -202,7 +201,7 @@ def _add_note(error: BaseException, note: str) -> None:
     if sys.version_info >= (3, 11):
         error.add_note(note)
     else:
-        error.__notes__ = [*getattr(error, "__notes__", []), note]  # type: ignore[attr-defined]  # declared from 3.11
+        setattr(error, "__notes__", [*getattr(error, "__notes__", []), note])  # noqa: B010  # declared from 3.11
 
 
 def _roll_back(attached: list[Technique], failed: Technique | None, error: BaseException) -> None:

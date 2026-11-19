@@ -30,9 +30,7 @@ from __future__ import annotations
 import enum
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, ClassVar
-
-from ..registry import Registry
+from typing import TYPE_CHECKING, ClassVar, Protocol
 
 if TYPE_CHECKING:
     from .config import TechniqueConfig
@@ -239,6 +237,18 @@ def storage_conflict(
     return access.refusal(name, other_name, storage)
 
 
+class NamedEntries(Protocol):
+    """The read side of a :class:`~economize.registry.Registry` of any entry type, as :class:`KernelChoice` uses it."""
+
+    def get(self, name: str) -> object:
+        """The entry registered as ``name``."""
+        ...
+
+    def __contains__(self, name: object) -> bool:
+        """Whether ``name`` is registered."""
+        ...
+
+
 @dataclass(frozen=True)
 class KernelChoice:
     """The configuration field that selects a technique's kernel, and the registry it names.
@@ -250,7 +260,7 @@ class KernelChoice:
     """
 
     field: str
-    registry: Registry[Any]
+    registry: NamedEntries
 
     def entry(self, config: TechniqueConfig | type[TechniqueConfig]) -> object:
         """The registry entry ``config`` selects (``config`` may be a config class: its default), ``None`` if the
