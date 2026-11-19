@@ -22,9 +22,14 @@ the number of heads.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from ....errors import ConfigError
+
+if TYPE_CHECKING:
+    from vllm.config import VllmConfig
+    from vllm.v1.worker.gpu.input_batch import InputBatch
 
 __all__: list[str] = []
 
@@ -40,7 +45,7 @@ else:
     class HydraSpeculator(HeadSpeculator):
         """Hydra drafting in the V2 model runner (see the module docstring)."""
 
-        def __init__(self, vllm_config: Any, device: Any, *args: Any, **kwargs: Any) -> None:
+        def __init__(self, vllm_config: VllmConfig, device: torch.device, *args: object, **kwargs: object) -> None:
             super().__init__(vllm_config, device, *args, **kwargs)
             self.history: torch.Tensor | None = None  # [rows, (K + 1) d] in the drafter's dtype
 
@@ -52,7 +57,8 @@ else:
             self.history = torch.zeros(rows, (spec.num_heads + 1) * spec.hidden_size, dtype=self.model.dtype,
                                        device=self.device)
 
-        def base_states(self, input_batch: Any, attn_metadata: Any, slot_mappings: Any, hidden: torch.Tensor,
+        def base_states(self, input_batch: InputBatch, attn_metadata: Mapping[str, object] | None,
+                        slot_mappings: dict[str, torch.Tensor], hidden: torch.Tensor,
                         skip_attention: bool) -> torch.Tensor:
             """With Hydra++ the prefix layer over the verification pass (writes its K/V); the base states ``[T, d]``."""
             name = self.model.prefix_layer_name

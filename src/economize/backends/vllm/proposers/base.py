@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 import numpy as np
 
@@ -25,6 +25,9 @@ from ....core.config import TechniqueConfig, nested_config, nested_dict
 from ....errors import ConfigError
 from ....registry import Registry
 from ...exporters import UnsupportedBackendError
+
+if TYPE_CHECKING:
+    from vllm.config import VllmConfig
 
 __all__ = [
     "CONFIG_KEY",
@@ -102,7 +105,7 @@ def proposer_for(config: TechniqueConfig, vocab_size: int) -> TokenProposer:
     return PROPOSERS.get(config.technique)(config, vocab_size)
 
 
-def proposer_entry(config: TechniqueConfig) -> dict[str, Any]:
+def proposer_entry(config: TechniqueConfig) -> dict[str, object]:
     """The JSON entry of ``config`` for ``additional_config[CONFIG_KEY]`` (``{"technique", "config"}``).
 
     Raises:
@@ -113,7 +116,7 @@ def proposer_entry(config: TechniqueConfig) -> dict[str, Any]:
     return nested_dict(config)
 
 
-def build_proposer(entry: Mapping[str, Any], vocab_size: int) -> TokenProposer:
+def build_proposer(entry: Mapping[str, object], vocab_size: int) -> TokenProposer:
     """The proposer an entry written by :func:`proposer_entry` describes."""
     return proposer_for(nested_config(dict(entry)), vocab_size)
 
@@ -139,7 +142,7 @@ class EconomizeProposer:
         ConfigError: ``additional_config`` names no economize drafter.
     """
 
-    def __init__(self, vllm_config: Any) -> None:
+    def __init__(self, vllm_config: VllmConfig) -> None:
         self.num_speculative_tokens = int(vllm_config.speculative_config.num_speculative_tokens)
         model = vllm_config.model_config
         self.max_model_len = int(model.max_model_len)
@@ -150,11 +153,11 @@ class EconomizeProposer:
                               "economize.backends.vllm.serving.to_vllm)")
         self.proposer = build_proposer(entry, int(model.get_vocab_size()))
 
-    def load_model(self, *args: Any, **kwargs: Any) -> None:
+    def load_model(self, *args: object, **kwargs: object) -> None:
         """Nothing to load (vLLM calls it with the target model)."""
 
     def propose(self, sampled_token_ids: Sequence[Sequence[int]], num_tokens_no_spec: np.ndarray,
-                token_ids_cpu: np.ndarray, slot_mappings: Any = None, **kwargs: Any) -> list[list[int]]:
+                token_ids_cpu: np.ndarray, slot_mappings: object = None, **kwargs: object) -> list[list[int]]:
         """The draft tokens of every request of the batch.
 
         Args:

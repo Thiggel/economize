@@ -20,9 +20,16 @@ drafter.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from ....errors import ConfigError
+
+if TYPE_CHECKING:
+    from torch import nn
+    from vllm.config import VllmConfig
+    from vllm.v1.worker.gpu.dp_utils import DPSyncState
+    from vllm.v1.worker.gpu.input_batch import InputBatch
 
 __all__: list[str] = []
 
@@ -45,7 +52,7 @@ else:
     class HeadSpeculator(JumpSpeculator):
         """Drafting with trained heads in the V2 model runner (see the module docstring)."""
 
-        def __init__(self, vllm_config: Any, device: Any, *args: Any, **kwargs: Any) -> None:
+        def __init__(self, vllm_config: VllmConfig, device: torch.device, *args: object, **kwargs: object) -> None:
             super().__init__(vllm_config, device, *args, **kwargs)
             self.no_state: torch.Tensor | None = None  # [rows, 1]: the state vLLM's update kernel copies
 
@@ -68,13 +75,14 @@ else:
             so that it can be captured); every step ends in :meth:`emit`."""
             raise NotImplementedError
 
-        def base_states(self, input_batch: Any, attn_metadata: Any, slot_mappings: Any, hidden: torch.Tensor,
+        def base_states(self, input_batch: InputBatch, attn_metadata: Mapping[str, object] | None,
+                        slot_mappings: dict[str, torch.Tensor], hidden: torch.Tensor,
                         skip_attention: bool) -> torch.Tensor:
             """The base states ``[T, d]`` from the target's last hidden states ``[T, d]`` (``model.base``)."""
             return self.model.base(hidden)
 
         # ---- loading ---------------------------------------------------------------------------------------------
-        def load_model(self, target_model: Any) -> None:
+        def load_model(self, target_model: nn.Module) -> None:
             super(JumpSpeculator, self).load_model(target_model)  # no jump sources
             limit = self.draft_limit()
             if self.num_speculative_steps > limit:
@@ -97,11 +105,15 @@ else:
 
         # ---- drafting --------------------------------------------------------------------------------------------
         @torch.inference_mode()
-        def propose(self, input_batch: Any, attn_metadata: Any, slot_mappings: Any, last_hidden_states: Any,
-                    aux_hidden_states: Any, num_sampled: Any, num_rejected: Any, last_sampled: Any,
-                    next_prefill_tokens: Any, temperature: Any, seeds: Any, dp_sync: Any = None,
-                    dummy_run: bool = False, skip_attn_for_dummy_run: bool = False, mm_inputs: Any = None,
+        def propose(self, input_batch: InputBatch, attn_metadata: Mapping[str, object] | None,
+                    slot_mappings: dict[str, torch.Tensor], last_hidden_states: torch.Tensor,
+                    aux_hidden_states: list[torch.Tensor] | None, num_sampled: torch.Tensor,
+                    num_rejected: torch.Tensor, last_sampled: torch.Tensor, next_prefill_tokens: torch.Tensor,
+                    temperature: torch.Tensor, seeds: torch.Tensor, dp_sync: DPSyncState | None = None,
+                    dummy_run: bool = False, skip_attn_for_dummy_run: bool = False,
+                    mm_inputs: tuple[list[torch.Tensor], torch.Tensor] | None = None,
                     is_profile: bool = False) -> torch.Tensor:
+            assert aux_hidden_states is not None  # the drafter declares the last layer as its auxiliary layer
             skip = attn_metadata is None or (dummy_run and skip_attn_for_dummy_run)
             states = self.base_states(input_batch, attn_metadata, slot_mappings, aux_hidden_states[0], skip)
             num_reqs = input_batch.num_reqs
@@ -134,8 +146,9 @@ else:
                 self._round(num_reqs, batch_desc.num_tokens, None, None, num_tokens_across_dp, batch_desc.cg_mode)
             return self.draft_tokens[:num_reqs]
 
-        def _round(self, num_reqs: int, num_tokens: int, attn_metadata: Any, slot_mappings: Any,
-                   num_tokens_across_dp: Any, cudagraph_runtime_mode: Any = None) -> None:
+        def _round(self, num_reqs: int, num_tokens: int, attn_metadata: Mapping[str, object] | None,
+                   slot_mappings: dict[str, torch.Tensor] | None, num_tokens_across_dp: torch.Tensor | None,
+                   cudagraph_runtime_mode: CUDAGraphMode | None = None) -> None:
             """The whole round (one CUDA graph): :meth:`draft_steps` in a forward context."""
             self._prepare_eplb_forward(num_reqs)
             mode = CUDAGraphMode.NONE if cudagraph_runtime_mode is None else cudagraph_runtime_mode

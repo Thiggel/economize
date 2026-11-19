@@ -14,7 +14,10 @@ backend) is served as the chain of the head's own samples, and ``num_speculative
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from vllm.config import VllmConfig
 
 __all__: list[str] = []
 
@@ -28,7 +31,7 @@ else:
     class RedrafterSpeculator(HeadSpeculator):
         """ReDrafter drafting in the V2 model runner (see the module docstring)."""
 
-        def __init__(self, vllm_config: Any, device: Any, *args: Any, **kwargs: Any) -> None:
+        def __init__(self, vllm_config: VllmConfig, device: torch.device, *args: object, **kwargs: object) -> None:
             super().__init__(vllm_config, device, *args, **kwargs)
             self.context: torch.Tensor | None = None  # [rows, d] in the drafter's dtype
             self.state: torch.Tensor | None = None  # [rows, d] in the drafter's dtype

@@ -13,9 +13,14 @@ The V1 runner is refused, as for the jump drafter.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from ....errors import ConfigError
+
+if TYPE_CHECKING:
+    from vllm.v1.worker.gpu.dp_utils import DPSyncState
+    from vllm.v1.worker.gpu.input_batch import InputBatch
 
 __all__: list[str] = []
 
@@ -32,17 +37,23 @@ else:
         """Kangaroo drafting in the V2 model runner (see the module docstring)."""
 
         @torch.inference_mode()
-        def propose(self, input_batch: Any, attn_metadata: Any, slot_mappings: Any, last_hidden_states: Any,
-                    aux_hidden_states: Any, *args: Any, dummy_run: bool = False,
-                    skip_attn_for_dummy_run: bool = False, **kwargs: Any) -> torch.Tensor:
+        def propose(self, input_batch: InputBatch, attn_metadata: Mapping[str, object] | None,
+                    slot_mappings: dict[str, torch.Tensor], last_hidden_states: torch.Tensor,
+                    aux_hidden_states: list[torch.Tensor] | None, num_sampled: torch.Tensor,
+                    num_rejected: torch.Tensor, last_sampled: torch.Tensor, next_prefill_tokens: torch.Tensor,
+                    temperature: torch.Tensor, seeds: torch.Tensor, dp_sync: DPSyncState | None = None,
+                    dummy_run: bool = False, skip_attn_for_dummy_run: bool = False,
+                    mm_inputs: tuple[list[torch.Tensor], torch.Tensor] | None = None,
+                    is_profile: bool = False) -> torch.Tensor:
             if attn_metadata is not None and not (dummy_run and skip_attn_for_dummy_run):
+                assert aux_hidden_states is not None  # the adapter reads the state after the exit layer
                 self._adapter_prefill(input_batch, attn_metadata, slot_mappings, aux_hidden_states)
             return super().propose(input_batch, attn_metadata, slot_mappings, last_hidden_states, aux_hidden_states,
-                                   *args, dummy_run=dummy_run, skip_attn_for_dummy_run=skip_attn_for_dummy_run,
-                                   **kwargs)
+                                   num_sampled, num_rejected, last_sampled, next_prefill_tokens, temperature, seeds,
+                                   dp_sync, dummy_run, skip_attn_for_dummy_run, mm_inputs, is_profile)
 
-        def _adapter_prefill(self, input_batch: Any, attn_metadata: Any, slot_mappings: Any,
-                             aux_hidden_states: Any) -> None:
+        def _adapter_prefill(self, input_batch: InputBatch, attn_metadata: Mapping[str, object],
+                             slot_mappings: dict[str, torch.Tensor], aux_hidden_states: list[torch.Tensor]) -> None:
             name = self.model.adapter_layer_name
             if isinstance(attn_metadata, dict) and name not in attn_metadata:
                 raise ConfigError(f"the target's attention metadata has no entry for the Kangaroo adapter layer "
