@@ -29,6 +29,7 @@ from typing import Any, cast
 
 import torch
 
+from ..decoding.config import DecodeConfig
 from ..decoding.verifiers import VERIFIERS
 from ..errors import ConfigError
 from ..unwrap import base_model_of  # re-exported: integrations import it from here
@@ -56,7 +57,7 @@ def _drafts(model: Any, decoding: Any) -> bool:
     return getattr(model, "drafting_technique", None) is not None and getattr(decoding, "cycle_length", 1) > 1
 
 
-def _sampling_decoding(model: Any, decoding: Any) -> Any:
+def _sampling_decoding(model: Any, decoding: DecodeConfig | None) -> DecodeConfig | None:
     """The decoding options for ``do_sample=True``.
 
     ``transformers``' ``pipeline("text-generation")`` and many generation configs sample by default. A drafting
@@ -64,7 +65,7 @@ def _sampling_decoding(model: Any, decoding: Any) -> Any:
     verifier), which draws tokens from the same distribution as sampling without drafts. A verifier named
     explicitly is kept, and one that needs a deterministic selector fails here, before the prompt is streamed.
     """
-    if not _drafts(model, decoding):
+    if decoding is None or not _drafts(model, decoding):
         return decoding
     if not VERIFIERS.get(decoding.verifier_name).requires_greedy:
         return decoding
