@@ -27,7 +27,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import pairwise
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 
@@ -141,11 +141,12 @@ class HiddenTransferDrafterSpec:
         return cls.from_dict(block)
 
     @classmethod
-    def of(cls, technique: HiddenTransferTechnique) -> HiddenTransferDrafterSpec:
+    def of(cls, technique: nn.Module) -> HiddenTransferDrafterSpec:
         """The spec of an attached :class:`~economize.techniques.dynamic_depth.HiddenTransferTechnique`."""
-        adapter = technique.adapter
+        transfer = cast("HiddenTransferTechnique", technique)  # the exporters hand over the attached technique
+        adapter = transfer.adapter
         return cls(num_layers=adapter.num_layers, hidden_size=adapter.hidden_size,
-                   transfer_layers=tuple(technique.transfer_layers), param_dtype=technique.config.param_dtype)
+                   transfer_layers=tuple(transfer.transfer_layers), param_dtype=transfer.config.param_dtype)
 
 
 def drafter_state(technique: nn.Module) -> dict[str, torch.Tensor]:
