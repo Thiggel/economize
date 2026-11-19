@@ -18,6 +18,7 @@ from ....registry import import_submodules
 from .base import (
     PLAN_FILE,
     VLLM_TECHNIQUES,
+    Configured,
     PlanBuilder,
     Role,
     Support,
@@ -33,6 +34,7 @@ from .base import (
 __all__ = [
     "PLAN_FILE",
     "VLLM_TECHNIQUES",
+    "Configured",
     "PlanBuilder",
     "Role",
     "Support",
