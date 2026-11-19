@@ -22,11 +22,16 @@ The tensors are keyed ``redrafter.<name>`` as in the technique's ``state_dict`` 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, cast
 
 import torch
 
 from ...errors import ConfigError
+
+if TYPE_CHECKING:
+    from torch import nn
+
+    from .._drafting.formats import JSONObject
 
 __all__ = ["CONFIG_KEY", "FORMAT_VERSION", "WEIGHTS_PREFIX", "RedrafterDrafterSpec", "drafter_state"]
 
@@ -81,7 +86,7 @@ class RedrafterDrafterSpec:
         """Whether an input projection maps ``[h_t; s_k]`` (``2 d``) to :attr:`width`."""
         return self.width != 2 * self.hidden_size
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "format_version": FORMAT_VERSION,
             "num_layers": self.num_layers,
@@ -96,7 +101,7 @@ class RedrafterDrafterSpec:
         }
 
     @classmethod
-    def from_dict(cls, block: dict[str, Any]) -> RedrafterDrafterSpec:
+    def from_dict(cls, block: JSONObject) -> RedrafterDrafterSpec:
         version = int(block.get("format_version", 1))
         if version > FORMAT_VERSION:
             raise ConfigError(f"the {CONFIG_KEY!r} block has format version {version}; this economize reads up to "
@@ -114,7 +119,7 @@ class RedrafterDrafterSpec:
         )
 
     @classmethod
-    def from_hf_config(cls, config: Any) -> RedrafterDrafterSpec:
+    def from_hf_config(cls, config: object) -> RedrafterDrafterSpec:
         """Read the block from a configuration object or dict (top level, or in ``transformer_layer_config``)."""
         data = config if isinstance(config, dict) else getattr(config, "__dict__", {})
         nested = data.get("transformer_layer_config") or {}
@@ -124,8 +129,12 @@ class RedrafterDrafterSpec:
         return cls.from_dict(block)
 
     @classmethod
-    def of(cls, technique: Any) -> RedrafterDrafterSpec:
+    def of(cls, technique: nn.Module) -> RedrafterDrafterSpec:
         """The spec of an attached :class:`~economize.techniques.redrafter.RedrafterTechnique`."""
+        from .._export import technique_as
+        from .technique import RedrafterTechnique
+
+        technique = technique_as(technique, RedrafterTechnique)
         adapter, config = technique.adapter, technique.config
         d = int(adapter.hidden_size)
         return cls(
@@ -141,6 +150,6 @@ class RedrafterDrafterSpec:
         )
 
 
-def drafter_state(technique: Any) -> dict[str, torch.Tensor]:
+def drafter_state(technique: nn.Module) -> dict[str, torch.Tensor]:
     """The technique's tensors (detached), keyed as in its ``state_dict``."""
     return {name: tensor.detach() for name, tensor in technique.state_dict().items()}

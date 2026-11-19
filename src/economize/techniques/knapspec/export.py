@@ -22,13 +22,18 @@ except an identity readout when ``r`` is below the last layer.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING
 
 import torch
 
 from ...errors import ConfigError
 from ..jump.export import JumpDrafterSpec
 from ..layer_skip.export import jump_config, jump_state_dict
+
+if TYPE_CHECKING:
+    from torch import nn
+
+    from .._drafting.formats import JSONObject
 
 __all__ = ["CONFIG_KEY", "FORMAT_VERSION", "KnapSpecDrafterSpec", "drafter_state"]
 
@@ -69,7 +74,7 @@ class KnapSpecDrafterSpec:
         if self.draft_length < 1:
             raise ConfigError(f"draft_length must be positive, got {self.draft_length}")
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "format_version": FORMAT_VERSION,
             "jump": self.path.to_dict(),
@@ -79,7 +84,7 @@ class KnapSpecDrafterSpec:
         }
 
     @classmethod
-    def from_dict(cls, block: dict[str, Any]) -> KnapSpecDrafterSpec:
+    def from_dict(cls, block: JSONObject) -> KnapSpecDrafterSpec:
         version = int(block.get("format_version", 1))
         if version > FORMAT_VERSION:
             raise ConfigError(f"the {CONFIG_KEY!r} block has format version {version}; this economize reads up to "
@@ -92,7 +97,7 @@ class KnapSpecDrafterSpec:
         )
 
     @classmethod
-    def from_hf_config(cls, config: Any) -> KnapSpecDrafterSpec:
+    def from_hf_config(cls, config: object) -> KnapSpecDrafterSpec:
         """Read the block from a configuration object or dict (top level, or in ``transformer_layer_config``)."""
         data = config if isinstance(config, dict) else getattr(config, "__dict__", {})
         nested = data.get("transformer_layer_config") or {}
@@ -102,7 +107,7 @@ class KnapSpecDrafterSpec:
         return cls.from_dict(block)
 
     @classmethod
-    def of(cls, technique: Any) -> KnapSpecDrafterSpec:
+    def of(cls, technique: nn.Module) -> KnapSpecDrafterSpec:
         """The spec of the current skip set of an attached :class:`~economize.techniques.knapspec.KnapSpecTechnique`.
 
         Raises:
@@ -110,6 +115,10 @@ class KnapSpecDrafterSpec:
                 first search; a generation leaves the set of its last search in place, or set one by hand), or the
                 set skips nothing.
         """
+        from .._export import technique_as
+        from .technique import KnapSpecTechnique
+
+        technique = technique_as(technique, KnapSpecTechnique)
         plan = technique.plan
         if plan is None:
             raise ConfigError("the KnapSpec technique has no skip set yet: run a generation (its search sets "
@@ -125,7 +134,7 @@ class KnapSpecDrafterSpec:
         return spec
 
 
-def drafter_state(technique: Any) -> dict[str, torch.Tensor]:
+def drafter_state(technique: nn.Module) -> dict[str, torch.Tensor]:
     """The drafter's tensors under the jump technique's names: an identity ``readout.*`` when ``r < L``, else none.
 
     Raises:
