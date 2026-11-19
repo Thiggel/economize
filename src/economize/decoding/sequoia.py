@@ -25,13 +25,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 import torch
 
 from ..errors import ConfigError
 from ..runtime.transfer import device_tensor
+from ..validation import is_positive_int
 from .cost import CostKind
 from .policies import POLICIES
 from .protocols import Draft, Drafter, Verifier, draft_footprint
@@ -40,6 +41,8 @@ from .tree_search import TreePolicy, TreeSearchDrafter, weak_method
 if TYPE_CHECKING:
     from ..runtime.runner import ExactPass
     from .config import DecodeConfig
+    from .graphs import GraphWrap
+    from .loop import CycleDecoder
     from .request import DraftRequest
 
 __all__ = [
@@ -121,7 +124,8 @@ class StaticTree:
 
 def _acceptance_matrix(acceptance: Sequence[float] | Sequence[Sequence[float]], depth: int) -> np.ndarray:
     """The acceptance rates as a matrix ``[depth, K]`` (row ``l``: after a node of depth ``l``, the root being 0)."""
-    rows: Sequence[Any] = acceptance if acceptance and isinstance(acceptance[0], Sequence) else [acceptance]
+    rows = (cast("Sequence[Sequence[float]]", acceptance) if acceptance and isinstance(acceptance[0], Sequence)
+            else [cast("Sequence[float]", acceptance)])
     matrix = [[float(v) for v in row] for row in rows]
     width = max(len(row) for row in matrix)
     if width == 0:
@@ -250,7 +254,7 @@ _OPTIONS = ("acceptance", "paths", "total_tokens", "depth", "verify_latency", "d
 
 
 def _tree_from_config(config: DecodeConfig) -> tuple[StaticTree, bool]:
-    options: Mapping[str, Any] = config.draft_policy_options
+    options: Mapping[str, object] = config.draft_policy_options
     unknown = sorted(set(options) - set(_OPTIONS))
     if unknown:
         raise ConfigError(f"draft_policy 'sequoia' has no options {unknown}; it takes {', '.join(_OPTIONS)}")
@@ -264,19 +268,24 @@ def _tree_from_config(config: DecodeConfig) -> tuple[StaticTree, bool]:
         extra = sorted(set(options) & {"total_tokens", "depth", "verify_latency", "draft_latency"})
         if extra:
             raise ConfigError(f"draft_policy 'sequoia' builds no tree from an explicit paths option; drop {extra}")
-        return StaticTree.from_paths(options["paths"]), record
+        return StaticTree.from_paths(cast("Sequence[Sequence[int]]", options["paths"])), record
     depth = options.get("depth", max(config.cycle_length - 1, 1))
     total = options.get("total_tokens", 32)
-    for name, value in (("depth", depth), ("total_tokens", total)):
-        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-            raise ConfigError(f"draft_policy 'sequoia' needs a positive integer {name}, got {value!r}")
+    if not is_positive_int(depth):
+        raise ConfigError(f"draft_policy 'sequoia' needs a positive integer depth, got {depth!r}")
+    if not is_positive_int(total):
+        raise ConfigError(f"draft_policy 'sequoia' needs a positive integer total_tokens, got {total!r}")
     latency = options.get("verify_latency")
     draft = options.get("draft_latency", 0.0)
     if isinstance(draft, bool) or not isinstance(draft, (int, float)) or draft < 0:
         raise ConfigError(f"draft_latency must be a number >= 0, got {draft!r}")
     if "draft_latency" in options and latency is None:
         raise ConfigError("draft_latency needs verify_latency")
-    return sequoia_tree(options["acceptance"], total, depth, verify_latency=latency, draft_latency=float(draft)), record
+    # The rates and latencies are validated by sequoia_tree.
+    acceptance = cast("Sequence[float] | Sequence[Sequence[float]]", options["acceptance"])
+    tree = sequoia_tree(acceptance, total, depth, verify_latency=cast("Sequence[float] | None", latency),
+                        draft_latency=float(draft))
+    return tree, record
 
 
 @POLICIES.register("sequoia")
@@ -373,7 +382,7 @@ class SequoiaDrafter(TreeSearchDrafter):
     def draft_capacity(self, cycle_length: int) -> int:
         return max(self.tree.size, self.tree.forwarded)
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: GraphWrap) -> bool:
         if not self.inner.enable_graphs(wrap):
             return False
         self._root_fn = wrap(weak_method(self._root))
@@ -388,12 +397,12 @@ class SequoiaDrafter(TreeSearchDrafter):
 
     # ---- drafting ---------------------------------------------------------------------------------------------
     def propose(self, request: DraftRequest) -> Draft:
-        inner: Any = self.inner
+        inner = self._stepper
         plan, batch, device = self._plan, request.batch_size, request.device
         consts = self._const(torch.device(device))
-        footprint = draft_footprint(inner)
+        footprint = draft_footprint(self.inner)
         inner.tree_begin(request)
-        logits = inner.step(request.tokens, request.positions, None)
+        logits = self.inner.step(request.tokens, request.positions, None)
         for b, cost in enumerate(request.costs):
             cost.record_footprint(CostKind.DRAFT, 1, request.ends[b] - 1, footprint, step=0)
         n_states = len(inner.tree_state())
@@ -432,7 +441,7 @@ class SequoiaDrafter(TreeSearchDrafter):
         depth ``d + 1`` and, when that depth has nodes with children, their tokens and states."""
         plan = self._plan
         d = plan.depth_of_forwarded[forwarded.shape[1]]
-        logits, out = self.inner.tree_step(frontier_tokens, forwarded, base, *states)  # type: ignore[attr-defined]
+        logits, out = self._stepper.tree_step(frontier_tokens, forwarded, base, *states)
         consts = self._const(frontier_tokens.device)
         here = frontier_tokens.device
         top = logits.float().topk(plan.width[d], -1).indices.to(here)
@@ -524,9 +533,16 @@ class _Consts:
         self.parents = make(plan.parents)[None]
 
 
-def measure_acceptance(model: Any, prompts: Sequence[torch.Tensor], max_new_tokens: int, *, depth: int = 6,
-                       width: int = 8, per_depth: bool = False,
-                       decoding: Mapping[str, Any] | None = None) -> tuple[float, ...] | tuple[tuple[float, ...], ...]:
+class _Decodes(Protocol):
+    """What :func:`measure_acceptance` uses of an :class:`~economize.EfficientModel`."""
+
+    def decoder(self, decoding: DecodeConfig | None = ...) -> CycleDecoder: ...
+
+
+def measure_acceptance(
+    model: _Decodes, prompts: Sequence[torch.Tensor], max_new_tokens: int, *, depth: int = 6, width: int = 8,
+    per_depth: bool = False, decoding: Mapping[str, object] | None = None,
+) -> tuple[float, ...] | tuple[tuple[float, ...], ...]:
     """The acceptance vector of ``model``'s drafter on ``prompts``, for the ``acceptance`` option of ``sequoia``.
 
     Decodes the prompts with the probe tree of :func:`probe_paths` (``depth`` deep, ``width`` children per spine node)
@@ -543,9 +559,10 @@ def measure_acceptance(model: Any, prompts: Sequence[torch.Tensor], max_new_toke
     """
     from .config import DecodeConfig
 
-    config = DecodeConfig(cycle_length=depth + 1, draft_policy="sequoia",
-                          draft_policy_options={"paths": probe_paths(depth, width), "record_acceptance": True},
-                          **dict(decoding or {}))
+    build: Callable[..., DecodeConfig] = DecodeConfig  # decoding holds further DecodeConfig fields, checked there
+    config = build(cycle_length=depth + 1, draft_policy="sequoia",
+                   draft_policy_options={"paths": probe_paths(depth, width), "record_acceptance": True},
+                   **dict(decoding or {}))
     decoder = model.decoder(config)
     drafter = decoder.active_drafter
     if not isinstance(drafter, SequoiaDrafter):

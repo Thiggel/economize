@@ -19,8 +19,8 @@ import importlib.util
 import math
 import os
 import weakref
-from collections.abc import Sequence
-from typing import Any
+from collections.abc import Callable, Sequence
+from typing import Protocol, cast
 
 import torch
 
@@ -131,8 +131,14 @@ def _evict(key: _TableKey, table: torch.Tensor) -> None:
         del _TABLES[key]
 
 
+class _Kernel(Protocol):
+    """A ``triton.jit`` kernel: indexing with the launch grid gives the launcher."""
+
+    def __getitem__(self, grid: tuple[int, int]) -> Callable[..., object]: ...
+
+
 @functools.cache
-def _kernel() -> Any:
+def _kernel() -> _Kernel:
     """The Triton kernel, compiled on first use (Triton is imported lazily)."""
     import triton
     import triton.language as tl
@@ -161,4 +167,4 @@ def _kernel() -> Any:
                 tl.debug_barrier()  # every source of the chunk is read before a destination is written
                 tl.store(plane + d[:, None] * words + c[None, :], tile, mask=ok)
 
-    return slot_gather_kernel
+    return cast(_Kernel, slot_gather_kernel)

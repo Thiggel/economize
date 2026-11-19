@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import torch
 from torch import nn
@@ -31,6 +31,8 @@ from ..spec import HeadGeometry, PassContext
 from ..standard import SoftcappedLogitsMixin, StandardDecoderAdapter
 
 if TYPE_CHECKING:
+    from transformers.models.gemma4.modeling_gemma4 import Gemma4TextAttention, Gemma4TextModel
+
     from ...attention.banded import StructuredMask
 
 __all__ = ["PER_LAYER_INPUTS", "Gemma4Adapter"]
@@ -83,7 +85,7 @@ class Gemma4Adapter(SoftcappedLogitsMixin, StandardDecoderAdapter):
         ids = input_ids.to(self.device)
         embeds = self.embed_tokens(ids)
         if ctx is not None and self.uses_per_layer_inputs:
-            decoder: Any = self.decoder  # HF Gemma4TextModel
+            decoder = cast("Gemma4TextModel", self.decoder)
             per_layer = decoder.get_per_layer_inputs(ids, embeds)
             ctx.token_inputs[PER_LAYER_INPUTS] = decoder.project_per_layer_inputs(embeds, per_layer)
         return embeds
@@ -110,9 +112,9 @@ class Gemma4Adapter(SoftcappedLogitsMixin, StandardDecoderAdapter):
         """The source layer of every KV-sharing layer, found once: :meth:`kv_source` runs on every layer call, and
         :meth:`remove_layers` refuses models with KV sharing, so the map never goes stale."""
         sources: dict[int, int] = {}
-        stores: dict[str, int] = {}  # layer type -> last non-sharing layer so far (it produces the shared K/V)
+        stores: dict[str | None, int] = {}  # layer type -> last non-sharing layer so far (it produces the shared K/V)
         for index in range(1, self.num_layers + 1):
-            attention: Any = self.layer(index).self_attn  # HF Gemma4TextAttention
+            attention = cast("Gemma4TextAttention", self.layer(index).self_attn)
             if attention.is_kv_shared_layer:
                 if attention.layer_type not in stores:
                     raise UnsupportedModelError(
@@ -133,8 +135,8 @@ class Gemma4Adapter(SoftcappedLogitsMixin, StandardDecoderAdapter):
     ) -> LayerInputs:
         _, kwargs = super().layer_inputs(index, hidden, ctx, cache, mask)
         del kwargs["use_cache"]
-        attention: Any = self.layer(index).self_attn  # HF Gemma4TextAttention
-        shared: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
+        attention = cast("Gemma4TextAttention", self.layer(index).self_attn)
+        shared: dict[str | None, tuple[torch.Tensor, torch.Tensor]] = {}  # transformers types layer_type optional
         if attention.is_kv_shared_layer:
             shared[attention.layer_type] = ctx.cache.read(self.kv_source(index) - 1)
         kwargs["shared_kv_states"] = shared

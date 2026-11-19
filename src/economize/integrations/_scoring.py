@@ -28,12 +28,16 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING
 
 import torch
 
 from ..core.technique import Capability
 from ..errors import ConfigError
+
+if TYPE_CHECKING:
+    from ..core.model import EfficientModel
+    from ..decoding.config import DecodeConfig
 
 __all__ = ["DECODE_ONLY", "ForcedSelector", "needs_decode_scoring", "score_continuations"]
 
@@ -41,7 +45,7 @@ __all__ = ["DECODE_ONLY", "ForcedSelector", "needs_decode_scoring", "score_conti
 DECODE_ONLY = Capability.DEPTH | Capability.KV_CACHE
 
 
-def needs_decode_scoring(model: Any) -> bool:
+def needs_decode_scoring(model: object) -> bool:
     """Whether a technique of ``model`` acts only while decoding (see :data:`DECODE_ONLY`)."""
     techniques = getattr(model, "techniques", None) or {}
     return any(technique.capabilities & DECODE_ONLY for technique in techniques.values())
@@ -87,11 +91,11 @@ class ForcedSelector:
 
 @torch.no_grad()
 def score_continuations(
-    model: Any,
+    model: EfficientModel,
     prompts: Sequence[torch.Tensor],
     continuations: Sequence[Sequence[int]],
     *,
-    decoding: Any = None,
+    decoding: DecodeConfig | None = None,
 ) -> list[tuple[float, bool]]:
     """``(log-likelihood, is_greedy)`` of every continuation after its prompt, under the model's decoding loop.
 

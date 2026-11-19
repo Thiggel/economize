@@ -83,7 +83,7 @@ against the table below (it reads the table from this file, so a new package mus
 
 | Layer | Packages |
 |---|---|
-| 0 | `_version`, `_compat`, `_deprecation`, `_identity`, `errors`, `unwrap`, `validation` |
+| 0 | `_version`, `_compat`, `_deprecation`, `_identity`, `_typing`, `errors`, `unwrap`, `validation` |
 | 1 | `registry`, `modules`, `attention` |
 | 2 | `arch` |
 | 3 | `runtime` |

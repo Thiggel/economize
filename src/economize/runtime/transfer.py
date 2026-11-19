@@ -10,14 +10,12 @@ completed, so the host may drop the CPU tensor at once.
 
 from __future__ import annotations
 
-from typing import Any
-
 import torch
 
 __all__ = ["device_tensor"]
 
 
-def device_tensor(values: Any, device: torch.device | str, dtype: torch.dtype = torch.long) -> torch.Tensor:
+def device_tensor(values: object, device: torch.device | str, dtype: torch.dtype = torch.long) -> torch.Tensor:
     """``torch.tensor(values, dtype=dtype, device=device)`` without a device synchronization on CUDA.
 
     Args:

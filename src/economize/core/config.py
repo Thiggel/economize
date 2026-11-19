@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
 
+from .._typing import JSONDict, JSONValue
 from ..errors import ConfigError
 from ..validation import known_fields
 
@@ -30,11 +32,11 @@ class TechniqueConfig:
     def validate(self, adapter: ArchAdapter) -> None:
         """Check the configuration against a concrete model. Raise :class:`ConfigError` if it cannot apply."""
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> JSONDict:
         return {f.name: _to_json(getattr(self, f.name)) for f in dataclasses.fields(self)}
 
     @classmethod
-    def from_dict(cls: type[C], data: dict[str, Any]) -> C:
+    def from_dict(cls: type[C], data: JSONDict) -> C:
         """The configuration written by :meth:`to_dict` (lists become tuples).
 
         A field missing from ``data`` takes its default, so a configuration saved before the field existed still
@@ -57,17 +59,18 @@ class TechniqueConfig:
         return cls(**{k: tuple(v) if isinstance(v, list) else v for k, v in known.items()})
 
 
-def _to_json(value: object) -> object:
-    return list(value) if isinstance(value, tuple) else value
+def _to_json(value: object) -> JSONValue:
+    # A configuration holds plain data by contract (the class docstring), so its fields are JSON values.
+    return cast("JSONValue", list(value) if isinstance(value, tuple) else value)
 
 
-def nested_dict(config: TechniqueConfig) -> dict[str, Any]:
+def nested_dict(config: TechniqueConfig) -> JSONDict:
     """The JSON form of a technique configuration nested in another one (the drafter of FR-Spec, the fallback of a
     hybrid): ``{"technique": name, "config": fields}``."""
     return {"technique": config.technique, "config": config.to_dict()}
 
 
-def nested_config(data: dict[str, Any] | TechniqueConfig) -> TechniqueConfig:
+def nested_config(data: Mapping[str, JSONValue] | TechniqueConfig) -> TechniqueConfig:
     """The configuration written by :func:`nested_dict` (a configuration object is returned as it is).
 
     Raises:
@@ -81,4 +84,5 @@ def nested_config(data: dict[str, Any] | TechniqueConfig) -> TechniqueConfig:
         raise ConfigError(
             f"a nested technique configuration needs the keys 'technique' and 'config', got {sorted(data)}"
         )
-    return TECHNIQUES.get(data["technique"]).config_class.from_dict(dict(data["config"]))
+    fields = cast("JSONDict", data["config"])  # what nested_dict wrote
+    return TECHNIQUES.get(cast(str, data["technique"])).config_class.from_dict(dict(fields))

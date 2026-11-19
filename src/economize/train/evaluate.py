@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterable, Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, TypeAlias, cast
 
 import torch
 
 from ..errors import ConfigError
 from .data import as_batch
+from .data.sources import BatchLike
 from .objective import Batch, Objective, TeacherRequest
 from .teacher import TeacherHead, teacher_pass
 
@@ -23,8 +24,11 @@ logger = logging.getLogger("economize.train")
 #: Sums a tensor over all processes of a data-parallel run (e.g. ``lambda t: accelerator.reduce(t, "sum")``).
 AllReduce = Callable[[torch.Tensor], torch.Tensor]
 
+#: Held-out data: ``[N, T]`` token rows, one :class:`Batch`, or an iterable of batches.
+EvalData: TypeAlias = torch.Tensor | Batch | Iterable[BatchLike]
 
-def split_batches(data: torch.Tensor | Batch | Iterable[Any], batch_size: int) -> list[Batch]:
+
+def split_batches(data: EvalData, batch_size: int) -> list[Batch]:
     """Evaluation batches from a ``[N, T]`` tensor (consecutive rows, in order), a :class:`Batch` or an iterable
     of batches."""
     if isinstance(data, Batch):
@@ -45,7 +49,7 @@ class MetricMeans:
         self.sums: dict[str, torch.Tensor] = {}
         self.counts: dict[str, int] = {}
 
-    def add(self, metrics: Mapping[str, Any]) -> None:
+    def add(self, metrics: Mapping[str, torch.Tensor | float]) -> None:
         for name, value in metrics.items():
             value = torch.as_tensor(value).detach().to(torch.float64)
             self.sums[name] = self.sums[name] + value if name in self.sums else value
@@ -81,7 +85,7 @@ def evaluate_batch(
     request: TeacherRequest | None = None,
     teacher_head: TeacherHead | None = None,
     autocast: torch.dtype | None = None,
-) -> Mapping[str, Any]:
+) -> Mapping[str, torch.Tensor | float]:
     """:meth:`Objective.evaluate` of one batch: the teacher pass ``request`` asks for (default: the objective's;
     without autocast, in the model's own dtypes), then the objective's metrics under ``autocast``."""
     batch = batch.to(model.adapter.device)
@@ -98,7 +102,7 @@ def evaluate_batch(
 def evaluate(
     model: EfficientModel,
     objective: Objective,
-    data: torch.Tensor | Batch | Iterable[Any],
+    data: EvalData,
     *,
     batch_size: int = 8,
     teacher_head: TeacherHead | None = None,
@@ -163,10 +167,10 @@ def _plain(value: torch.Tensor) -> float | list[float]:
     return value.item() if value.dim() == 0 else value.tolist()
 
 
-def mean_metrics(rows: Iterable[Mapping[str, Any]]) -> dict[str, float]:
+def mean_metrics(rows: Iterable[Mapping[str, torch.Tensor | float]]) -> dict[str, float]:
     """Mean of every metric over the scalar metric dictionaries that report it (used for gradient-accumulation
     micro-batches)."""
     totals = MetricMeans()
     for row in rows:
         totals.add(row)
-    return {name: float(value) for name, value in totals.means().items()}  # type: ignore[arg-type]
+    return {name: float(cast(float, value)) for name, value in totals.means().items()}  # scalar rows, scalar means

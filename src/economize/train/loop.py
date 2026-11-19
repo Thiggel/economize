@@ -22,11 +22,11 @@ import json
 import logging
 import math
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
 import torch
 
@@ -34,20 +34,24 @@ from ..errors import ConfigError, NonFiniteLossError
 from ..validation import check_choice, check_positive, check_registered
 from .checkpoint import RunCheckpointer, latest_checkpoint, load_trained, save_trained
 from .data import BatchSource, as_source, shard_source
-from .evaluate import MetricMeans, evaluate
-from .module import ObjectiveModule
+from .data.sources import TrainData
+from .evaluate import EvalData, MetricMeans, evaluate
+from .module import ObjectiveModule, ObjectiveModuleOutput
 from .objective import Batch, Objective, OptimDefaults, build_objective, default_objective
 from .optim import build_optimizer, build_scheduler
 from .schedule import SCHEDULES
 from .teacher import TeacherHead, make_teacher_head
-from .utils import autocast_dtype, jsonable, rng_state, seed_everything, set_rng_state, spawn_seed
+from .utils import RNGState, autocast_dtype, jsonable, rng_state, seed_everything, set_rng_state, spawn_seed
 
 if TYPE_CHECKING:
     from torch import nn
+    from torch.nn.parallel import DistributedDataParallel
+    from torch.optim.optimizer import StateDict
+    from typing_extensions import Unpack
 
     from ..core.model import EfficientModel
 
-__all__ = ["TrainConfig", "TrainResult", "build_optimizer", "fit", "latest_checkpoint"]
+__all__ = ["TrainConfig", "TrainOverrides", "TrainResult", "build_optimizer", "fit", "latest_checkpoint"]
 
 logger = logging.getLogger("economize.train")
 
@@ -57,6 +61,37 @@ LOG_FILE = "train_log.jsonl"
 MAX_EMPTY_DRAWS = 1000
 
 NonFinitePolicy = Literal["raise", "skip", "warn"]
+
+#: A logged record: a training step's loss and metrics, or an evaluation (JSON-serializable values).
+LogRecord = dict[str, object]
+#: Evaluation means (see :func:`~economize.train.evaluate`).
+EvalMetrics = dict[str, float | list[float]]
+
+
+class _CheckpointStateRequired(TypedDict):
+    step: int
+    optimizer: StateDict
+    rng: RNGState
+    data: Mapping[str, object]
+    history: list[LogRecord]
+    losses: list[float]
+
+
+class _CheckpointState(_CheckpointStateRequired, total=False):
+    """The trainer state of a checkpoint (``elapsed`` and ``eval`` are missing in those of older versions)."""
+
+    scaler: dict[str, object]
+    elapsed: float
+    eval: EvalMetrics | None
+
+
+class _StoredResult(TypedDict, total=False):
+    """The result file of a finished run."""
+
+    steps: int
+    losses: list[float]
+    history: list[LogRecord]
+    eval: EvalMetrics | None
 
 
 @dataclass
@@ -153,12 +188,42 @@ class TrainConfig:
             changes["grad_clip"] = None
         return replace(defaults, **changes)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         out = asdict(self)
         out["autocast"] = None if self.autocast is None else str(self.autocast)
         out["output_dir"] = None if self.output_dir is None else str(self.output_dir)
         out["resume"] = str(self.resume) if isinstance(self.resume, Path) else self.resume
         return out
+
+
+class TrainOverrides(TypedDict, total=False):
+    """The fields of :class:`TrainConfig` as keyword overrides of :func:`fit`."""
+
+    steps: int
+    batch_size: int
+    seq_len: int
+    grad_accum: int
+    lr: float | None
+    lr_backbone: float | None
+    weight_decay: float | None
+    betas: tuple[float, float] | None
+    warmup_steps: int | None
+    schedule: str | None
+    min_lr_ratio: float | None
+    grad_clip: float | None
+    autocast: str | torch.dtype | None
+    nonfinite: NonFinitePolicy
+    log_every: int
+    eval_every: int | None
+    eval_batch_size: int
+    save_every: int | None
+    keep_checkpoints: int
+    output_dir: str | Path | None
+    resume: bool | str | Path
+    seed: int | None
+    accelerate: bool
+    offload_optimizer: bool
+    find_unused_parameters: bool
 
 
 @dataclass
@@ -176,22 +241,22 @@ class TrainResult:
 
     steps: int
     losses: list[float] = field(default_factory=list)
-    history: list[dict[str, Any]] = field(default_factory=list)
-    eval: dict[str, Any] | None = None
+    history: list[LogRecord] = field(default_factory=list)
+    eval: EvalMetrics | None = None
     output_dir: Path | None = None
     final_path: Path | None = None
 
 
 def fit(
     model: EfficientModel,
-    data: Any,
+    data: TrainData,
     objective: str | Objective | None = None,
     *,
     config: TrainConfig | None = None,
-    eval_data: Any = None,
+    eval_data: EvalData | None = None,
     teacher_model: nn.Module | TeacherHead | None = None,
-    callbacks: Iterable[Callable[[dict[str, Any]], None]] = (),
-    **overrides: Any,
+    callbacks: Iterable[Callable[[LogRecord], None]] = (),
+    **overrides: Unpack[TrainOverrides],
 ) -> TrainResult:
     """Train ``model`` with ``objective`` on ``data``.
 
@@ -225,12 +290,12 @@ class _Run:
     def __init__(
         self,
         model: EfficientModel,
-        data: Any,
+        data: TrainData,
         objective: Objective,
         config: TrainConfig,
-        eval_data: Any,
-        teacher_model: Any,
-        callbacks: list[Callable[[dict[str, Any]], None]],
+        eval_data: EvalData | None,
+        teacher_model: nn.Module | TeacherHead | None,
+        callbacks: list[Callable[[LogRecord], None]],
     ) -> None:
         self.model, self.objective, self.config, self.callbacks = model, objective, config, callbacks
         self.accelerator = None
@@ -258,7 +323,7 @@ class _Run:
         self.settings = config.optimizer_settings(objective.defaults)
         self.optimizer = build_optimizer(self.module.groups, self.settings, offload=config.offload_optimizer)
         self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = None  # built in train(), after any resume
-        self.forward: Any = self.module
+        self.forward: nn.Module = self.module  # or its DistributedDataParallel wrapper
         if self.accelerator is not None and self.accelerator.num_processes > 1:
             self.forward = self.accelerator.prepare_model(self.module)
         self.autocast = autocast_dtype(config.autocast)
@@ -268,9 +333,9 @@ class _Run:
         self.checkpoints = RunCheckpointer(self.output_dir, rank=rank, world=self.world,
                                            keep=config.keep_checkpoints, barrier=self._barrier)
         self.step = 0
-        self.history: list[dict[str, Any]] = []
+        self.history: list[LogRecord] = []
         self.losses: list[float] = []
-        self.last_eval: dict[str, Any] | None = None
+        self.last_eval: EvalMetrics | None = None
         self.elapsed = 0.0
 
     # ---- the loop ------------------------------------------------------------------------------------------------
@@ -297,10 +362,12 @@ class _Run:
             for micro in range(config.grad_accum):
                 batch = self._next_batch()
                 sync = micro == config.grad_accum - 1 or self.forward is self.module
-                with nullcontext() if sync else self.forward.no_sync():
+                with nullcontext() if sync else cast("DistributedDataParallel", self.forward).no_sync():
                     with torch.autocast(self.model.adapter.device.type, self.autocast,
                                         enabled=self.autocast is not None):
-                        out = self.forward(batch.input_ids, batch.attention_mask, batch.loss_mask)
+                        out: ObjectiveModuleOutput = self.forward(
+                            batch.input_ids, batch.attention_mask, batch.loss_mask
+                        )
                     loss = out["loss"] / config.grad_accum
                     scaled = loss if self.scaler is None else self.scaler.scale(loss)
                     if self.accelerator is not None:
@@ -397,7 +464,7 @@ class _Run:
         final = self.checkpoints.final_dir
         assert final is not None
         load_trained(self.model, final, owned=self.module.owned)
-        stored = self.checkpoints.load_result()
+        stored = cast(_StoredResult, self.checkpoints.load_result())  # written by train()
         steps = int(stored.get("steps", json.loads((final / "economize_config.json").read_text())["train"]["step"]))
         logger.info("%s is a finished run of %d steps: loaded its final weights, nothing to train", self.output_dir,
                     steps)
@@ -416,7 +483,7 @@ class _Run:
     def _mean_over_processes(self, value: torch.Tensor) -> torch.Tensor:
         return self._sum_over_processes(value) / self.world
 
-    def _log(self, record: dict[str, Any]) -> None:
+    def _log(self, record: LogRecord) -> None:
         record = {k: (float(v) if isinstance(v, torch.Tensor) else v) for k, v in record.items()}
         self.history.append(record)
         if not self.main:
@@ -438,7 +505,8 @@ class _Run:
             torch.cuda.empty_cache()
         self.module.train(False)
         try:
-            self.last_eval = evaluate(self.model, self.objective, self.eval_data,
+            eval_data = cast("EvalData", self.eval_data)  # _evaluate runs only with eval_data
+            self.last_eval = evaluate(self.model, self.objective, eval_data,
                                       batch_size=self.config.eval_batch_size, teacher_head=self.teacher_head,
                                       autocast=self.autocast, rank=self.rank, world=self.world,
                                       all_reduce=self._sum_over_processes)
@@ -490,7 +558,7 @@ class _Run:
         if path is None:
             return
         load_trained(self.model, path, owned=self.module.owned)
-        state = self.checkpoints.load_state(path)
+        state = cast(_CheckpointState, self.checkpoints.load_state(path))  # written by _save_checkpoint
         self.optimizer.load_state_dict(state["optimizer"])
         if self.scaler is not None and "scaler" in state:
             self.scaler.load_state_dict(state["scaler"])

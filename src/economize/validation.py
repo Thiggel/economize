@@ -11,7 +11,7 @@ import warnings
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import fields, is_dataclass
 from numbers import Integral, Real
-from typing import Protocol, TypeVar
+from typing import Protocol, TypeGuard, TypeVar
 
 from .errors import ConfigError, UnknownFieldWarning, UnregisteredNameError
 
@@ -26,6 +26,7 @@ __all__ = [
     "check_positive",
     "check_registered",
     "check_unit_interval",
+    "is_positive_int",
     "known_fields",
 ]
 
@@ -45,6 +46,11 @@ class _NameRegistry(Protocol):
     def __contains__(self, name: object, /) -> bool: ...
 
     def names(self) -> Iterable[str]: ...
+
+
+def is_positive_int(value: object) -> TypeGuard[int]:
+    """Whether ``value`` is an ``int`` (a ``bool`` is not) of at least 1."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
 def check_globs(name: str, patterns: object, *, allow_empty: bool = False) -> None:

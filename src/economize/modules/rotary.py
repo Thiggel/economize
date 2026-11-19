@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, cast
 
 import torch
 from torch import nn
@@ -65,7 +65,7 @@ def default_inv_freq(dim: int, theta: float) -> torch.Tensor:
 def rope_frequencies(
     head_dim: int,
     theta: float = 10000.0,
-    scaling: Mapping[str, Any] | None = None,
+    scaling: Mapping[str, object] | None = None,
     *,
     partial_rotary_factor: float = 1.0,
     max_position_embeddings: int | None = None,
@@ -87,7 +87,7 @@ def rope_frequencies(
             change with the sequence length, which a static table cannot follow).
     """
     params = dict(scaling or {})
-    rope_type = params.pop("rope_type", params.pop("type", "default"))
+    rope_type = cast(str, params.pop("rope_type", params.pop("type", "default")))  # another type: not in the table
     params.pop("rope_theta", None)
     params.pop("partial_rotary_factor", None)
     dim = int(head_dim * partial_rotary_factor)
@@ -105,7 +105,7 @@ def rope_frequencies(
     if partial_rotary_factor != 1.0:
         rope["partial_rotary_factor"] = partial_rotary_factor
     try:
-        # PreTrainedConfig keeps unknown keyword arguments as attributes; its typed signature does not list them
+        # Any: PreTrainedConfig keeps unknown keyword arguments as attributes; its typed signature does not list them
         fields: dict[str, Any] = {
             "hidden_size": head_dim,
             "num_attention_heads": 1,
@@ -135,7 +135,7 @@ class RotaryTable(nn.Module):
         self,
         head_dim: int,
         theta: float = 10000.0,
-        scaling: Mapping[str, Any] | None = None,
+        scaling: Mapping[str, object] | None = None,
         *,
         partial_rotary_factor: float = 1.0,
         max_position_embeddings: int | None = None,

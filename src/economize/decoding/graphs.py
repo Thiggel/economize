@@ -27,7 +27,7 @@ same graph; the loop reads them before that.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Protocol, TypeVar, cast
 
 import torch
 
@@ -49,8 +49,21 @@ from ..runtime import (
 
 __all__ = ["DecodeGraphs", "GraphWrap", "static_cache_class"]
 
-#: What :meth:`Drafter.enable_graphs` receives: turns a step function of tensors into its graphed version.
-GraphWrap = Callable[[Callable[..., Any]], StaticStep]
+_R = TypeVar("_R")
+
+
+class GraphWrap(Protocol):
+    """What :meth:`Drafter.enable_graphs <economize.decoding.Drafter.enable_graphs>` receives: turns a step function
+    of tensors into its graphed version (a :class:`~economize.runtime.StaticStep`), which takes the same tensors and
+    returns what the function returns."""
+
+    def __call__(self, fn: Callable[..., _R], /) -> Callable[..., _R]: ...
+
+
+class _StaticCache(Protocol):
+    """The member a static cache variant adds to :class:`~economize.runtime.KVCache` (:func:`static_cache_class`)."""
+
+    def activate(self, batch_size: int) -> None: ...
 
 
 def static_cache_class(kind: str) -> type[KVCache] | None:
@@ -92,9 +105,9 @@ class DecodeGraphs:
             raise ConfigError(f"cache kind {self.cache_kind!r} has no static variant for CUDA graphs")
         self._cache_class = static
         self._pool = GraphPool()
-        self._cache: Any = None  # an instance of the static variant
+        self._cache: KVCache | None = None  # an instance of the static variant
         self._bound: KVCache | None = None  # what the passes run on: the static cache or a wrapper of it
-        self._state: tuple[Any, ...] = ()  # the bound cache's graph_state when the graphs were recorded
+        self._state: tuple[object, ...] = ()  # the bound cache's graph_state when the graphs were recorded
         self._exact = self.wrap(self._exact_pass)
         self._tree = self.wrap(self._tree_pass)
 
@@ -108,7 +121,7 @@ class DecodeGraphs:
         """Graphs recorded so far (over all steps)."""
         return self._pool.num_graphs
 
-    def wrap(self, fn: Callable[..., Any]) -> StaticStep:
+    def wrap(self, fn: Callable[..., _R]) -> StaticStep[_R]:
         """``fn`` (a function of tensors without host synchronization) as a graphed step of this decoder.
 
         The step's graphs are dropped whenever the cache is rebuilt.
@@ -129,7 +142,7 @@ class DecodeGraphs:
             spec = CacheSpec(rounded, batch_size, self.cache_kind, ring)
             self._cache = self._bound = cache = self._cache_class(spec)
         else:
-            cache.activate(batch_size)
+            cast("_StaticCache", cache).activate(batch_size)
         return cache
 
     def bind(self, cache: KVCache) -> None:

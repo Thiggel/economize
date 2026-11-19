@@ -35,7 +35,7 @@ import math
 import re
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, cast
 
 import torch
 from torch import nn
@@ -45,6 +45,14 @@ from ..core.lora_capable import LoraCapable
 from ..errors import ConfigError
 from ..modules import LayerLoRA, LoRADelta
 from ..unwrap import base_model_of, is_peft_model, peft_base
+
+if TYPE_CHECKING:
+    from peft import PeftModel
+
+    from .._typing import JSONDict
+    from ..core.config import TechniqueConfig
+    from ..core.model import EfficientModel
+    from ..decoding.config import DecodeConfig
 
 __all__ = [
     "LoraCapable",
@@ -63,7 +71,9 @@ _PREFIX = "base_model.model."
 _KEY = re.compile(rf"{re.escape(_PREFIX)}(?P<name>.+)\.lora_(?P<which>[AB])(?:\.[^.]+)?\.weight")
 
 
-def apply(model: Any, *configs: Any, decoding: Any = None, merge: bool = False) -> Any:
+def apply(
+    model: nn.Module, *configs: TechniqueConfig, decoding: DecodeConfig | None = None, merge: bool = False
+) -> EfficientModel:
     """``economize.apply`` for a PEFT model (any other model is passed through unchanged).
 
     Args:
@@ -82,7 +92,11 @@ def apply(model: Any, *configs: Any, decoding: Any = None, merge: bool = False) 
     """
     from ..core import apply  # deferred: importing this module stays light
 
-    base = (model.merge_and_unload() if merge else model.get_base_model()) if is_peft_model(model) else model
+    if is_peft_model(model):
+        peft_model = cast("PeftModel", model)
+        base = cast(nn.Module, peft_model.merge_and_unload() if merge else peft_model.get_base_model())
+    else:
+        base = model
     efficient = apply(base, *configs, decoding=decoding)
     uncovered = _uncovered_peft_layers(efficient)
     if uncovered:
@@ -109,14 +123,14 @@ def _deltas(lora: LayerLoRA) -> Iterator[tuple[str, dict[str, LoRADelta]]]:
         yield key, {attr: cast(LoRADelta, delta) for attr, delta in cast(nn.ModuleDict, deltas).items()}
 
 
-def lora_techniques(model: Any) -> dict[str, LayerLoRA]:
+def lora_techniques(model: object) -> dict[str, LayerLoRA]:
     """The LoRA of every attached :class:`LoraCapable` technique that has one, keyed by technique name."""
     techniques = getattr(model, "techniques", None) or {}
     loras = {name: t.layer_lora() for name, t in techniques.items() if isinstance(t, LoraCapable)}
     return {name: lora for name, lora in loras.items() if lora is not None}
 
 
-def _lora_of(model: Any, technique: str | None = None) -> LayerLoRA:
+def _lora_of(model: object, technique: str | None = None) -> LayerLoRA:
     """The LoRA of ``technique``, or of the only attached technique that has one.
 
     Raises:
@@ -136,7 +150,7 @@ def _lora_of(model: Any, technique: str | None = None) -> LayerLoRA:
     return next(iter(loras.values()))
 
 
-def _uncovered_peft_layers(model: Any) -> list[str]:
+def _uncovered_peft_layers(model: EfficientModel) -> list[str]:
     """PEFT-wrapped maps of LoRA-adapted layers that a technique's LoRA should adapt (the layer's
     ``ArchAdapter.lora_targets``) but does not."""
     uncovered = []
@@ -151,7 +165,7 @@ def _uncovered_peft_layers(model: Any) -> list[str]:
     return uncovered
 
 
-def lora_modules(model: Any, *, technique: str | None = None) -> dict[str, LoRADelta]:
+def lora_modules(model: EfficientModel, *, technique: str | None = None) -> dict[str, LoRADelta]:
     """The LoRA updates (``LoRADelta``) of a technique, keyed by the qualified name of the linear map they adapt.
 
     Args:
@@ -175,7 +189,7 @@ def lora_modules(model: Any, *, technique: str | None = None) -> dict[str, LoRAD
     return modules
 
 
-def save_lora(model: Any, save_directory: str | Path, *, technique: str | None = None,
+def save_lora(model: EfficientModel, save_directory: str | Path, *, technique: str | None = None,
               base_model_name_or_path: str | None = None) -> Path:
     """Write a technique's LoRA as a PEFT LoRA adapter of the layers it adapts (blocks ``1..r`` for early exit).
 
@@ -196,7 +210,7 @@ def save_lora(model: Any, save_directory: str | Path, *, technique: str | None =
     from safetensors.torch import save_file
 
     modules, lora = lora_modules(model, technique=technique), _lora_of(model, technique)
-    alpha: Any = lora.alpha  # PEFT annotates lora_alpha as int but stores any number; economize's alpha is a float
+    alpha = cast(int, lora.alpha)  # PEFT annotates lora_alpha as int but stores any number; economize's is a float
     base = base_model_of(model)
     config = LoraConfig(
         r=lora.rank,
@@ -217,7 +231,7 @@ def save_lora(model: Any, save_directory: str | Path, *, technique: str | None =
     return path
 
 
-def load_lora(model: Any, path: str | Path, *, technique: str | None = None, strict: bool = True,
+def load_lora(model: EfficientModel, path: str | Path, *, technique: str | None = None, strict: bool = True,
               revision: str | None = None, token: str | bool | None = None) -> list[str]:
     """Load a PEFT LoRA adapter into a technique's LoRA.
 
@@ -246,7 +260,7 @@ def load_lora(model: Any, path: str | Path, *, technique: str | None = None, str
 
         directory = Path(snapshot_download(str(path), revision=revision, token=token,
                                            allow_patterns=[ADAPTER_CONFIG, ADAPTER_WEIGHTS]))
-    config = json.loads((directory / ADAPTER_CONFIG).read_text())
+    config: JSONDict = json.loads((directory / ADAPTER_CONFIG).read_text())
     scale = _peft_scale(config)
     from safetensors.torch import load_file
 
@@ -276,7 +290,7 @@ def load_lora(model: Any, path: str | Path, *, technique: str | None = None, str
     return sorted(names)
 
 
-def _peft_scale(config: dict[str, Any]) -> float:
+def _peft_scale(config: JSONDict) -> float:
     """The update scale of a PEFT LoRA config, refusing the variants a plain LoRA update cannot express."""
     if config.get("peft_type", "LORA") != "LORA":
         raise ConfigError(f"expected a LoRA adapter, got peft_type={config.get('peft_type')!r}")
@@ -286,7 +300,7 @@ def _peft_scale(config: dict[str, Any]) -> float:
         unsupported.append("bias")
     if unsupported:
         raise ConfigError(f"LoRA variants are not supported by economize's LoRA: {unsupported}")
-    rank, alpha = int(config["r"]), float(config["lora_alpha"])
+    rank, alpha = int(cast(int, config["r"])), float(cast(float, config["lora_alpha"]))
     return alpha / (math.sqrt(rank) if config.get("use_rslora") else rank)
 
 

@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable, Mapping
-from typing import Any, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 import torch
 
 from ..errors import ConfigError
+
+if TYPE_CHECKING:
+    from transformers import GenerationConfig, StoppingCriteriaList
+    from transformers.generation.streamers import BaseStreamer
 
 __all__ = [
     "HistoryFreeSelector",
@@ -48,7 +52,7 @@ _HISTORY_FREE_PROCESSORS = frozenset({
 })
 
 
-def check_generation_config(config: Any) -> None:
+def check_generation_config(config: GenerationConfig) -> None:
     """Raise :class:`ConfigError` for every generation option that economize cannot honour.
 
     Logits processors, warpers and stopping criteria that ``transformers`` builds from the config (temperature,
@@ -69,7 +73,7 @@ def check_generation_config(config: Any) -> None:
         raise ConfigError("economize generate cannot honour: " + "; ".join(problems))
 
 
-def check_model_kwargs(model_kwargs: Mapping[str, Any]) -> None:
+def check_model_kwargs(model_kwargs: Mapping[str, object]) -> None:
     """Raise :class:`ConfigError` for model inputs that economize would otherwise drop (embeddings, a filled cache,
     multimodal inputs). The inputs that ``generate`` prepares on its own are accepted."""
     cache = model_kwargs.get("past_key_values")
@@ -81,10 +85,16 @@ def check_model_kwargs(model_kwargs: Mapping[str, Any]) -> None:
         raise ConfigError(f"economize generate cannot forward the model inputs {unknown}; pass input_ids only")
 
 
-def _cache_length(cache: Any) -> int:
+class _SizedCache(Protocol):
+    def get_seq_length(self) -> int: ...
+
+
+def _cache_length(cache: object) -> int:
     if hasattr(cache, "get_seq_length"):
-        return int(cache.get_seq_length())
-    return int(cache[0][0].shape[-2]) if len(cache) else 0
+        return int(cast(_SizedCache, cache).get_seq_length())
+    # legacy tuple cache: one (key, value) pair per layer, keys [batch, heads, seq, head_dim]
+    legacy = cast("tuple[tuple[torch.Tensor, ...], ...]", cache)
+    return int(legacy[0][0].shape[-2]) if len(legacy) else 0
 
 
 def left_padding(mask: torch.Tensor | None, row: int, width: int) -> int:
@@ -260,7 +270,7 @@ class _AtRow:
         return out[self.row : self.row + 1]
 
 
-def _as_list(processors: Any) -> list[Any]:
+def _as_list(processors: Processor) -> list[Processor]:
     return list(processors) if isinstance(processors, list) else [processors]
 
 
@@ -295,7 +305,13 @@ class StopAndStream:
         prefix: The row's left padding, prepended for the criteria (see :class:`ProcessedSelector`).
     """
 
-    def __init__(self, criteria: Any, streamer: Any, prompt_length: int, prefix: torch.Tensor | None = None) -> None:
+    def __init__(
+        self,
+        criteria: StoppingCriteriaList | None,
+        streamer: BaseStreamer | None,
+        prompt_length: int,
+        prefix: torch.Tensor | None = None,
+    ) -> None:
         self.criteria, self.streamer = criteria, streamer
         self.prompt_length, self.prefix = prompt_length, prefix
         self.checked = prompt_length
@@ -319,7 +335,7 @@ class StopAndStream:
         if not self.criteria:
             return False
         ids = prefix_tokens if self.prefix is None else torch.cat([self.prefix.to(prefix_tokens.device), prefix_tokens])
-        return bool(torch.as_tensor(self.criteria(ids[None].long(), None)).any())
+        return bool(torch.as_tensor(self.criteria(cast(torch.LongTensor, ids[None].long()), None)).any())
 
     def _stream(self, generated: torch.Tensor) -> None:
         if self.streamer is not None and generated.shape[0] > self.streamed:

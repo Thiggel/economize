@@ -12,7 +12,7 @@ from __future__ import annotations
 import weakref
 from abc import abstractmethod
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, TypeVar, cast, runtime_checkable
 
 import torch
 
@@ -121,11 +121,14 @@ class TreePolicy(DraftPolicy):
                               "that do")
 
 
-def weak_method(method: Callable[..., Any]) -> Callable[..., Any]:
+_R = TypeVar("_R")
+
+
+def weak_method(method: Callable[..., _R]) -> Callable[..., _R]:
     """``method`` held through a weak reference to its object (graphed steps outlive no drafter)."""
     ref = weakref.WeakMethod(method)
 
-    def call(*args: Any) -> Any:
+    def call(*args: object) -> _R:
         bound = ref()
         if bound is None:
             raise RuntimeError("the drafter whose tree step this graph runs was deleted")
@@ -184,25 +187,30 @@ class TreeSearchDrafter(Drafter):
 
     # ---- forwarded members of the inner drafter ---------------------------------------------------------------
     @property
-    def source_layers(self) -> tuple[int, ...]:  # type: ignore[override]
+    def source_layers(self) -> tuple[int, ...]:  # type: ignore[override]  # read-only forward of the attribute
         return self.inner.source_layers
 
     @property
-    def layer_span(self) -> tuple[int, int]:  # type: ignore[override]
+    def layer_span(self) -> tuple[int, int]:  # type: ignore[override]  # read-only forward of the attribute
         return self.inner.layer_span
 
     @property
-    def footprint(self) -> LayerFootprint | None:  # type: ignore[override]
+    def footprint(self) -> LayerFootprint | None:  # type: ignore[override]  # read-only forward of the attribute
         return self.inner.footprint
 
     @property
     def observed_layers(self) -> tuple[int, ...]:
         return self.inner.observed_layers
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: str) -> Any:  # Any: forwards any attribute of the inner drafter, whatever its type
         if name == "inner":
             raise AttributeError(name)
         return getattr(self.inner, name)
+
+    @property
+    def _stepper(self) -> TreeStepDrafter:
+        """The inner drafter as the :class:`TreeStepDrafter` that :meth:`TreePolicy.check_drafter` verified it is."""
+        return cast("TreeStepDrafter", self.inner)
 
     def begin(self, runner: LayerRunner, cache: KVCache, batch_size: int) -> None:
         if runner.has_recurrent_layers:

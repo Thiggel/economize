@@ -27,7 +27,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, ClassVar, Final
+from typing import ClassVar, Final, SupportsInt, TypedDict, TypeVar, cast
 
 import torch
 
@@ -44,6 +44,7 @@ __all__ = [
     "TSKIP_JUMP",
     "TSKIP_KINDS",
     "TSKIP_MEDUSA",
+    "TskipCheckpoint",
     "TskipEagle3Format",
     "TskipFile",
     "TskipFormat",
@@ -146,6 +147,17 @@ def _kind(file: str, mtime_ns: int, size: int) -> str | None:
     return TSKIP_EAGLE3 if isinstance(cfg, dict) and cfg.get("pred") == "eagle3" else TSKIP_JUMP
 
 
+class TskipCheckpoint(TypedDict, total=False):
+    """A loaded ``jump.pt``: the run's ``cfg`` (jump and EAGLE-3 runs), base model name, state dict, and for Medusa
+    runs ``kind="medusa"`` with ``K`` heads. The converters validate every value they read."""
+
+    cfg: dict[str, object]
+    model: str
+    state: dict[str, torch.Tensor]
+    kind: str
+    K: int
+
+
 class TskipFormat(CheckpointFormat):
     """A checkpoint format for one :attr:`TskipFile.kind` of ``jump.pt``.
 
@@ -165,14 +177,14 @@ class TskipFormat(CheckpointFormat):
         if not isinstance(raw, dict) or "state" not in raw:
             raise CheckpointFormatError(f"{file} is not a {self.kind} jump.pt checkpoint (needs 'state')")
         try:
-            checkpoint = self.convert(raw)
+            checkpoint = self.convert(cast(TskipCheckpoint, raw))
         except CheckpointFormatError as error:
             raise CheckpointFormatError(f"{file}: {error}") from error
         checkpoint.meta.setdefault("source", str(file))
         return checkpoint
 
     @abstractmethod
-    def convert(self, raw: dict[str, Any]) -> Checkpoint:
+    def convert(self, raw: TskipCheckpoint) -> Checkpoint:
         """The economize checkpoint of the loaded ``jump.pt`` dict ``raw`` (``raw["model"]`` names the base model)."""
 
 
@@ -246,7 +258,7 @@ _MIXERS = {"cat": "concat", "fc": "fused_linear", "lattn": "layer_attention"}
 _PREDICTORS = {"mlp": "mlp", "lin": "linear"}
 
 
-def _layer(cfg: dict[str, Any], key: str) -> int:
+def _layer(cfg: Mapping[str, object], key: str) -> int:
     """The integer layer index ``cfg[key]`` (``m``, ``u`` or ``r``)."""
     value = cfg.get(key)
     if isinstance(value, bool) or not isinstance(value, int):
@@ -254,16 +266,19 @@ def _layer(cfg: dict[str, Any], key: str) -> int:
     return value
 
 
-def _number(cfg: dict[str, Any], key: str, default: Any, kind: type) -> Any:
+_Number = TypeVar("_Number", int, float)
+
+
+def _number(cfg: Mapping[str, object], key: str, default: _Number, kind: type[_Number]) -> _Number:
     """``kind(cfg.get(key, default))``, failing with a :class:`CheckpointFormatError`."""
     value = cfg.get(key, default)
     try:
-        return kind(value)
+        return kind(cast(str, value))  # whatever the pickle holds: kind() raises on what it cannot convert
     except (TypeError, ValueError) as error:
         raise CheckpointFormatError(f"jump.pt config {key}={value!r} is not a {kind.__name__}") from error
 
 
-def jump_config_from_tskip(cfg: dict[str, Any]) -> JumpConfig:
+def jump_config_from_tskip(cfg: Mapping[str, object]) -> JumpConfig:
     """Translate the ``cfg`` dict of a ``jump.pt`` into a :class:`~economize.techniques.jump.JumpConfig`.
 
     Every key the translation reads is checked first. ``pred_depth`` (the number of attention layers of a block
@@ -292,7 +307,7 @@ def jump_config_from_tskip(cfg: dict[str, Any]) -> JumpConfig:
     m, u, r = _layer(cfg, "m"), _layer(cfg, "u"), _layer(cfg, "r")
     src = cfg.get("src") or ""
     try:
-        sources = sorted({int(x) for x in src.split(",")}) if src else [u]
+        sources = sorted({int(x) for x in cast(str, src).split(",")}) if src else [u]  # a non-str src: AttributeError
     except (AttributeError, ValueError) as error:
         raise CheckpointFormatError(f"jump.pt src={src!r} is not a comma-separated list of layers") from error
     if sources[-1] != u:
@@ -335,7 +350,7 @@ class TskipJumpFormat(TskipFormat):
 
     kind = TSKIP_JUMP
 
-    def convert(self, raw: dict[str, Any]) -> Checkpoint:
+    def convert(self, raw: TskipCheckpoint) -> Checkpoint:
         if "cfg" not in raw:
             raise CheckpointFormatError("not a jump-drafter jump.pt (needs 'cfg' and 'state')")
         config = jump_config_from_tskip(raw["cfg"])
@@ -343,7 +358,7 @@ class TskipJumpFormat(TskipFormat):
 
 
 # ---- stateless early-exit drafters -----------------------------------------------------------------------------------
-def early_exit_config_from_tskip(cfg: dict[str, Any], num_layers: int) -> EarlyExitConfig:
+def early_exit_config_from_tskip(cfg: Mapping[str, object], num_layers: int) -> EarlyExitConfig:
     """Translate the ``cfg`` dict of a stateless early-exit ``jump.pt`` into an
     :class:`~economize.techniques.early_exit.EarlyExitConfig`.
 
@@ -352,7 +367,7 @@ def early_exit_config_from_tskip(cfg: dict[str, Any], num_layers: int) -> EarlyE
     trained copy) and a readout adapter. When the predictor's correction is zero this is exactly an early-exit
     drafter with ``head="readout"``. Other jump drafters load as jump techniques (format ``"tskip"``).
     """
-    m, u, r = int(cfg["m"]), int(cfg["u"]), int(cfg["r"])
+    m, u, r = (int(cast(SupportsInt, cfg[key])) for key in "mur")
     if m != 0 or u != r or r >= num_layers:
         raise CheckpointFormatError(f"jump.pt drafter (m={m}, u={u}, r={r}) is not an early-exit drafter (m=0, u=r<L)")
     if cfg.get("use_state", True):
@@ -362,7 +377,10 @@ def early_exit_config_from_tskip(cfg: dict[str, Any], num_layers: int) -> EarlyE
     if cfg.get("pred", "mlp") not in ("mlp", "lin") or cfg.get("src") or not cfg.get("emb_residual", True):
         raise CheckpointFormatError(f"jump.pt predictor settings {cfg} do not reduce to the token embedding")
     return EarlyExitConfig(
-        exit_layer=r, head="readout", adaptation=cfg.get("mode", "frozen"), lora_rank=int(cfg.get("lora_rank", 16))
+        exit_layer=r,
+        head="readout",
+        adaptation=cast(str, cfg.get("mode", "frozen")),
+        lora_rank=int(cast(SupportsInt, cfg.get("lora_rank", 16))),
     )
 
 
@@ -379,7 +397,7 @@ def early_exit_state_from_tskip(state: Mapping[str, torch.Tensor], atol: float =
 
 
 # ---- EAGLE-3 heads (format "tskip_eagle3") ---------------------------------------------------------------------------
-def eagle3_config_from_tskip(checkpoint: dict[str, Any]) -> Eagle3Config:
+def eagle3_config_from_tskip(checkpoint: TskipCheckpoint) -> Eagle3Config:
     """The :class:`~economize.techniques.eagle3.Eagle3Config` of an EAGLE-3 ``jump.pt`` (shared, frozen final norm and
     LM head; the first position has a draft entry with a zero source)."""
     cfg = checkpoint.get("cfg")
@@ -423,13 +441,13 @@ class TskipEagle3Format(TskipFormat):
 
     kind = TSKIP_EAGLE3
 
-    def convert(self, raw: dict[str, Any]) -> Checkpoint:
+    def convert(self, raw: TskipCheckpoint) -> Checkpoint:
         return Checkpoint([eagle3_config_from_tskip(raw)], {"eagle3": eagle3_state_from_tskip(raw["state"])}, None,
                           raw.get("model"))
 
 
 # ---- Medusa heads (format "tskip_medusa") ----------------------------------------------------------------------------
-def medusa_config_from_tskip(checkpoint: dict[str, Any]) -> MedusaConfig:
+def medusa_config_from_tskip(checkpoint: TskipCheckpoint) -> MedusaConfig:
     """The :class:`~economize.techniques.medusa.MedusaConfig` of a Medusa ``jump.pt`` (one block per head, shared norm
     and head)."""
     if checkpoint.get("kind") != "medusa":
@@ -453,7 +471,7 @@ class TskipMedusaFormat(TskipFormat):
 
     kind = TSKIP_MEDUSA
 
-    def convert(self, raw: dict[str, Any]) -> Checkpoint:
+    def convert(self, raw: TskipCheckpoint) -> Checkpoint:
         return Checkpoint([medusa_config_from_tskip(raw)], {"medusa": medusa_state_from_tskip(raw["state"])}, None,
                           raw.get("model"))
 

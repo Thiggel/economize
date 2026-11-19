@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from collections.abc import Callable, Iterator, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from collections.abc import Iterator, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, cast
 
 import torch
 from torch import nn
@@ -37,6 +37,8 @@ from .technique import Capability, Technique, technique_for
 if TYPE_CHECKING:
     from collections.abc import ItemsView, ValuesView
 
+    from transformers.utils import ModelOutput
+
     class _TechniqueDict(nn.ModuleDict):
         """``nn.ModuleDict`` of :class:`Technique` (typing only: at runtime a plain ``nn.ModuleDict``)."""
 
@@ -46,8 +48,14 @@ if TYPE_CHECKING:
 
 __all__ = ["GENERATE_IMPLEMENTATIONS", "EfficientModel", "GenerateFn", "apply"]
 
-#: A ``transformers``-compatible ``generate``, called as ``fn(model, inputs, **generate_kwargs)``.
-GenerateFn = Callable[..., Any]
+class GenerateFn(Protocol):
+    """A ``transformers``-compatible ``generate``, called as ``fn(model, inputs, **generate_kwargs)``: the token ids,
+    or a ``transformers`` generate output when ``return_dict_in_generate=True``."""
+
+    def __call__(
+        self, model: EfficientModel, inputs: torch.Tensor | None = None, /, **kwargs: object
+    ) -> torch.Tensor | ModelOutput: ...
+
 
 #: Implementations of :meth:`EfficientModel.generate`. The core does not import the integrations layer: the package
 #: root registers ``"transformers"`` (:func:`economize.integrations.generate.generate`, imported on first use), and
@@ -102,6 +110,7 @@ class EfficientModel(nn.Module, EconomizeHubMixin):
         self.source_digests: dict[str, str] | None = None
         self.train(base_model.training)  # the wrapper starts in the base model's mode (e.g. eval after loading)
 
+    # Any: the wrapper proxies every attribute of the wrapped Hugging Face model, whose types it cannot know.
     def __getattr__(self, name: str) -> Any:
         try:
             return super().__getattr__(name)
@@ -110,7 +119,7 @@ class EfficientModel(nn.Module, EconomizeHubMixin):
                 raise
             return getattr(self.base_model, name)
 
-    def forward(self, *args: Any, **kwargs: Any) -> Any:
+    def forward(self, *args: object, **kwargs: object) -> object:
         """The base model's forward pass (drafters act only while decoding)."""
         return self.base_model(*args, **kwargs)
 
@@ -282,7 +291,7 @@ class EfficientModel(nn.Module, EconomizeHubMixin):
             prompts, max_new_tokens, selector=selector, stop=stop, selectors=selectors, stops=stops
         )
 
-    def generate(self, inputs: torch.Tensor | None = None, **kwargs: Any) -> Any:
+    def generate(self, inputs: torch.Tensor | None = None, **kwargs: object) -> torch.Tensor | ModelOutput:
         """``transformers``' ``generate`` with economize's decoding loop.
 
         Accepts ``decoding=DecodeConfig(...)`` besides every greedy and sampling argument of ``generate``; see
@@ -320,7 +329,7 @@ def apply(
     model: nn.Module,
     *configs: TechniqueConfig,
     decoding: DecodeConfig | None = None,
-    calibration: Any = None,
+    calibration: object = None,
 ) -> EfficientModel:
     """Attach the techniques described by ``configs`` to a Hugging Face causal LM.
 
@@ -350,7 +359,7 @@ def build_model(
     configs: Sequence[TechniqueConfig],
     *,
     decoding: DecodeConfig | None = None,
-    calibration: Any = None,
+    calibration: object = None,
     states: States | None = None,
 ) -> EfficientModel:
     """:func:`apply` that also loads saved technique ``states`` before the techniques attach (used by

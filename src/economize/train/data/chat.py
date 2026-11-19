@@ -4,7 +4,7 @@ assistant turns (:func:`tokenize_chats`) and the target's own continuations (:fu
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 import torch
 
@@ -13,11 +13,23 @@ from .sources import Example
 
 if TYPE_CHECKING:
     from torch import nn
+    from transformers import PreTrainedTokenizerBase
+
+class _Generates(Protocol):
+    """An HF causal LM's ``generate`` with the default ``return_dict_in_generate=False`` (it returns the ids)."""
+
+    def generate(self, *, input_ids: torch.Tensor, attention_mask: torch.Tensor, **kwargs: object) -> torch.Tensor: ...
+
+
+#: A chat conversation: ``{"role", "content"}`` messages.
+Conversation = Sequence[Mapping[str, object]]
 
 __all__ = ["generate_self_distillation", "tokenize_chats", "tokenize_texts"]
 
 
-def tokenize_texts(tokenizer: Any, texts: Iterable[str], max_length: int, *, add_eos: bool = True) -> list[Example]:
+def tokenize_texts(
+    tokenizer: PreTrainedTokenizerBase, texts: Iterable[str], max_length: int, *, add_eos: bool = True
+) -> list[Example]:
     """Plain-text examples (every next token counts), truncated to ``max_length`` tokens."""
     examples = []
     for text in texts:
@@ -29,9 +41,10 @@ def tokenize_texts(tokenizer: Any, texts: Iterable[str], max_length: int, *, add
     return examples
 
 
-def _chat_ids(tokenizer: Any, messages: Sequence[Mapping[str, Any]], generation_prompt: bool) -> list[int]:
+def _chat_ids(tokenizer: PreTrainedTokenizerBase, messages: Conversation, generation_prompt: bool) -> list[int]:
     out = tokenizer.apply_chat_template(
-        list(messages), tokenize=True, add_generation_prompt=generation_prompt, return_dict=False
+        cast("list[dict[str, str]]", list(messages)),  # HF's annotation; templates render any JSON message
+        tokenize=True, add_generation_prompt=generation_prompt, return_dict=False
     )
     if isinstance(out, Mapping):  # some tokenizers return a BatchEncoding regardless
         out = out["input_ids"]
@@ -39,8 +52,8 @@ def _chat_ids(tokenizer: Any, messages: Sequence[Mapping[str, Any]], generation_
 
 
 def tokenize_chats(
-    tokenizer: Any,
-    conversations: Iterable[Sequence[Mapping[str, Any]]],
+    tokenizer: PreTrainedTokenizerBase,
+    conversations: Iterable[Conversation],
     max_length: int,
     *,
     assistant_only: bool = True,
@@ -87,14 +100,14 @@ def tokenize_chats(
 @torch.no_grad()
 def generate_self_distillation(
     model: nn.Module,
-    tokenizer: Any,
-    prompts: Sequence[str | Sequence[Mapping[str, Any]]],
+    tokenizer: PreTrainedTokenizerBase,
+    prompts: Sequence[str | Conversation],
     *,
     max_new_tokens: int = 256,
     batch_size: int = 8,
     chat: bool | None = None,
     progress: Callable[[int, int], None] | None = None,
-    **generate_kwargs: Any,
+    **generate_kwargs: object,
 ) -> list[Example]:
     """Examples made of prompts and the target's own continuations (HF ``generate``), with the loss on the
     continuation only. Training a drafter on them matches its training data to what it will draft at test time.
@@ -118,7 +131,7 @@ def generate_self_distillation(
     for first in range(0, len(prompts), batch_size):
         chunk = prompts[first : first + batch_size]
         encoded = [
-            _chat_ids(tokenizer, cast("Sequence[Mapping[str, Any]]", p), True)
+            _chat_ids(tokenizer, cast("Conversation", p), True)
             if chat
             else tokenizer(p, add_special_tokens=True)["input_ids"]
             for p in chunk
@@ -129,7 +142,7 @@ def generate_self_distillation(
         for i, e in enumerate(encoded):  # left padding for generation
             ids[i, width - len(e) :] = torch.tensor(e)
             attention[i, width - len(e) :] = 1
-        out = cast(Any, model).generate(  # an HF causal LM
+        out = cast("_Generates", model).generate(  # an HF causal LM
             input_ids=ids.to(device), attention_mask=attention.to(device), max_new_tokens=max_new_tokens,
             pad_token_id=pad, **generate_kwargs,
         ).cpu()
@@ -155,7 +168,7 @@ def _ids(value: object) -> set[int]:
     return set()
 
 
-def _stop_ids(tokenizer: Any, model: nn.Module, generate_kwargs: Mapping[str, Any]) -> set[int]:
+def _stop_ids(tokenizer: PreTrainedTokenizerBase, model: nn.Module, generate_kwargs: Mapping[str, object]) -> set[int]:
     """Every id ``generate`` stops on: the tokenizer's EOS, the model's generation config (Llama 3 and Qwen chat
     models list several) and an ``eos_token_id`` passed to the call."""
     config = getattr(model, "generation_config", None)

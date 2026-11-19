@@ -7,7 +7,7 @@ pass has seen yet, records its cost and returns a :class:`Pass` that says where 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import torch
 
@@ -126,7 +126,7 @@ def chain_pass(gen: Generation, draft: Draft) -> Pass:
     if gen.graphs is not None:  # one graph per (batch size, width): the mask is always given
         if valid is None:
             valid = torch.ones_like(positions, dtype=torch.bool)
-        exact, logits = gen.graphs.exact(tokens, positions, valid, picks, starts)
+        exact, logits = gen.graphs.exact(tokens, positions, valid, picks, cast("list[int | None]", starts))  # read only
     else:
         ctx = gen.runner.context(gen.cache, positions, valid, trusted=True, consecutive=True)
         with phase(gen.phase):
@@ -165,7 +165,7 @@ def tree_pass(gen: Generation, draft: Draft) -> Pass:
     parents = torch.cat([root_parent, draft.parents.to(gen.device) + 1], 1)
     valid = torch.arange(width, device=gen.device) < device_tensor(draft.lengths, gen.device)[:, None] + 1
     if gen.graphs is not None:  # one graph per (batch size, tree width)
-        exact, logits = gen.graphs.tree(tokens, parents, starts_t, valid, starts)
+        exact, logits = gen.graphs.tree(tokens, parents, starts_t, valid, cast("list[int | None]", starts))  # read only
     else:
         tree = TreeLayout.build(parents, starts_t, valid, trash_slot=gen.cache.trash_slot)
         ctx = gen.runner.tree_context(gen.cache, tree, valid, trusted=True)

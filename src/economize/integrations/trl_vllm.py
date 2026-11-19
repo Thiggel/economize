@@ -43,12 +43,13 @@ from __future__ import annotations
 import importlib
 import re
 import urllib.request
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import Any
+from types import ModuleType
+from typing import TYPE_CHECKING, Protocol, cast
 
 import torch
 from transformers import TrainerCallback
@@ -59,6 +60,10 @@ from ..backends.vllm.spec import speculative_config
 from ..errors import ConfigError
 from ..validation import check_positive
 from ._trl_common import inject_logs, is_eval_log
+
+if TYPE_CHECKING:
+    from torch import nn
+    from transformers import Trainer, TrainerControl, TrainerState, TrainingArguments
 
 __all__ = [
     "COUNTERS",
@@ -83,6 +88,46 @@ COUNTERS: tuple[str, ...] = (
 )
 
 
+_Weights = Iterable[tuple[str, torch.Tensor]]
+
+
+class _WeightLoader(Protocol):
+    """vLLM's target model inside a worker (``load_weights`` of a vLLM model class)."""
+
+    def load_weights(self, weights: _Weights) -> object: ...
+
+
+class _Metric(Protocol):
+    """An entry of ``vllm.LLM.get_metrics()`` (counters also have ``value``)."""
+
+    name: str
+
+
+class _Engine(Protocol):
+    """The parts of ``vllm.LLM`` used here."""
+
+    def get_metrics(self) -> Sequence[_Metric]: ...
+
+
+class _Client(Protocol):
+    """The parts of TRL's ``VLLMClient`` (server mode) used here."""
+
+    base_url: str
+
+    def update_named_params(
+        self, metadata: list[tuple[str, str, list[int]]], weights: Iterator[tuple[str, torch.Tensor]]
+    ) -> object: ...
+
+
+class _Generation(Protocol):
+    """The parts of TRL's ``VLLMGeneration`` (``trl.generation.vllm_generation``) used here."""
+
+    mode: str
+    llm: _Engine
+    vllm_client: _Client
+    _iter_named_params: Callable[[], Iterator[tuple[str, torch.Tensor]]]
+
+
 # ---- colocate mode: the engine arguments ---------------------------------------------------------------------------
 @contextmanager
 def speculative_rollouts(
@@ -91,10 +136,10 @@ def speculative_rollouts(
     *,
     sampling: bool = True,
     log_stats: bool = True,
-    engine_kwargs: dict[str, Any] | None = None,
+    engine_kwargs: Mapping[str, object] | None = None,
     modules: Sequence[str] = TRL_LLM_MODULES,
-    **extra: Any,
-) -> Iterator[dict[str, Any]]:
+    **extra: object,
+) -> Iterator[dict[str, object]]:
     """Make the trainers constructed inside the block build their colocated vLLM engine with the drafter.
 
     Inside the block, TRL's ``LLM`` is a subclass that adds ``speculative_config`` (and ``disable_log_stats=False``
@@ -115,11 +160,11 @@ def speculative_rollouts(
     Raises:
         ConfigError: TRL (with vLLM) is not importable, or none of ``modules`` defines ``LLM``.
     """
-    config = speculative_config(drafter, num_speculative_tokens, sampling=sampling, **extra)
-    added = dict(engine_kwargs or {}) | {"speculative_config": config}
+    config: dict[str, object] = speculative_config(drafter, num_speculative_tokens, sampling=sampling, **extra)
+    added: dict[str, object] = dict(engine_kwargs or {}) | {"speculative_config": config}
     if log_stats:
         added["disable_log_stats"] = False
-    patched: list[tuple[Any, Any]] = []
+    patched: list[tuple[ModuleType, type]] = []
     for name in modules:
         try:
             module = importlib.import_module(name)
@@ -135,41 +180,46 @@ def speculative_rollouts(
         yield config
     finally:
         for module, original in patched:
-            module.LLM = original
+            setattr(module, "LLM", original)  # noqa: B010  (mirrors the getattr above)
 
 
-def _with_defaults(llm: type[Any], added: dict[str, Any]) -> type:
+def _with_defaults(llm: type, added: dict[str, object]) -> type:
     """A subclass of ``llm`` whose constructor fills in ``added`` (the caller's arguments win)."""
+    # vLLM's LLM constructor, read off the class (mypy refuses ``llm.__init__``); its arguments pass through untyped
+    init: Callable[..., None] = getattr(llm, "__init__")  # noqa: B009
 
-    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
-        llm.__init__(self, *args, **(added | kwargs))
+    def __init__(self: object, *args: object, **kwargs: object) -> None:
+        init(self, *args, **(added | kwargs))
 
     return type(llm.__name__, (llm,), {"__init__": __init__, "__module__": llm.__module__,
                                         "__doc__": llm.__doc__, "economize_engine_kwargs": dict(added)})
 
 
 # ---- the drafter's weights -----------------------------------------------------------------------------------------
-def _generation(trainer: Any) -> Any:
+def _generation(trainer: object) -> _Generation:
     generation = getattr(trainer, "vllm_generation", None)
     if generation is None or getattr(trainer, "use_vllm", True) is False:
         raise ConfigError("the trainer does not generate with vLLM (set use_vllm=True; TRL 0.29 or later)")
-    return generation
+    return cast(_Generation, generation)
 
 
-def _in_process_model(llm: Any) -> Any:
+def _in_process_model(llm: object) -> _WeightLoader | None:
     """The target model of an engine whose worker runs in this process, else ``None``.
 
     This is the path TRL's own colocate sync loads weights through (TRL 1.14 with vLLM 0.30): the uniprocess and
     external-launcher executors of vLLM's V1 engine, with ``VLLM_ENABLE_V1_MULTIPROCESSING=0`` as TRL sets it, and
     the V0 engine keep the worker in the engine's process (one worker per tensor-parallel rank).
     """
+    target = llm
     try:
-        return llm.llm_engine.model_executor.driver_worker.model_runner.model
+        for name in ("llm_engine", "model_executor", "driver_worker", "model_runner", "model"):
+            target = getattr(target, name)
     except AttributeError:
         return None
+    return cast(_WeightLoader, target)
 
 
-def _load_into_engine(generation: Any, weights: list[tuple[str, torch.Tensor]]) -> None:
+def _load_into_engine(generation: _Generation, weights: list[tuple[str, torch.Tensor]]) -> None:
     """Load ``weights`` into the target model of the trainer's colocated engine.
 
     In-process workers (what TRL builds) load them directly. Otherwise ``LLM.apply_model`` (vLLM 0.8 and later)
@@ -193,12 +243,12 @@ def _load_into_engine(generation: Any, weights: list[tuple[str, torch.Tensor]]) 
     apply_model(lambda target: target.load_weights(on_cpu))
 
 
-def _device(generation: Any) -> torch.device | None:
+def _device(generation: _Generation) -> torch.device | None:
     accelerator = getattr(generation, "accelerator", None)
     return accelerator.device if generation.mode == "server" and accelerator is not None else None
 
 
-def sync_drafter(trainer: Any, model: Any) -> Callable[[], None]:
+def sync_drafter(trainer: Trainer, model: nn.Module) -> Callable[[], None]:
     """Append the drafter's tensors (:func:`~economize.backends.vllm.drafter_weights`) to every policy weight sync.
 
     TRL syncs the policy before the first generation after an optimizer step. With this, the same sync (one
@@ -232,11 +282,13 @@ def sync_drafter(trainer: Any, model: Any) -> Callable[[], None]:
         raise ConfigError("the trainer's weight sync already carries a drafter")
     device = _device(generation)
 
+    sync: Callable[[], Iterator[tuple[str, torch.Tensor]]] = original
+
     def iterate() -> Iterator[tuple[str, torch.Tensor]]:
-        yield from original()
+        yield from sync()
         yield from drafter_weights(model, device=device)
 
-    iterate.economize_drafter = model  # type: ignore[attr-defined]
+    setattr(iterate, "economize_drafter", model)  # noqa: B010  (a marker on a function, read back with getattr)
     patched = "_iter_named_params" in vars(generation)  # an instance-level wrapper installed before ours
     generation._iter_named_params = iterate
 
@@ -250,7 +302,7 @@ def sync_drafter(trainer: Any, model: Any) -> Callable[[], None]:
     return undo
 
 
-def push_drafter(trainer: Any, model: Any) -> list[str]:
+def push_drafter(trainer: Trainer, model: nn.Module) -> list[str]:
     """Load ``model``'s jump drafter into the trainer's running vLLM engine now (outside a policy sync).
 
     Colocate mode loads the tensors on every process; server mode sends them from the main process in a weight-update
@@ -294,7 +346,7 @@ def parse_prometheus(text: str) -> dict[str, float]:
     return totals
 
 
-def spec_decode_counters(trainer: Any, *, timeout: float = 10.0) -> dict[str, float] | None:
+def spec_decode_counters(trainer: Trainer, *, timeout: float = 10.0) -> dict[str, float] | None:
     """vLLM's cumulative speculative-decoding counters of the trainer's engine.
 
     Colocate mode reads ``LLM.get_metrics()`` (statistics must be on: :func:`speculative_rollouts` turns them on);
@@ -331,7 +383,7 @@ class SpecDecodeStatsCallback(TrainerCallback):
     so that ``trainer.state.log_history`` and the reporting integrations see the statistics.
     """
 
-    def __init__(self, trainer: Any, *, read: Callable[[], dict[str, float] | None] | None = None) -> None:
+    def __init__(self, trainer: Trainer, *, read: Callable[[], dict[str, float] | None] | None = None) -> None:
         self.read = read or (lambda: spec_decode_counters(trainer))
         self._last: dict[str, float] | None = None
         self.totals: dict[str, float] = {}
@@ -346,7 +398,14 @@ class SpecDecodeStatsCallback(TrainerCallback):
         self.totals = dict(now)
         return {name: now[name] - last.get(name, 0.0) for name in now}
 
-    def on_log(self, args: Any, state: Any, control: Any, logs: dict[str, float] | None = None, **kwargs: Any) -> None:
+    def on_log(
+        self,
+        args: TrainingArguments,
+        state: TrainerState,
+        control: TrainerControl,
+        logs: dict[str, float] | None = None,
+        **kwargs: object,
+    ) -> None:
         if logs is None:
             return
         delta = self.window()
@@ -374,13 +433,15 @@ class RedistillCallback(TrainerCallback):
     :func:`sync_drafter` is installed; with ``push=True`` it is pushed at once (:func:`push_drafter`).
     """
 
-    def __init__(self, trainer: Any, model: Any, distill: Callable[[Any], Any], every: int, *,
+    def __init__(self, trainer: Trainer, model: nn.Module, distill: Callable[[nn.Module], object], every: int, *,
                  push: bool = False) -> None:
         check_positive("every", every)
         self.trainer, self.model, self.distill, self.every, self.push = trainer, model, distill, every, push
         self.rounds = 0
 
-    def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+    def on_step_end(
+        self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs: object
+    ) -> None:
         if state.global_step % self.every:
             return
         self.distill(self.model)
@@ -410,10 +471,10 @@ class DrafterLink:
 
 
 def attach_drafter(
-    trainer: Any,
-    model: Any = None,
+    trainer: Trainer,
+    model: nn.Module | None = None,
     *,
-    distill: Callable[[Any], Any] | None = None,
+    distill: Callable[[nn.Module], object] | None = None,
     every: int = 0,
     stats: bool = True,
 ) -> DrafterLink:
@@ -436,7 +497,9 @@ def attach_drafter(
         raise ConfigError("re-distillation needs the drafter's model and every >= 1")
     callbacks = trainer.callback_handler.callbacks
     link = DrafterLink(stats=SpecDecodeStatsCallback(trainer) if stats else None,
-                       redistill=RedistillCallback(trainer, model, distill, every) if distill is not None else None)
+                       redistill=None if distill is None else
+                       # distill implies a model (checked above)
+                       RedistillCallback(trainer, cast("nn.Module", model), distill, every))
     if model is not None:
         link.on_detach(sync_drafter(trainer, model))
     for callback in (link.redistill, link.stats):
@@ -446,7 +509,7 @@ def attach_drafter(
     return link
 
 
-def _discard(items: list[Any], item: Any) -> None:
+def _discard(items: list[TrainerCallback], item: TrainerCallback) -> None:
     """Remove ``item`` from ``items`` if it is still there."""
     if item in items:
         items.remove(item)

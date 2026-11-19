@@ -16,7 +16,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, ClassVar, Protocol, runtime_checkable
 
 import torch
 
@@ -28,6 +28,7 @@ from .cost import LayerFootprint
 if TYPE_CHECKING:
     from ..runtime import ExactPass, KVCache, LayerRunner
     from .config import DecodeConfig
+    from .graphs import GraphWrap
     from .request import DraftRequest
 
 __all__ = [
@@ -257,7 +258,7 @@ class Drafter(ABC):
         """Most tokens (tree nodes) one :meth:`propose` call makes per row (the loop sizes its buffers with it)."""
         return cycle_length - 1
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool:
+    def enable_graphs(self, wrap: GraphWrap) -> bool:
         """Opt in to CUDA graphs (``DecodeConfig.cuda_graphs``); return whether the drafter did.
 
         The decoder calls this once, before the first generation. ``wrap(fn)`` turns a function of tensors into a
@@ -321,7 +322,7 @@ class WrappableDrafter(Protocol):
 
     def draft_capacity(self, cycle_length: int) -> int: ...
 
-    def enable_graphs(self, wrap: Callable[[Callable[..., Any]], Callable[..., Any]]) -> bool: ...
+    def enable_graphs(self, wrap: GraphWrap) -> bool: ...
 
     def drafts_trees(self, verifier: Verifier) -> bool: ...
 
@@ -348,7 +349,7 @@ class Verifier(ABC):
     needs_draft_probs: ClassVar[bool] = False
     supports_trees: ClassVar[bool] = False
     lossless: ClassVar[bool] = True
-    default_options: ClassVar[Mapping[str, Any]] = {}
+    default_options: ClassVar[Mapping[str, object]] = {}
 
     def __init__(self, config: DecodeConfig) -> None:
         self.config = config
@@ -358,7 +359,7 @@ class Verifier(ABC):
                 f"unknown verifier_options {sorted(unknown)} for verifier {config.verifier_name!r}; "
                 f"it takes {sorted(self.default_options)}"
             )
-        self.options: dict[str, Any] = {**self.default_options, **config.verifier_options}
+        self.options: dict[str, object] = {**self.default_options, **config.verifier_options}
 
     def draft(
         self, logits: torch.Tensor, selector: TokenSelector, history: torch.Tensor

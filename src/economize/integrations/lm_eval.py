@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, TypeGuard, cast
 
 import torch
 
@@ -49,6 +49,13 @@ from ..validation import check_choice
 from ._scoring import needs_decode_scoring, score_continuations
 from .generate import generate
 
+if TYPE_CHECKING:
+    from transformers import PreTrainedModel
+
+    from ..core.model import EfficientModel
+    from ..decoding.config import DecodeConfig
+    from ..decoding.result import DecodeResult
+
 __all__ = ["MODEL_NAME", "SCORING_MODES", "EconomizeLM", "main"]
 
 #: The name under which :class:`EconomizeLM` is registered in lm-eval's model registry.
@@ -58,7 +65,7 @@ MODEL_NAME = "economize"
 SCORING_MODES = ("auto", "decode", "forward")
 
 
-def _is_efficient(model: Any) -> bool:
+def _is_efficient(model: object) -> TypeGuard[EfficientModel]:
     """Whether ``model`` is an economize model (it decodes) rather than a ``transformers`` model."""
     from transformers import PreTrainedModel
 
@@ -87,12 +94,12 @@ class EconomizeLM(HFLM):
 
     def __init__(
         self,
-        pretrained: Any = None,
+        pretrained: EfficientModel | PreTrainedModel | str | None = None,
         economize: str | None = None,
         check_base: bool = True,
         scoring: str = "auto",
-        on_results: Callable[[list[Any]], None] | None = None,
-        **kwargs: Any,
+        on_results: Callable[[list[DecodeResult]], None] | None = None,
+        **kwargs: object,
     ) -> None:
         check_choice("scoring", scoring, SCORING_MODES)
         overrides = {name: kwargs.pop(name) for name in _decode_fields() & set(kwargs)}
@@ -109,7 +116,9 @@ class EconomizeLM(HFLM):
 
             efficient = from_pretrained(str(economize), base_model=self._model, check_base=check_base)
         self.efficient = efficient
-        self.decoding = dataclasses.replace(efficient.decoding, **overrides) if overrides else None
+        # the overrides are DecodeConfig fields picked out of the untyped HFLM keyword arguments
+        replace: Callable[..., DecodeConfig] = dataclasses.replace
+        self.decoding = replace(efficient.decoding, **overrides) if overrides else None
         self.on_results = on_results
         self.scoring = ("decode" if needs_decode_scoring(efficient) else "forward") if scoring == "auto" else scoring
 
@@ -143,7 +152,7 @@ class EconomizeLM(HFLM):
         return answers
 
     def _model_generate(
-        self, context: torch.Tensor, max_length: int, stop: list[str], **generation_kwargs: Any
+        self, context: torch.Tensor, max_length: int, stop: list[str], **generation_kwargs: object
     ) -> torch.Tensor:
         """``HFLM._model_generate`` through economize: the batch is decoded in one call, each row with its own
         stop-sequence criteria (``row_stopping_criteria``), so that each row ends at its own stop sequence.
@@ -156,12 +165,16 @@ class EconomizeLM(HFLM):
         generation_kwargs.pop("use_cache", None)
         generation_kwargs = _greedy_unless_sampling(generation_kwargs)
         rows = [stop_sequences_criteria(self.tokenizer, stop, context.shape[1], 1) for _ in range(context.shape[0])]
-        return generate(self.efficient, context, max_length=max_length, row_stopping_criteria=rows,
-                        pad_token_id=self.tokenizer.pad_token_id, decoding=self.decoding, on_results=self.on_results,
-                        **generation_kwargs)
+        # lm-eval's generation keywords are an untyped mapping; it never sets return_dict_in_generate, so the
+        # result is the token tensor
+        economize_generate: Callable[..., object] = generate
+        output = economize_generate(self.efficient, context, max_length=max_length, row_stopping_criteria=rows,
+                                    pad_token_id=self.tokenizer.pad_token_id, decoding=self.decoding,
+                                    on_results=self.on_results, **generation_kwargs)
+        return cast(torch.Tensor, output)
 
 
-def _greedy_unless_sampling(kwargs: dict[str, Any]) -> dict[str, Any]:
+def _greedy_unless_sampling(kwargs: dict[str, object]) -> dict[str, object]:
     """lm-eval's convention: temperature 0 (the default) means greedy decoding."""
     kwargs = dict(kwargs)
     temperature = kwargs.setdefault("temperature", 0.0)
@@ -172,7 +185,7 @@ def _greedy_unless_sampling(kwargs: dict[str, Any]) -> dict[str, Any]:
     return kwargs
 
 
-def _base_of_checkpoint(economize: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+def _base_of_checkpoint(economize: str, kwargs: dict[str, object]) -> tuple[str, dict[str, object]]:
     """The base model name (and revision) an economize checkpoint records (see
     :func:`economize.core.serialization.resolve_base_model`)."""
     from ..core.hub import download, read_meta

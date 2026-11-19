@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import cast
 
 import torch
 
@@ -79,7 +80,8 @@ class DraftRequest:
             raise ConfigError("selectors must hold one selector per row")
         self.seq, self.selector, self.verifier, self.policy = seq, selector, verifier, policy
         self.selectors = list(selectors) if selectors is not None else [selector] * seq.shape[0]
-        self.footprint = footprint if footprint is not None else LayerFootprint(*layer_span)  # type: ignore[misc]
+        # Exactly one of footprint and layer_span is given (checked above).
+        self.footprint = footprint if footprint is not None else LayerFootprint(*cast("tuple[int, int]", layer_span))
         self.costs = list(costs)
         self.ends, self.budgets = list(ends), list(budgets)
         self.index = 0

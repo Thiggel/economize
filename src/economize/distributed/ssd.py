@@ -41,7 +41,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Literal
 
 import torch
 from torch import nn
@@ -88,7 +88,7 @@ class SSDConfig:
     top_p: float = 1.0
     seed: int = 0
     verifier: str | None = None
-    verifier_options: Mapping[str, Any] = field(default_factory=dict, hash=False)
+    verifier_options: Mapping[str, object] = field(default_factory=dict, hash=False)
 
     def __post_init__(self) -> None:
         check_positive("draft_length", self.draft_length)
@@ -139,7 +139,7 @@ class SSDResult(DecodeResult):
         """Tokens committed per verification pass (accepted drafts plus the target's own token)."""
         return 1 + self.mean_accepted
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self) -> dict[str, object]:
         """The statistics above, the target's cost summary and the drafter's work.
 
         The target's keys (``exact_calls``, ``layer_tokens``, ``relative_layer_tokens``, ...) count the target's

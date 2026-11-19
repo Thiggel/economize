@@ -4,14 +4,32 @@ from __future__ import annotations
 
 import json
 import random
-from typing import Any
+from typing import TypedDict, cast
 
 import numpy as np
 import torch
 
+from .._typing import JSONValue
 from ..errors import ConfigError
 
-__all__ = ["autocast_dtype", "jsonable", "rng_state", "seed_everything", "set_rng_state", "spawn_seed"]
+__all__ = ["RNGState", "autocast_dtype", "jsonable", "rng_state", "seed_everything", "set_rng_state", "spawn_seed"]
+
+#: numpy's legacy generator state with its key as a tensor: kind, key, position, has_gauss, cached gaussian.
+NumpyState = tuple[str, torch.Tensor, int, int, float]
+
+
+class _RNGStateRequired(TypedDict):
+    torch: torch.Tensor
+    numpy: NumpyState
+    #: ``random.getstate()`` (typeshed types it as ``tuple[Any, ...]``)
+    python: tuple[object, ...]
+
+
+class RNGState(_RNGStateRequired, total=False):
+    """What :func:`rng_state` returns."""
+
+    #: one state per CUDA device, present when CUDA was initialized
+    cuda: list[torch.Tensor]
 
 
 def autocast_dtype(value: str | torch.dtype | None) -> torch.dtype | None:
@@ -42,11 +60,11 @@ def spawn_seed(seed: int, *keys: int) -> int:
     return (int(words[0]) | int(words[1]) << 32) & (2**63 - 1)
 
 
-def rng_state() -> dict[str, Any]:
+def rng_state() -> RNGState:
     """The state of every random generator a run uses (``torch``, ``numpy``, ``random`` and initialized CUDA), of
     tensors and plain Python values only, so that ``torch.load(..., weights_only=True)`` reads it back."""
     kind, key, pos, has_gauss, cached = np.random.get_state(legacy=True)
-    state: dict[str, Any] = {
+    state: RNGState = {
         "torch": torch.get_rng_state(),
         "numpy": (str(kind), torch.from_numpy(key.astype(np.int64)), int(pos), int(has_gauss), float(cached)),
         "python": random.getstate(),
@@ -56,7 +74,7 @@ def rng_state() -> dict[str, Any]:
     return state
 
 
-def set_rng_state(state: dict[str, Any]) -> None:
+def set_rng_state(state: RNGState) -> None:
     """Restore a state of :func:`rng_state`."""
     torch.set_rng_state(state["torch"])
     kind, key, pos, has_gauss, cached = state["numpy"]
@@ -66,11 +84,11 @@ def set_rng_state(state: dict[str, Any]) -> None:
         torch.cuda.set_rng_state_all(state["cuda"])
 
 
-def jsonable(value: Any) -> Any:
+def jsonable(value: object) -> JSONValue:
     """``value`` with everything JSON cannot hold replaced by its ``repr`` (dict keys become strings)."""
     try:
         json.dumps(value)
-        return value
+        return cast("JSONValue", value)
     except TypeError:
         if isinstance(value, dict):
             return {str(k): jsonable(v) for k, v in value.items()}

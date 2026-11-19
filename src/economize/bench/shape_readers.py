@@ -14,17 +14,16 @@ adapter.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any
 
 from ..arch import ARCHITECTURES
-from ..arch.config import config_value
+from ..arch.config import HFConfig, config_value
 from ..registry import Registry
 
 __all__ = ["SHAPE_READERS", "ShapeReader", "family_fields", "first_set"]
 
 #: Reads family-specific fields: ``reader(text_config, fields)`` returns the fields of :class:`ModelShape` that
 #: replace the generic reading ``fields`` for configs of one ``model_type``.
-ShapeReader = Callable[[Any, Mapping[str, Any]], Mapping[str, Any]]
+ShapeReader = Callable[[HFConfig, Mapping[str, object]], Mapping[str, object]]
 
 #: The :data:`ShapeReader` of every model type whose config the generic reading of
 #: :meth:`ModelShape.from_config` gets wrong. A new family registers one (``SHAPE_READERS.register("type", fn)``,
@@ -33,7 +32,7 @@ ShapeReader = Callable[[Any, Mapping[str, Any]], Mapping[str, Any]]
 SHAPE_READERS: Registry[ShapeReader] = Registry("shape reader", "economize.shape_readers")
 
 
-def first_set(config: Any, *names: str) -> Any:
+def first_set(config: HFConfig, *names: str) -> object:
     """The first of the config attributes ``names`` that is set (not ``None`` or zero), else ``None``."""
     for name in names:
         value = config_value(config, name)
@@ -42,7 +41,7 @@ def first_set(config: Any, *names: str) -> Any:
     return None
 
 
-def family_fields(config: Any, fields: Mapping[str, Any]) -> dict[str, Any]:
+def family_fields(config: HFConfig, fields: Mapping[str, object]) -> dict[str, object]:
     """``fields`` with the corrections of the config's family applied: the adapter's ``shape_fields``, then the
     registered :data:`ShapeReader` (which sees the adapter's corrections)."""
     out = dict(fields)
@@ -54,7 +53,7 @@ def family_fields(config: Any, fields: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _ungated(config: Any, fields: Mapping[str, Any]) -> Mapping[str, Any]:
+def _ungated(config: HFConfig, fields: Mapping[str, object]) -> Mapping[str, object]:
     """An MLP of two matrices (no gate projection)."""
     return {"gated": False}
 
@@ -71,10 +70,10 @@ SHAPE_READERS.register("gpt_bigcode", _ungated)
 
 
 @SHAPE_READERS.register("llama4_text")
-def _llama4(config: Any, fields: Mapping[str, Any]) -> Mapping[str, Any]:
+def _llama4(config: HFConfig, fields: Mapping[str, object]) -> Mapping[str, object]:
     """Llama-4: one ungated shared expert of width ``intermediate_size`` in every MoE layer, and dense layers of an
     interleaved model of their own width ``intermediate_size_mlp``."""
-    out: dict[str, Any] = {"intermediate": first_set(config, "intermediate_size_mlp") or fields["intermediate"]}
+    out: dict[str, object] = {"intermediate": first_set(config, "intermediate_size_mlp") or fields["intermediate"]}
     if fields["experts"]:
         out.update(shared_intermediate=fields["intermediate"], shared_gate=False)
     return out

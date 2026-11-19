@@ -20,16 +20,23 @@ import contextlib
 import gc
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 import torch
+
+if TYPE_CHECKING:
+    from torch.cuda import _POOL_HANDLE
 
 __all__ = ["GraphPool", "StaticStep", "capture"]
 
 _Key = tuple[tuple[tuple[int, ...], torch.dtype, torch.device], ...]
+_R = TypeVar("_R")
+_R_co = TypeVar("_R_co", covariant=True)
 
 
-def capture(graph: torch.cuda.CUDAGraph, fn: Callable[[], Any], device: torch.device, *, pool: Any = None) -> Any:
+def capture(
+    graph: torch.cuda.CUDAGraph, fn: Callable[[], _R], device: torch.device, *, pool: _POOL_HANDLE | None = None
+) -> _R:
     """Record ``fn()`` into ``graph`` on a fresh stream of ``device`` and return its output (the graph's buffers).
 
     Every capture of the library goes through here, so all of them share the same safeguards:
@@ -75,13 +82,13 @@ def capture(graph: torch.cuda.CUDAGraph, fn: Callable[[], Any], device: torch.de
 
 
 @dataclass
-class _Captured:
+class _Captured(Generic[_R_co]):
     graph: torch.cuda.CUDAGraph
     inputs: tuple[torch.Tensor, ...]
-    output: Any
+    output: _R_co
 
 
-class StaticStep:
+class StaticStep(Generic[_R_co]):
     """A function of tensors replayed from a CUDA graph per distinct input signature (shapes, dtypes, devices).
 
     Outputs of a replay are the graph's static buffers: they are overwritten by the next call with the same
@@ -94,15 +101,17 @@ class StaticStep:
         pool: Memory pool shared with other graphs (``torch.cuda.graph_pool_handle()``).
     """
 
-    def __init__(self, fn: Callable[..., Any], *, warmup: int = 2, enabled: bool = True, pool: Any = None) -> None:
+    def __init__(
+        self, fn: Callable[..., _R_co], *, warmup: int = 2, enabled: bool = True, pool: _POOL_HANDLE | None = None
+    ) -> None:
         self.fn = fn
         self.warmup = warmup
         self.enabled = enabled
         self.pool = pool
-        self._graphs: dict[_Key, _Captured] = {}
+        self._graphs: dict[_Key, _Captured[_R_co]] = {}
         self._calls: dict[_Key, int] = {}
 
-    def __call__(self, *inputs: torch.Tensor) -> Any:
+    def __call__(self, *inputs: torch.Tensor) -> _R_co:
         if not self.enabled or not inputs or inputs[0].device.type != "cuda":
             return self.fn(*inputs)
         key: _Key = tuple((tuple(t.shape), t.dtype, t.device) for t in inputs)
@@ -127,7 +136,7 @@ class StaticStep:
     def num_graphs(self) -> int:
         return len(self._graphs)
 
-    def _capture(self, key: _Key, inputs: tuple[torch.Tensor, ...]) -> Any:
+    def _capture(self, key: _Key, inputs: tuple[torch.Tensor, ...]) -> _R_co:
         static = tuple(t.clone() for t in inputs)
         graph = torch.cuda.CUDAGraph()
         output = capture(graph, lambda: self.fn(*static), inputs[0].device, pool=self.pool)
@@ -136,7 +145,7 @@ class StaticStep:
         return output
 
     @staticmethod
-    def _side_stream(fn: Callable[..., Any], *inputs: torch.Tensor) -> Any:
+    def _side_stream(fn: Callable[..., _R], *inputs: torch.Tensor) -> _R:
         stream = torch.cuda.Stream(inputs[0].device)
         stream.wait_stream(torch.cuda.current_stream(inputs[0].device))
         with torch.cuda.stream(stream):
@@ -161,12 +170,12 @@ class GraphPool:
     def __init__(self, device: torch.device | None = None, *, enabled: bool = True) -> None:
         self.device = device
         self.enabled = enabled
-        self.steps: list[StaticStep] = []
-        self.handle: Any = self._new_handle()
+        self.steps: list[StaticStep[object]] = []
+        self.handle: _POOL_HANDLE | None = self._new_handle()
 
-    def step(self, fn: Callable[..., Any], **kwargs: Any) -> StaticStep:
+    def step(self, fn: Callable[..., _R], *, warmup: int = 2, enabled: bool = True) -> StaticStep[_R]:
         """``fn`` as a :class:`StaticStep` on this pool (keyword arguments as for :class:`StaticStep`)."""
-        step = StaticStep(fn, pool=self.handle, enabled=self.enabled and kwargs.pop("enabled", True), **kwargs)
+        step = StaticStep(fn, pool=self.handle, enabled=self.enabled and enabled, warmup=warmup)
         self.steps.append(step)
         return step
 
@@ -183,7 +192,7 @@ class GraphPool:
         """Graphs recorded so far (over all steps)."""
         return sum(step.num_graphs for step in self.steps)
 
-    def _new_handle(self) -> Any:
+    def _new_handle(self) -> _POOL_HANDLE | None:
         if not self.enabled:
             return None
         with self._on_device():

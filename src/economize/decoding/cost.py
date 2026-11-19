@@ -5,9 +5,23 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
-from typing import Any, Final
+from typing import Final, TypedDict
 
-__all__ = ["CostEvent", "CostKind", "CostLog", "LayerFootprint"]
+__all__ = ["CostEvent", "CostKind", "CostLog", "CostSummary", "LayerFootprint"]
+
+
+class CostSummary(TypedDict):
+    """The aggregate counts of :meth:`CostLog.summary`."""
+
+    exact_calls: int
+    exact_tokens: int
+    draft_steps: int
+    wasted_draft_steps: int
+    replay_calls: int
+    layer_tokens: int
+    module_layer_tokens: dict[str, int]
+    sequential_calls: int
+    relative_layer_tokens: float
 
 
 class CostKind:
@@ -147,7 +161,7 @@ class CostLog:
         """Number of events of ``kind``."""
         return sum(1 for e in self.events if e.kind == kind)
 
-    def summary(self, num_layers: int, prompt_tokens: int, generated: int) -> dict[str, Any]:
+    def summary(self, num_layers: int, prompt_tokens: int, generated: int) -> CostSummary:
         """Aggregate counts, including layer applications relative to plain decoding of the same output.
 
         Plain decoding runs all ``L`` layers once over the prompt and once over every generated token but the last,

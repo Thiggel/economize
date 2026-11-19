@@ -552,7 +552,7 @@ class ArchAdapter(ABC):
         for new_index, layer in enumerate(layers):
             for module in layer.modules():
                 if isinstance(getattr(module, "layer_idx", None), int):
-                    module.layer_idx = new_index  # type: ignore[assignment]  # Module.__setattr__ types tensors/modules
+                    setattr(module, "layer_idx", new_index)  # noqa: B010  # Module.__setattr__ types only tensors/modules
 
     def renumber_config(self, kept: Sequence[int]) -> None:
         """Rewrite the config fields that address decoder layers by index, for a removal that keeps ``kept``.

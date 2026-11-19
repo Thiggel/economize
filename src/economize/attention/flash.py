@@ -38,7 +38,7 @@ import os
 import threading
 import weakref
 from dataclasses import dataclass
-from typing import Any
+from typing import Protocol, cast
 
 import torch
 
@@ -73,8 +73,18 @@ MAX_HEAD_DIM_FA4 = 512
 _FA2_PAGE = 256
 
 
+class _FlashInterface(Protocol):
+    """The functions economize calls on ``vllm.vllm_flash_attn.flash_attn_interface``."""
+
+    def is_fa_version_supported(self, fa_version: int) -> bool: ...
+
+    def flash_attn_varlen_func(
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, **kwargs: object
+    ) -> torch.Tensor: ...
+
+
 @functools.cache
-def _interface() -> Any:
+def _interface() -> _FlashInterface | None:
     try:
         from vllm.vllm_flash_attn import flash_attn_interface
     except Exception:  # vLLM is optional; any import failure means "no FlashAttention"
@@ -203,7 +213,7 @@ def flash_prefill(
     first = _offsets(mask, batch, keys, window)
     if first is None:
         return None, "mask_pattern"
-    fai = _interface()
+    fai = cast(_FlashInterface, _interface())  # the version check above found the build
     device = query.device
     q = query.transpose(1, 2).reshape(batch * queries, q_heads, dim)
     cu_q = torch.arange(0, (batch + 1) * queries, queries, device=device, dtype=torch.int32)
@@ -407,7 +417,7 @@ def flash_decode(
         return None, "flash_softcap"
     if not (force or FLASH_DECODE == "1") and not decode_prefers_flash(version, dim, hint.window, batch, queries, keys):
         return None, "flash_shape"
-    fai = _interface()
+    fai = cast(_FlashInterface, _interface())  # the version check above found the build
     q = query.transpose(1, 2).reshape(batch * queries, q_heads, dim)
     out = fai.flash_attn_varlen_func(
         q,
@@ -543,7 +553,7 @@ def _ring_call(
         return None, "flash_hint"
     if decode and not decode_prefers_flash(version, dim, ring.window, batch, queries, keys):
         return None, "flash_shape"
-    fai = _interface()
+    fai = cast(_FlashInterface, _interface())  # the version check above found the build
     k_pages, v_pages = _ring_view(key, ring.page), _ring_view(value, ring.page)
     rows = torch.arange(batch, device=query.device, dtype=torch.int32)[:, None] * (kv_heads * keys // ring.page)
     q = query.transpose(1, 2).reshape(batch * queries, q_heads, dim)

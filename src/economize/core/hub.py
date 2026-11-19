@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, TypedDict, cast
 
 from huggingface_hub import ModelCard, ModelCardData, ModelHubMixin
 from torch import nn
@@ -30,12 +31,18 @@ from .serialization import (
 )
 
 if TYPE_CHECKING:
+    from huggingface_hub.hub_mixin import DataclassInstance
+    from typing_extensions import Unpack
+
+    from .._typing import JSONDict
     from ..decoding import DecodeConfig
     from .model import EfficientModel
 
 __all__ = [
     "REPO_PATTERNS",
+    "DownloadKwargs",
     "EconomizeHubMixin",
+    "PushKwargs",
     "base_metadata",
     "check_base_model",
     "describe_quantization",
@@ -84,6 +91,36 @@ out = base.generate(input_ids, custom_generate="{recipe}", trust_remote_code=Tru
 """
 
 
+class _UploadKwargs(TypedDict, total=False):
+    """The options of ``ModelHubMixin.push_to_hub`` (``huggingface_hub``) but ``model_card_kwargs``."""
+
+    config: dict[str, object] | DataclassInstance | None
+    commit_message: str
+    private: bool | None
+    token: str | None
+    branch: str | None
+    create_pr: bool | None
+    allow_patterns: list[str] | str | None
+    ignore_patterns: list[str] | str | None
+    delete_patterns: list[str] | str | None
+
+
+class PushKwargs(_UploadKwargs, total=False):
+    """The options of ``ModelHubMixin.push_to_hub`` (``huggingface_hub``)."""
+
+    model_card_kwargs: dict[str, object] | None
+
+
+class DownloadKwargs(TypedDict, total=False):
+    """The options of :func:`download` that it passes to ``huggingface_hub.snapshot_download``."""
+
+    revision: str | None
+    cache_dir: str | Path | None
+    force_download: bool
+    local_files_only: bool
+    token: str | bool | None
+
+
 class EconomizeHubMixin(
     ModelHubMixin,
     library_name="economize",
@@ -118,17 +155,19 @@ class EconomizeHubMixin(
         model = self._economize_model()
         save(model, save_directory, extra_meta=base_metadata(model))
 
-    def push_to_hub(self, repo_id: str, *, model_card_kwargs: dict[str, Any] | None = None,
-                    **kwargs: Any) -> str:
+    def push_to_hub(self, repo_id: str, *, model_card_kwargs: dict[str, object] | None = None,
+                    **kwargs: Unpack[_UploadKwargs]) -> str:
         """``ModelHubMixin.push_to_hub``, with ``repo_id`` passed on to the model card unless ``model_card_kwargs``
         names one."""
-        model_card_kwargs = {"repo_id": repo_id, **(model_card_kwargs or {})}
-        return super().push_to_hub(repo_id, model_card_kwargs=model_card_kwargs, **kwargs)
+        card_kwargs = {"repo_id": repo_id, **(model_card_kwargs or {})}
+        return super().push_to_hub(repo_id, model_card_kwargs=card_kwargs, **kwargs)
 
-    def generate_model_card(self, *args: Any, **kwargs: Any) -> ModelCard:
+    def generate_model_card(self, *args: object, **kwargs: object) -> ModelCard:
         """A model card linking the checkpoint to its base model. ``kwargs``: ``repo_id``, ``license``,
         ``datasets``, ``language``, ``custom_generate`` (the repo id of the recipe, if published)."""
-        return model_card(self._economize_model(), **kwargs)
+        # model_card names and checks its keywords; ModelHubMixin passes whatever model_card_kwargs held.
+        card: Callable[..., ModelCard] = model_card
+        return card(self._economize_model(), **kwargs)
 
     @classmethod
     def from_pretrained(
@@ -140,7 +179,7 @@ class EconomizeHubMixin(
         cache_dir: str | Path | None = None,
         local_files_only: bool = False,
         revision: str | None = None,
-        **model_kwargs: Any,
+        **model_kwargs: object,
     ) -> EfficientModel:
         """Load an economize checkpoint from a folder or a Hub repo; see
         :func:`economize.integrations.hub.from_pretrained` for ``model_kwargs``.
@@ -148,7 +187,9 @@ class EconomizeHubMixin(
         Returns an :class:`~economize.EfficientModel`. Unlike ``ModelHubMixin.from_pretrained`` this never looks for
         a ``config.json``.
         """
-        return cls._from_pretrained(
+        # _from_pretrained names its own keywords (base_model, format, ...) and passes the rest to the base model.
+        load_checkpoint: Callable[..., EfficientModel] = cls._from_pretrained
+        return load_checkpoint(
             model_id=str(pretrained_model_name_or_path), revision=revision, cache_dir=cache_dir,
             force_download=force_download, local_files_only=local_files_only, token=token, **model_kwargs,
         )
@@ -168,7 +209,7 @@ class EconomizeHubMixin(
         format: str | None = None,
         decoding: DecodeConfig | None = None,
         check_base: bool = True,
-        **model_kwargs: Any,
+        **model_kwargs: object,
     ) -> EfficientModel:
         folder = download(model_id, revision=revision, cache_dir=cache_dir, force_download=force_download,
                           local_files_only=local_files_only, token=token)
@@ -187,7 +228,7 @@ class EconomizeHubMixin(
         return model
 
 
-def download(repo_id: str | Path, **kwargs: Any) -> str:
+def download(repo_id: str | Path, **kwargs: Unpack[DownloadKwargs]) -> str:
     """Local folder of a checkpoint: ``repo_id`` itself when it is a folder, else a ``snapshot_download`` of its
     configuration, weights and model card (``kwargs``: ``revision``, ``token``, ``cache_dir``, ...)."""
     if os.path.isdir(repo_id):
@@ -199,14 +240,14 @@ def download(repo_id: str | Path, **kwargs: Any) -> str:
     )
 
 
-def read_meta(folder: str | Path) -> dict[str, Any]:
+def read_meta(folder: str | Path) -> JSONDict:
     """The ``economize_config.json`` of a checkpoint folder (``{}`` for a folder without one, e.g. another format)."""
     path = Path(folder) / CONFIG_FILE
-    return json.loads(path.read_text()) if path.is_file() else {}
+    return cast("JSONDict", json.loads(path.read_text())) if path.is_file() else {}
 
 
 # ---- base model metadata ------------------------------------------------------------------------------------------
-def describe_quantization(model: nn.Module) -> dict[str, Any] | None:
+def describe_quantization(model: nn.Module) -> JSONDict | None:
     """The quantization a ``transformers`` quantizer applied to ``model``'s base, or ``None`` for an unquantized
     base. Checkpoints record it next to the weight fingerprint; :mod:`economize.integrations.quantized` re-exports it.
 
@@ -231,7 +272,7 @@ def describe_quantization(model: nn.Module) -> dict[str, Any] | None:
     }
 
 
-def _as_dict(qconfig: object) -> dict[str, Any]:
+def _as_dict(qconfig: object) -> JSONDict:
     """A JSON-safe dict of a ``QuantizationConfigMixin`` or plain dict (unserialisable values become ``repr``)."""
     if qconfig is None:
         return {}
@@ -241,10 +282,10 @@ def _as_dict(qconfig: object) -> dict[str, Any]:
         raw = qconfig.to_dict()
     else:
         raw = dict(vars(qconfig))
-    return json.loads(json.dumps(raw, default=repr, sort_keys=True))
+    return cast("JSONDict", json.loads(json.dumps(raw, default=repr, sort_keys=True)))
 
 
-def base_metadata(model: nn.Module) -> dict[str, Any]:
+def base_metadata(model: nn.Module) -> JSONDict:
     """The entries of ``economize_config.json`` that describe the base model beyond its name: its revision, the
     :func:`~economize.teacher_fingerprint` of its weights (``None`` on a tensor-parallel shard) and its quantization."""
     base = base_model_of(model)
@@ -256,7 +297,7 @@ def base_metadata(model: nn.Module) -> dict[str, Any]:
     }
 
 
-def check_base_model(model: nn.Module, meta: dict[str, Any]) -> bool:
+def check_base_model(model: nn.Module, meta: Mapping[str, object]) -> bool:
     """Warn (:class:`~economize.TeacherMismatchWarning`) when ``model``'s base weights differ from those the checkpoint
     was saved with; the warning names the revision and the quantization of both. Returns whether they match
     (``True`` when the checkpoint records no fingerprint or ``model`` is a tensor-parallel shard)."""
@@ -282,7 +323,7 @@ def _is_repo_id(name: str | None) -> bool:
 
 def model_card(model: EfficientModel, *, repo_id: str | None = None, license: str | None = None,
                datasets: list[str] | None = None, language: list[str] | None = None,
-               custom_generate: str | None = None, **_: Any) -> ModelCard:
+               custom_generate: str | None = None, **_: object) -> ModelCard:
     """The model card of an economize checkpoint (YAML metadata and a usage section)."""
     base = base_model_of(model)
     name = getattr(base.config, "name_or_path", None) or None
@@ -291,8 +332,10 @@ def model_card(model: EfficientModel, *, repo_id: str | None = None, license: st
     drafts = getattr(model, "drafting_technique", None) is not None
     names = {"economize", *(f"economize-{t.name}" for t in techniques), *(["speculative-decoding"] if drafts else [])}
     tags = sorted(names)
-    relation: dict[str, Any] = {"base_model_relation": "adapter"} if linked else {}
-    data = ModelCardData(
+    relation: dict[str, str] = {"base_model_relation": "adapter"} if linked else {}
+    # ModelCardData keeps keywords it does not name (base_model_relation) as fields; its signature lists only its own.
+    card_data: Callable[..., ModelCardData] = ModelCardData
+    data = card_data(
         base_model=linked, library_name="economize", pipeline_tag="text-generation", tags=tags, license=license,
         datasets=datasets, language=language, **relation,
     )

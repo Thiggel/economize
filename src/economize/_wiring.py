@@ -7,22 +7,34 @@ higher module on first use so that ``import economize`` stays light.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+import torch
 
 from .core.compatibility import BACKEND_SUPPORT, BackendSupport
 from .core.config import TechniqueConfig
 from .core.model import GENERATE_IMPLEMENTATIONS
 from .core.technique import Technique
 
+if TYPE_CHECKING:
+    from transformers.utils import ModelOutput
+
+    from .core.model import EfficientModel
+
 __all__: list[str] = []
 
 
 @GENERATE_IMPLEMENTATIONS.register("transformers")
-def _transformers_generate(model: Any, inputs: Any = None, **kwargs: Any) -> Any:
+def _transformers_generate(
+    model: EfficientModel, inputs: torch.Tensor | None = None, /, **kwargs: object
+) -> torch.Tensor | ModelOutput:
     """:func:`economize.integrations.generate.generate`, imported on the first ``EfficientModel.generate`` call."""
     from .integrations.generate import generate
 
-    return generate(model, inputs, **kwargs)
+    # generate names its own keyword parameters and checks the rest; the forwarded keywords are typed only as object.
+    forward: Callable[..., torch.Tensor | ModelOutput] = generate
+    return forward(model, inputs, **kwargs)
 
 
 @BACKEND_SUPPORT.register("vllm")

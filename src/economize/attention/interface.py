@@ -28,13 +28,13 @@ from __future__ import annotations
 import os
 import sys
 from collections import Counter
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, TypedDict, cast, runtime_checkable
 
 import torch
 from torch.overrides import _get_current_function_mode_stack
 from torch.utils._device import DeviceContext
 
-from .banded import StructuredMask
+from .banded import AttentionForward, StructuredMask
 from .decode import _FP8, decode_attention, out_of_resources, triton_available
 from .flash import _offsets, flash_decode, flash_prefill, prefix_hint
 from .packed import materialized_kv, packed_of
@@ -49,6 +49,8 @@ __all__ = [
     "NAME",
     "PACKED_FORMATS",
     "AttentionObserver",
+    "UsageRecord",
+    "UsageSummary",
     "economize_attention_forward",
     "install",
     "kernel_calls",
@@ -67,6 +69,24 @@ FLASH_PREFILL = os.environ.get("ECONOMIZE_FLASH_PREFILL", "1") != "0"
 #: Packed K/V formats (:mod:`.packed`) the kernel reads; the call is logged on path ``"kernel_<format>"``.
 PACKED_FORMATS = frozenset({"kivi", "gathered", "quest"})
 
+class UsageRecord(TypedDict):
+    """One row of :func:`kernel_usage`."""
+
+    layer: int | None
+    queries: int
+    path: str
+    reason: str
+    calls: int
+
+
+class UsageSummary(TypedDict):
+    """The result of :func:`usage_summary`."""
+
+    calls: dict[str, int]
+    fallback_reasons: dict[str, int]
+    queries: dict[str, list[int]]
+
+
 _calls = {"kernel": 0, "fallback": 0, "flash": 0}
 _usage: Counter[tuple[int | None, int, str, str]] = Counter()
 
@@ -77,7 +97,7 @@ def kernel_calls() -> dict[str, int]:
     return dict(_calls)
 
 
-def kernel_usage(reset: bool = False) -> list[dict[str, Any]]:
+def kernel_usage(reset: bool = False) -> list[UsageRecord]:
     """Which path each attention call took, grouped by layer, query length and fallback reason.
 
     Every Python-level call is counted (eager steps and CUDA-graph captures; replays run the captured path). A
@@ -90,7 +110,7 @@ def kernel_usage(reset: bool = False) -> list[dict[str, Any]]:
     Returns:
         One record per ``(layer, queries, path, reason)`` with its call count, sorted by layer and query length.
     """
-    rows = [
+    rows: list[UsageRecord] = [
         {"layer": layer, "queries": queries, "path": path, "reason": reason, "calls": n}
         for (layer, queries, path, reason), n in _usage.items()
     ]
@@ -100,7 +120,7 @@ def kernel_usage(reset: bool = False) -> list[dict[str, Any]]:
     return rows
 
 
-def usage_summary() -> dict[str, Any]:
+def usage_summary() -> UsageSummary:
     """Compact form of :func:`kernel_usage`: calls per path, per fallback reason, and the query lengths per path."""
     paths: Counter[str] = Counter()
     reasons: Counter[str] = Counter()
@@ -133,7 +153,7 @@ class AttentionObserver(Protocol):
         ...
 
 
-def _active_modes() -> list[Any]:
+def _active_modes() -> list[object]:
     return [mode for mode in _get_current_function_mode_stack() if not isinstance(mode, DeviceContext)]
 
 
@@ -145,24 +165,38 @@ def _tapped() -> bool:
 def _observers() -> list[AttentionObserver] | None:
     """The active function modes when every one is an :class:`AttentionObserver` (``[]`` for none), else ``None``."""
     modes = _active_modes()
-    return modes if all(isinstance(mode, AttentionObserver) for mode in modes) else None
+    if all(isinstance(mode, AttentionObserver) for mode in modes):
+        return cast("list[AttentionObserver]", modes)
+    return None
 
 
-def _sdpa(*args: Any, **kwargs: Any) -> tuple[torch.Tensor, Any]:
+def _sdpa(*args: object, **kwargs: object) -> tuple[torch.Tensor, torch.Tensor | None]:
     _calls["fallback"] += 1
-    return sdpa_attention_forward(*args, **kwargs)  # contiguous K/V where PyTorch's masked kernel errs (sdpa_guard)
+    forward: AttentionForward = sdpa_attention_forward  # the arguments pass through unchecked
+    return forward(*args, **kwargs)  # contiguous K/V where PyTorch's masked kernel errs (sdpa_guard)
 
 
-def _sinks(kwargs: dict[str, Any]) -> Any:
+def _sinks(kwargs: dict[str, object]) -> object:
     return kwargs.get("s_aux") if kwargs.get("s_aux") is not None else kwargs.get("sinks")
 
 
-def _eager_function(module: torch.nn.Module, kwargs: dict[str, Any]) -> Any:
+def _softcap(kwargs: dict[str, object]) -> float | None:
+    return cast("float | None", kwargs.get("softcap"))  # set by transformers' Gemma-2 style attention
+
+
+def _window(kwargs: dict[str, object]) -> int | None:
+    return cast("int | None", kwargs.get("sliding_window"))  # set by transformers for sliding-window layers
+
+
+def _eager_function(module: torch.nn.Module, kwargs: dict[str, object]) -> AttentionForward | None:
     """The model's own ``eager_attention_forward`` when the call needs it: ``sdpa`` ignores attention sinks and
     returns no attention weights, so such calls must not fall back to it."""
     if _sinks(kwargs) is None and not kwargs.get("output_attentions", False):
         return None
-    return getattr(sys.modules.get(type(module).__module__), "eager_attention_forward", None)
+    return cast(
+        "AttentionForward | None",
+        getattr(sys.modules.get(type(module).__module__), "eager_attention_forward", None),
+    )
 
 
 def _fallback(
@@ -175,8 +209,8 @@ def _fallback(
     scaling: float | None,
     is_causal: bool | None,
     reason: str,
-    kwargs: dict[str, Any],
-) -> tuple[torch.Tensor, Any]:
+    kwargs: dict[str, object],
+) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Run one call on ``sdpa``, or on the model's eager function for sinks and attention weights; log it. A cache
     without dense buffers (KIVI's packed storage) has its K/V materialized first."""
     layer = getattr(module, "layer_idx", None)
@@ -212,7 +246,7 @@ def _fallback_reason(
     key: torch.Tensor,
     attention_mask: torch.Tensor | None,
     dropout: float,
-    kwargs: dict[str, Any],
+    kwargs: dict[str, object],
 ) -> str | None:
     """Why this call cannot run on the kernel, or ``None`` when it can. Decided per call, never per model."""
     batch, q_heads, queries, _ = query.shape
@@ -259,7 +293,7 @@ def _flash(
     attention_mask: torch.Tensor | None,
     dropout: float,
     scaling: float | None,
-    kwargs: dict[str, Any],
+    kwargs: dict[str, object],
 ) -> torch.Tensor | None:
     """A long query on FlashAttention, logged on path ``"flash<version>"``, or ``None`` (then ``sdpa`` runs it, logged
     with reason ``"long_query"``). fp8 K/V are upcast to the query's dtype first: a prefill chunk reads the cache once,
@@ -280,7 +314,7 @@ def _flash(
         key, value = key.to(query.dtype), value.to(query.dtype)
     scale = query.shape[-1] ** -0.5 if scaling is None else scaling
     out, path = flash_prefill(
-        query, key, value, attention_mask, scale, softcap=kwargs.get("softcap"), window=kwargs.get("sliding_window")
+        query, key, value, attention_mask, scale, softcap=_softcap(kwargs), window=_window(kwargs)
     )
     if out is None:
         return None
@@ -306,8 +340,8 @@ def _sparse_prefill(
     attention_mask: torch.Tensor | None,
     dropout: float,
     scaling: float | None,
-    kwargs: dict[str, Any],
-) -> tuple[torch.Tensor, Any] | None:
+    kwargs: dict[str, object],
+) -> tuple[torch.Tensor, torch.Tensor | None] | None:
     """A fresh prompt through the module's sparse-prefill attachment, or ``None`` when the call attends densely
     (no attachment, a short or non-fresh query, a sliding-window layer, a CUDA-graph capture)."""
     prefill = prefill_of(module)
@@ -328,7 +362,7 @@ def _sparse_prefill(
         if first is None or bool((first != 0).any()):
             return None  # a prompt after cached tokens, or a left-padded batch: dense
     scale = query.shape[-1] ** -0.5 if scaling is None else scaling
-    softcap = kwargs.get("softcap")
+    softcap = _softcap(kwargs)
     layer = getattr(module, "layer_idx", None)
     k_est = key[:, :, :queries]
     if k_est.dtype != query.dtype:
@@ -355,7 +389,7 @@ def _sparse_prefill(
 
 
 def _prefill_kernel_reason(
-    module: torch.nn.Module, query: torch.Tensor, key: torch.Tensor, dropout: float, kwargs: dict[str, Any]
+    module: torch.nn.Module, query: torch.Tensor, key: torch.Tensor, dropout: float, kwargs: dict[str, object]
 ) -> str | None:
     """Why a sparse prefill cannot run on its kernel, or ``None`` when it can."""
     if not query.is_cuda:
@@ -388,8 +422,8 @@ def economize_attention_forward(
     dropout: float = 0.0,
     scaling: float | None = None,
     is_causal: bool | None = None,
-    **kwargs: Any,
-) -> tuple[torch.Tensor, None]:
+    **kwargs: object,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
     """``transformers`` attention function (``[B, H, Q, D]`` in, ``[B, Q, H, D]`` out) on the decode kernel.
 
     The choice between the kernel and the ``sdpa`` fallback is made for every call, so a prefill or a tapped exact
@@ -418,7 +452,7 @@ def economize_attention_forward(
     if attention_mask is not None and attention_mask.shape[-1] != key.shape[2]:
         attention_mask = attention_mask[..., : key.shape[2]]
     scale = query.shape[-1] ** -0.5 if scaling is None else scaling
-    softcap = kwargs.get("softcap")
+    softcap = _softcap(kwargs)
     packed = packed_of(key)
     if hint is not None and packed is None and _sinks(kwargs) is None:
         flash_out, flash_path = flash_decode(query, key, value, hint, scale, softcap)
@@ -427,15 +461,16 @@ def economize_attention_forward(
             _usage[(layer, queries, flash_path, "")] += 1
             return flash_out, None
     path = "kernel"
+    sinks = cast("torch.Tensor | None", _sinks(kwargs))  # _fallback_reason sent other sinks to the fallback
     try:
         if packed is not None and packed.format in PACKED_FORMATS:
             path = f"kernel_{packed.format}"
-            out = packed.attend(query, key, value, attention_mask, scale, softcap=softcap, sinks=_sinks(kwargs))
+            out = packed.attend(query, key, value, attention_mask, scale, softcap=softcap, sinks=sinks)
         else:
             key, value = materialized_kv(key, value)
-            window = kwargs.get("sliding_window") if attention_mask is not None else None
+            window = _window(kwargs) if attention_mask is not None else None
             out = decode_attention(
-                query, key, value, attention_mask, scale, softcap=softcap, sinks=_sinks(kwargs), window=window
+                query, key, value, attention_mask, scale, softcap=softcap, sinks=sinks, window=window
             )
     except out_of_resources():  # raised at compile time, before any launch (e.g. fp32 at head dim 512 on Turing)
         return _fallback(module, query, key, value, attention_mask, dropout, scaling, is_causal, "out_of_resources",

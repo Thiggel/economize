@@ -16,7 +16,7 @@ that behaves exactly like :class:`~economize.runtime.PositionalKVCache`) under `
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import ClassVar
 
 import torch
 
@@ -60,7 +60,7 @@ class PooledStaticKVCache(StaticKVCache):
         self.batch_size = batch_size
 
     def update(
-        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: Any, **kwargs: Any
+        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: object, **kwargs: object
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if layer_idx not in self.keys and self._rows is None:
             self._bind(layer_idx, key_states, value_states)

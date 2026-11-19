@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable
-from typing import Any
+from typing import cast
 
 import torch
 from torch import nn
@@ -73,10 +73,11 @@ def bitsandbytes_linear(module: nn.Module) -> nn.Linear | None:
         return None
     import bitsandbytes.functional as bnb_functional
 
-    weight: Any = module.weight
+    weight = cast(torch.Tensor, module.weight)
     state = getattr(module, "state", None)
-    if getattr(weight, "quant_state", None) is not None:  # 4-bit NF4 / FP4
-        dense = bnb_functional.dequantize_4bit(weight.data, weight.quant_state)
+    quant_state = getattr(weight, "quant_state", None)
+    if quant_state is not None:  # 4-bit NF4 / FP4
+        dense = bnb_functional.dequantize_4bit(weight.data, quant_state)
     else:  # LLM.int8: codes and row scales on the weight until the first forward, on the module's state after it
         codes = getattr(weight, "CB", None)
         codes = codes if codes is not None else getattr(state, "CB", None)
@@ -85,7 +86,7 @@ def bitsandbytes_linear(module: nn.Module) -> nn.Linear | None:
         if codes is None or scales is None:
             return None
         dense = bnb_functional.int8_vectorwise_dequant(codes, scales)
-    bias: Any = module.bias
+    bias = cast("torch.Tensor | None", module.bias)
     linear = nn.Linear(dense.shape[1], dense.shape[0], bias=bias is not None, device=dense.device,
                        dtype=torch.float32)
     with torch.no_grad():

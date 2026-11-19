@@ -29,7 +29,7 @@ call and its batch bookkeeping), :mod:`.passes` (exact passes), :mod:`.commit` (
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import TypeVar
 
 import torch
 
@@ -50,6 +50,8 @@ from .stop import StopChecker, StopCondition
 from .verifiers import VERIFIERS
 
 __all__ = ["CycleDecoder", "DecodeResult", "StopCondition", "VerifyObserver"]
+
+_T = TypeVar("_T")
 
 
 class CycleDecoder:
@@ -220,7 +222,7 @@ def _check_combination(config: DecodeConfig, verifier: Verifier, drafter: Drafte
                           "chain drafter")
 
 
-def _per_row(values: Sequence[Any] | None, count: int, name: str) -> list[Any] | None:
+def _per_row(values: Sequence[_T] | None, count: int, name: str) -> list[_T] | None:
     if values is None:
         return None
     values = list(values)

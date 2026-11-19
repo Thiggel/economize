@@ -26,7 +26,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import ClassVar
 
 import torch
 import torch.nn.functional as F
@@ -182,7 +182,7 @@ class KVCache(SlotLayout, ABC):
     #: it holds only for the class that declares it (a subclass may address its buffers by position).
     supports_ring: ClassVar[bool] = False
 
-    def __init_subclass__(cls, **kwargs: Any) -> None:
+    def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
         if "static_variant" not in cls.__dict__:
             cls.static_variant = None
@@ -243,7 +243,7 @@ class KVCache(SlotLayout, ABC):
             self._rows = previous
 
     # ---- CUDA graphs -------------------------------------------------------------------------------------------
-    def external_pass(self, frontier: list[int | None]) -> AbstractContextManager[Any]:
+    def external_pass(self, frontier: list[int | None]) -> AbstractContextManager[object]:
         """A context around a replayed (CUDA graph) exact pass whose row ``b`` writes from slot ``frontier[b]`` on.
 
         A graph cannot run the host code a cache may run at the boundary of an exact pass (see
@@ -252,7 +252,7 @@ class KVCache(SlotLayout, ABC):
         """
         return nullcontext()
 
-    def graph_state(self) -> tuple[Any, ...]:
+    def graph_state(self) -> tuple[object, ...]:
         """What the kernels a graph records over this cache depend on beyond its buffers' addresses.
 
         A recorded graph is replayed only while this value is unchanged; a cache returns a new value when, for
@@ -274,7 +274,7 @@ class KVCache(SlotLayout, ABC):
 
     @abstractmethod
     def update(
-        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: Any, **kwargs: Any
+        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: object, **kwargs: object
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Write layer ``layer_idx``'s K/V at the active slots and return its whole buffers (the attention keys)."""
 
@@ -372,7 +372,7 @@ class PositionalKVCache(KVCache):
         return (*super().tensor_stores(), self.keys, self.values)
 
     def update(
-        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: Any, **kwargs: Any
+        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args: object, **kwargs: object
     ) -> tuple[torch.Tensor, torch.Tensor]:
         slots = self.active_slots
         ring = self.ring is not None and layer_idx in self.ring.layers
@@ -495,8 +495,10 @@ class _LinearLayerView:
 
     def __init__(self, conv: torch.Tensor | None, recurrent: torch.Tensor | None) -> None:
         indexed = _indexed_states()
-        self.conv_states: Any = {0: conv} if indexed else conv
-        self.recurrent_states: Any = {0: recurrent} if indexed else recurrent
+        self.conv_states: dict[int, torch.Tensor | None] | torch.Tensor | None = {0: conv} if indexed else conv
+        self.recurrent_states: dict[int, torch.Tensor | None] | torch.Tensor | None = (
+            {0: recurrent} if indexed else recurrent
+        )
 
 
 class _LayerList:
@@ -604,7 +606,7 @@ class HybridCache(PositionalKVCache):
 
     def update_conv_state(
         self, conv_states: torch.Tensor, layer_idx: int, state_idx: int = 0, conv_kernel_size: int | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> torch.Tensor:
         """Store the conv window of layer ``layer_idx`` and return what the layer convolves.
 
@@ -629,7 +631,7 @@ class HybridCache(PositionalKVCache):
         return full
 
     def update_recurrent_state(
-        self, recurrent_states: torch.Tensor, layer_idx: int, state_idx: int = 0, **kwargs: Any
+        self, recurrent_states: torch.Tensor, layer_idx: int, state_idx: int = 0, **kwargs: object
     ) -> torch.Tensor:
         """Store the recurrent state after the current tokens."""
         self._views.pop((layer_idx, _RECURRENT), None)

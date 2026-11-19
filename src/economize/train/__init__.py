@@ -17,7 +17,7 @@ acceptance on the policy's samples).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from . import rl
 from .checkpoint import RunCheckpointer, latest_checkpoint, load_trained, save_trained
@@ -169,7 +169,7 @@ _REGISTERED = {
 }
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> type[Objective]:  # the _LAZY names resolve to their TYPE_CHECKING imports
     """Resolve the lazy exports: the ``transformers`` trainer, and the technique objectives kept under their
     deprecated old names (these warn with a :class:`DeprecationWarning`).
 

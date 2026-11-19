@@ -7,7 +7,7 @@ import warnings
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, TypeAlias, TypedDict, cast, runtime_checkable
 
 import torch
 from torch.utils.data import DataLoader, RandomSampler
@@ -31,6 +31,10 @@ __all__ = [
 ]
 
 
+#: One item of a :class:`LoaderSource`: a batch, a ``[B, T]`` (or ``[T]``) tensor, or a mapping with ``input_ids``.
+BatchLike: TypeAlias = Batch | torch.Tensor | Mapping[str, object]
+
+
 @runtime_checkable
 class BatchSource(Protocol):
     """An endless supply of training batches with a resumable position.
@@ -45,13 +49,23 @@ class BatchSource(Protocol):
         """The next batch (on the CPU; the loop moves it)."""
         ...
 
-    def state_dict(self) -> dict[str, Any]:
+    def state_dict(self) -> Mapping[str, object]:
         """The source's position, picklable."""
         ...
 
-    def load_state_dict(self, state: Mapping[str, Any]) -> None:
+    def load_state_dict(self, state: Mapping[str, object]) -> None:
         """Continue from a position saved by :meth:`state_dict`."""
         ...
+
+
+class _OrderState(TypedDict):
+    epoch: int
+    cursor: int
+
+
+class _LoaderState(TypedDict):
+    epoch: int
+    consumed: int
 
 
 # ---- in-memory data ----------------------------------------------------------------------------------------------
@@ -87,11 +101,12 @@ class _Shuffled:
         self.cursor += self.batch_size
         return indices
 
-    def state_dict(self) -> dict[str, Any]:
+    def state_dict(self) -> _OrderState:
         return {"epoch": self.epoch, "cursor": self.cursor}
 
-    def load_state_dict(self, state: Mapping[str, Any]) -> None:
-        self.epoch, self.cursor = int(state["epoch"]), int(state["cursor"])
+    def load_state_dict(self, state: Mapping[str, object]) -> None:
+        saved = cast(_OrderState, state)  # written by state_dict
+        self.epoch, self.cursor = int(saved["epoch"]), int(saved["cursor"])
         self._order = self._permutation()
 
 
@@ -105,10 +120,10 @@ class _ShuffledSource:
         processes see independent orders (call before the first batch)."""
         self._order.shard(rank, world)
 
-    def state_dict(self) -> dict[str, Any]:
+    def state_dict(self) -> Mapping[str, object]:
         return self._order.state_dict()
 
-    def load_state_dict(self, state: Mapping[str, Any]) -> None:
+    def load_state_dict(self, state: Mapping[str, object]) -> None:
         self._order.load_state_dict(state)
 
 
@@ -205,11 +220,11 @@ class LoaderSource:
         seed: Seed of the order of every epoch (``None``: leave the loader's own order).
     """
 
-    def __init__(self, loader: Iterable[Any], *, rank: int = 0, world: int = 1, seed: int | None = None) -> None:
+    def __init__(self, loader: Iterable[BatchLike], *, rank: int = 0, world: int = 1, seed: int | None = None) -> None:
         self.loader = loader
         self.seed = seed
         self.epoch, self.consumed = 0, 0
-        self._iterator: Iterator[Any] | None = None
+        self._iterator: Iterator[BatchLike] | None = None
         self.shard(rank, world)
 
     def shard(self, rank: int, world: int) -> None:
@@ -237,13 +252,13 @@ class LoaderSource:
         self.consumed += 1
         return as_batch(item)
 
-    def _epoch_iterator(self) -> Iterator[Any]:
+    def _epoch_iterator(self) -> Iterator[BatchLike]:
         """An iterator over the items of epoch ``self.epoch``, in the order the seed fixes for it."""
         if self.seed is not None:
             _seed_epoch(self.loader, spawn_seed(self.seed, self.epoch), self.epoch)
         return iter(self.loader)
 
-    def _next_round(self) -> Any:
+    def _next_round(self) -> BatchLike | None:
         """This process's item of the next ``world`` items (``StopIteration`` at an incomplete round)."""
         assert self._iterator is not None
         mine = None
@@ -253,15 +268,16 @@ class LoaderSource:
                 mine = item
         return mine
 
-    def state_dict(self) -> dict[str, Any]:
+    def state_dict(self) -> _LoaderState:
         return {"epoch": self.epoch, "consumed": self.consumed}
 
-    def load_state_dict(self, state: Mapping[str, Any]) -> None:
-        self.epoch, self.consumed = int(state["epoch"]), int(state["consumed"])
+    def load_state_dict(self, state: Mapping[str, object]) -> None:
+        saved = cast(_LoaderState, state)  # written by state_dict
+        self.epoch, self.consumed = int(saved["epoch"]), int(saved["consumed"])
         self._iterator = None
 
 
-def _seed_epoch(loader: Iterable[Any], seed: int, epoch: int) -> None:
+def _seed_epoch(loader: Iterable[object], seed: int, epoch: int) -> None:
     """Make the order of ``loader``'s next iteration a function of ``seed`` and ``epoch``.
 
     See :class:`LoaderSource`."""
@@ -276,7 +292,7 @@ def _seed_epoch(loader: Iterable[Any], seed: int, epoch: int) -> None:
             loader.sampler.generator = torch.Generator().manual_seed(seed)
 
 
-def as_batch(item: Any) -> Batch:
+def as_batch(item: BatchLike | None) -> Batch:
     """A :class:`Batch` from a batch, a ``[B, T]`` tensor or a mapping of tensors or lists (``labels`` = ``-100``
     masked). A single sequence ``[T]`` (e.g. one row of a Hugging Face dataset) becomes a batch of one row."""
     if isinstance(item, Batch):
@@ -297,13 +313,17 @@ def as_batch(item: Any) -> Batch:
     raise TypeError(f"cannot make a batch from {type(item).__name__}")
 
 
-def _rows(value: Any) -> torch.Tensor:
+def _rows(value: object) -> torch.Tensor:
     """``[B, T]`` from a tensor or list of one sequence ``[T]`` or of several ``[B, T]``."""
     value = torch.as_tensor(value)
     return value[None] if value.dim() == 1 else value
 
 
-def as_source(data: Any, batch_size: int = 8, *, seq_len: int = 1024, seed: int = 0) -> BatchSource:
+#: What :func:`as_source` accepts.
+TrainData: TypeAlias = BatchSource | str | Path | torch.Tensor | Batch | Sequence[Example] | Iterable[BatchLike]
+
+
+def as_source(data: TrainData, batch_size: int = 8, *, seq_len: int = 1024, seed: int = 0) -> BatchSource:
     """A :class:`BatchSource` from a source, a token file path, a ``[N, T]`` tensor, a list of :class:`Example` s or
     an iterable of batches."""
     if isinstance(data, BatchSource):
@@ -313,9 +333,9 @@ def as_source(data: Any, batch_size: int = 8, *, seq_len: int = 1024, seed: int 
     if isinstance(data, (torch.Tensor, Batch)):
         return TensorSource(data, batch_size, seed=seed)
     if isinstance(data, Sequence) and data and isinstance(data[0], Example):
-        return SequenceSource(data, batch_size, seed=seed)
+        return SequenceSource(cast("Sequence[Example]", data), batch_size, seed=seed)
     if isinstance(data, Iterable):
-        return LoaderSource(data, seed=seed)
+        return LoaderSource(cast("Iterable[BatchLike]", data), seed=seed)
     raise TypeError(f"cannot read training batches from {type(data).__name__}")
 
 
