@@ -26,7 +26,7 @@ function of the seed alone and a resumed run continues with the batches the inte
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, TypedDict
 
 import torch
 
@@ -35,6 +35,10 @@ from ...validation import check_non_negative, check_number, check_positive
 from ..objective import Batch
 from ..utils import spawn_seed
 from .sources import Example, _Shuffled, collate
+
+if TYPE_CHECKING:
+    from transformers import PreTrainedTokenizerBase
+    from typing_extensions import Unpack
 
 __all__ = ["ORDINAL_NUMBERS", "PASSKEY_ALPHABET", "PasskeyRetrieval"]
 
@@ -56,6 +60,30 @@ QUESTION = "Based on the content of the book, what is the {ordinal_number} passk
 PROMPT_BEFORE = "<|im_start|> This is a very long story book: <book> "
 PROMPT_AFTER = " </book>.\n\n"
 SEPARATOR = "\n\n"
+
+
+class PasskeyOptions(TypedDict, total=False):
+    """Keyword options of :class:`PasskeyRetrieval` (see its arguments)."""
+
+    prompt_tokens: Sequence[int] | None
+    batch_size: int
+    context_length_min: int
+    context_length_max: int
+    context_lengths_num_intervals: int
+    min_depth_ratio: float
+    max_depth_ratio: float
+    depth_ratio_num_intervals: int
+    num_passkeys: int
+    passkey_length: int
+    buffer_size: int
+    pad_to_multiple_of: int
+    pad_token_id: int
+    seed: int
+    needle: str
+    question: str
+    prompt_before: str
+    prompt_after: str
+    separator: str
 
 
 class PasskeyRetrieval:
@@ -167,7 +195,9 @@ class PasskeyRetrieval:
         self._order = _Shuffled(context_lengths_num_intervals, batch_size, seed, shuffle=True)
 
     @classmethod
-    def from_tokenizer(cls, tokenizer: Any, texts: Iterable[str], **options: Any) -> PasskeyRetrieval:
+    def from_tokenizer(
+        cls, tokenizer: PreTrainedTokenizerBase, texts: Iterable[str], **options: Unpack[PasskeyOptions]
+    ) -> PasskeyRetrieval:
         """Build the source from a Hugging Face tokenizer and haystack texts (e.g. the reference's BookSum chapters).
 
         As in the reference, texts are concatenated until the concatenation has at least ``context_length_max``
@@ -200,10 +230,10 @@ class PasskeyRetrieval:
         ]
         return collate(examples, self.pad_token_id)
 
-    def state_dict(self) -> dict[str, Any]:
+    def state_dict(self) -> Mapping[str, object]:
         return self._order.state_dict()
 
-    def load_state_dict(self, state: Mapping[str, Any]) -> None:
+    def load_state_dict(self, state: Mapping[str, object]) -> None:
         self._order.load_state_dict(state)
 
     def shard(self, rank: int, world: int) -> None:

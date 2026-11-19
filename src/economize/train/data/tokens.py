@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import torch
@@ -13,6 +13,9 @@ import torch
 from ...errors import ConfigError
 from ..objective import Batch
 from ..utils import spawn_seed
+
+if TYPE_CHECKING:
+    from numpy.typing import DTypeLike
 
 __all__ = ["TokenStream", "fixed_windows"]
 
@@ -41,7 +44,7 @@ class TokenStream:
         seed: int = 0,
         *,
         aligned: bool = False,
-        dtype: Any = np.uint32,
+        dtype: DTypeLike = np.uint32,
     ) -> None:
         self.path = str(path)
         self.tokens = np.memmap(self.path, dtype=dtype, mode="r")
@@ -65,14 +68,14 @@ class TokenStream:
         rows = np.stack([self.tokens[i : i + length].astype(np.int64) for i in starts])
         return Batch(torch.from_numpy(rows))
 
-    def state_dict(self) -> dict[str, Any]:
+    def state_dict(self) -> dict[str, object]:
         return {"rng": self.rng.bit_generator.state}
 
-    def load_state_dict(self, state: Mapping[str, Any]) -> None:
-        self.rng.bit_generator.state = state["rng"]
+    def load_state_dict(self, state: Mapping[str, object]) -> None:
+        self.rng.bit_generator.state = cast("Mapping[str, object]", state["rng"])  # written by state_dict
 
 
-def fixed_windows(path: str | Path, n: int, seq_len: int, *, dtype: Any = np.uint32) -> torch.Tensor:
+def fixed_windows(path: str | Path, n: int, seq_len: int, *, dtype: DTypeLike = np.uint32) -> torch.Tensor:
     """``n`` evenly spaced windows ``[n, seq_len]`` of a token file (as the reference implementation in
     ``tests/train/test_data_sources.py``)."""
     tokens = np.memmap(str(path), dtype=dtype, mode="r")
