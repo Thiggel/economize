@@ -33,11 +33,11 @@ bounded and the result is the same, since every query row attends independently.
 from __future__ import annotations
 
 from functools import partial
-from typing import Any
+from typing import cast
 
 import torch
 
-from .banded import StructuredMask
+from .banded import AttentionForward, StructuredMask
 
 __all__ = [
     "QUERY_CHUNK",
@@ -75,7 +75,11 @@ def needs_dense_kv(module: torch.nn.Module, query: torch.Tensor, key: torch.Tens
 
 
 def packs_query(
-    module: torch.nn.Module, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, attention_mask: Any
+    module: torch.nn.Module,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attention_mask: torch.Tensor | None,
 ) -> bool:
     """Whether ``transformers`` >= 5.23 would fold the query heads of this call into its query axis: a single query
     of grouped heads that ``sdpa`` cannot attend with ``enable_gqa`` (see the module docstring)."""
@@ -98,7 +102,7 @@ class _Ungrouped:
     def __init__(self, module: torch.nn.Module) -> None:
         self._module = module
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: str) -> object:
         return getattr(self._module, name)
 
 
@@ -107,11 +111,11 @@ def sdpa_attention_forward(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    attention_mask: torch.Tensor | None,
-    *args: Any,
+    attention_mask: torch.Tensor | StructuredMask | None,
+    *args: object,
     dense_kv: bool | None = None,
-    **kwargs: Any,
-) -> tuple[torch.Tensor, Any]:
+    **kwargs: object,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
     """``transformers``' ``sdpa_attention_forward`` with contiguous K/V when :func:`needs_dense_kv` (or
     ``dense_kv``) or :func:`packs_query` says so; same signature and result. A :class:`~.banded.StructuredMask`
     attends through this function."""
@@ -119,13 +123,15 @@ def sdpa_attention_forward(
         kwargs.update(zip(("dropout", "scaling", "is_causal"), args))
         return attention_mask.attend(partial(sdpa_attention_forward, dense_kv=dense_kv), module, query, key, value,
                                      **kwargs)
-    from transformers.integrations.sdpa_attention import sdpa_attention_forward as forward
+    from transformers.integrations.sdpa_attention import sdpa_attention_forward as hf_forward
+
+    forward: AttentionForward = hf_forward  # the extra positional and keyword arguments pass through unchecked
 
     chunked = _chunked(query, attention_mask, kwargs)
     dense = dense_kv if dense_kv is not None else needs_dense_kv(module, query, key)
     if chunked or dense or packs_query(module, query, key, value, attention_mask):
         key, value = _ungrouped(key, query.shape[1]), _ungrouped(value, query.shape[1])
-        module = _Ungrouped(module)  # type: ignore[assignment]
+        module = cast(torch.nn.Module, _Ungrouped(module))  # duck-typed: the forward only reads attributes
     if not chunked:
         return forward(module, query, key, value, attention_mask, *args, **kwargs)
     assert attention_mask is not None  # _chunked holds only for a dense mask
@@ -147,7 +153,7 @@ def _ungrouped(states: torch.Tensor, heads: int) -> torch.Tensor:
     return repeated.reshape(batch, heads, length, dim).contiguous()
 
 
-def _chunked(query: torch.Tensor, attention_mask: Any, kwargs: dict[str, Any]) -> bool:
+def _chunked(query: torch.Tensor, attention_mask: torch.Tensor | None, kwargs: dict[str, object]) -> bool:
     """Whether the call attends in query chunks: a long query with a dense per-query mask and no position bias."""
     return (
         query.shape[2] > QUERY_CHUNK

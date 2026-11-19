@@ -22,7 +22,6 @@ from __future__ import annotations
 import abc
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
 
 import torch
 
@@ -32,7 +31,7 @@ from .registry import ATTENTION_KERNELS
 __all__ = ["AttentionForward", "BandMask", "StructuredMask", "accepts_structured_masks"]
 
 #: A ``transformers`` attention function: ``(module, query, key, value, mask, **kwargs) -> (out [B, Q, H, D], _)``.
-AttentionForward = Callable[..., tuple[torch.Tensor, Any]]
+AttentionForward = Callable[..., tuple[torch.Tensor, torch.Tensor | None]]
 
 #: Default queries per block of a bounded band (the window, clipped to this range).
 _MIN_BLOCK, _MAX_BLOCK = 128, 512
@@ -52,7 +51,7 @@ class StructuredMask(abc.ABC):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> tuple[torch.Tensor, None]:
         """The attention output ``[B, Q, H, D]`` under this mask.
 
@@ -128,7 +127,7 @@ class BandMask(StructuredMask):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> tuple[torch.Tensor, None]:
         if query.shape[2] != self.length or key.shape[2] != self.length:
             raise ConfigError(

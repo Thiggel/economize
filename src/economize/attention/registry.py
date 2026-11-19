@@ -16,9 +16,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING
 
 from ..registry import Registry
+
+if TYPE_CHECKING:
+    import torch
 
 __all__ = [
     "ATTENTION_KERNELS",
@@ -56,8 +59,8 @@ class AttentionKernel:
     """
 
     family: str
-    forward: Callable[..., tuple[Any, Any]]
-    mask_function: Callable[..., Any] | None = None
+    forward: Callable[..., tuple[torch.Tensor, torch.Tensor | None]]
+    mask_function: Callable[..., object] | None = None
     description: str = ""
     fp8_kv: bool = False
     packed_kv: frozenset[str] = frozenset()
