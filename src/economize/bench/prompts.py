@@ -17,19 +17,32 @@ A new suite is a function registered in :data:`PROMPT_SOURCES` that returns a :c
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Protocol, cast
 
 import torch
 
 from ..errors import ConfigError
 from ..registry import Registry
 
-__all__ = ["PROMPT_SOURCES", "SPEC_BENCH_URL", "PromptSet", "load_prompts"]
+if TYPE_CHECKING:
+    from transformers import BatchEncoding
+
+__all__ = ["PROMPT_SOURCES", "SPEC_BENCH_URL", "PromptSet", "PromptTokenizer", "load_prompts"]
 
 #: Spec-Bench's prompt file in its repository.
 SPEC_BENCH_URL = "https://raw.githubusercontent.com/hemingkx/Spec-Bench/main/data/spec_bench/question.jsonl"
+
+
+class PromptTokenizer(Protocol):
+    """What :meth:`PromptSet.tokenize` calls on a tokenizer (a ``transformers`` tokenizer satisfies it)."""
+
+    def __call__(self, text: str) -> BatchEncoding: ...
+
+    def apply_chat_template(
+        self, conversation: list[dict[str, str]], *, add_generation_prompt: bool, tokenize: bool, **kwargs: object
+    ) -> object: ...
 
 
 @dataclass(frozen=True)
@@ -62,7 +75,7 @@ class PromptSet:
             groups.setdefault(category, []).append(index)
         return groups
 
-    def tokenize(self, tokenizer: Any, *, chat: bool = False, **template: Any) -> list[torch.Tensor]:
+    def tokenize(self, tokenizer: PromptTokenizer, *, chat: bool = False, **template: object) -> list[torch.Tensor]:
         """Token ids ``[P]`` per prompt; ``chat=True`` wraps each prompt as a user turn of the tokenizer's chat
         template with the generation prompt appended (``template`` goes to ``apply_chat_template``)."""
         if not chat:
@@ -71,7 +84,8 @@ class PromptSet:
         for text in self.texts:
             ids = tokenizer.apply_chat_template([{"role": "user", "content": text}], add_generation_prompt=True,
                                                 tokenize=True, **template)
-            ids = ids["input_ids"] if hasattr(ids, "keys") else ids  # a dict or a BatchEncoding
+            if hasattr(ids, "keys"):  # a dict or a BatchEncoding
+                ids = cast("Mapping[str, object]", ids)["input_ids"]
             result.append(torch.as_tensor(ids, dtype=torch.long).reshape(-1))
         return result
 
@@ -82,7 +96,7 @@ PromptSource = Callable[..., PromptSet]
 PROMPT_SOURCES: Registry[PromptSource] = Registry("prompt source", "economize.prompt_sources")
 
 
-def load_prompts(name: str, limit: int | None = None, **options: Any) -> PromptSet:
+def load_prompts(name: str, limit: int | None = None, **options: object) -> PromptSet:
     """Load the prompt suite ``name`` (see the module docstring), keeping the first ``limit`` prompts."""
     prompts = PROMPT_SOURCES.get(name)(**options)
     if limit is not None:
@@ -90,10 +104,11 @@ def load_prompts(name: str, limit: int | None = None, **options: Any) -> PromptS
     return prompts
 
 
-def _load_dataset(*args: Any, **kwargs: Any) -> Any:
+def _load_dataset(*args: str, **kwargs: str | None) -> Iterable[Mapping[str, object]]:
+    """The rows of a ``datasets`` split (the suites below read their fields by name and cast them)."""
     from datasets import load_dataset
 
-    return load_dataset(*args, **kwargs)
+    return cast("Iterable[Mapping[str, object]]", load_dataset(*args, **kwargs))
 
 
 @PROMPT_SOURCES.register("spec-bench")
@@ -105,9 +120,10 @@ def spec_bench(path: str = SPEC_BENCH_URL, categories: Sequence[str] | None = No
     keep = None if categories is None else set(categories)
     texts, cats = [], []
     for row in rows:
-        if keep is None or row["category"] in keep:
-            texts.append(row["turns"][0])
-            cats.append(row["category"])
+        category = cast(str, row["category"])
+        if keep is None or category in keep:
+            texts.append(cast("list[str]", row["turns"])[0])
+            cats.append(category)
     return PromptSet("spec-bench", tuple(texts), tuple(cats))
 
 
@@ -122,7 +138,7 @@ def gsm8k(split: str = "test", cache_dir: str | None = None) -> PromptSet:
 def humaneval(split: str = "test", cache_dir: str | None = None) -> PromptSet:
     """HumanEval's function signatures and docstrings, completed by the model."""
     rows = _load_dataset("openai/openai_humaneval", split=split, cache_dir=cache_dir)
-    return PromptSet("humaneval", tuple(row["prompt"] for row in rows))
+    return PromptSet("humaneval", tuple(cast(str, row["prompt"]) for row in rows))
 
 
 _SMOKE = (

@@ -36,16 +36,19 @@ approximate for those architectures.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
-from ..arch.config import config_value, text_config
+from ..arch.config import HFConfig, config_value, text_config
 from ..decoding.cost import CostEvent, CostKind, CostLog
 from ..errors import ConfigError
 from ..registry import Registry
 from .shape_readers import SHAPE_READERS, ShapeReader, family_fields
 from .shape_readers import first_set as _first
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
 
 __all__ = [
     "DRAFT_MODEL",
@@ -57,6 +60,7 @@ __all__ = [
     "CostReport",
     "Hardware",
     "ModelShape",
+    "ShapeFields",
     "ShapeReader",
     "get_hardware",
 ]
@@ -70,6 +74,36 @@ _LAYER_PARTS = frozenset({"attention", "mlp", "mixer"})
 _STANDARD_PARTS = frozenset({"attention", "mlp"})
 #: The module name a separate draft model records (``CostModel(draft=...)`` prices it).
 DRAFT_MODEL = "draft_model"
+
+
+class ShapeFields(TypedDict, total=False):
+    """Keyword arguments of :class:`ModelShape` (the overrides of :meth:`ModelShape.from_config`)."""
+
+    num_layers: int
+    hidden: int
+    heads: int
+    kv_heads: int
+    head_dim: int
+    intermediate: int
+    vocab: int
+    gated: bool
+    experts: int
+    active_experts: int
+    expert_intermediate: int
+    shared_intermediate: int
+    shared_gate: bool
+    dense_layers: frozenset[int]
+    layer_types: tuple[str, ...]
+    sliding_window: int | None
+    chunk_size: int | None
+    layer_parts: tuple[frozenset[str], ...]
+    mixer_params: int
+    expert_hidden: int
+
+
+def _int(config: HFConfig, *names: str) -> int | None:
+    """:func:`first_set` of size fields (integers in every config that sets them)."""
+    return cast("int | None", _first(config, *names))
 
 
 @dataclass(frozen=True)
@@ -143,7 +177,7 @@ class ModelShape:
             raise ConfigError(f"unknown layer parts {unknown}; a layer holds some of {sorted(_LAYER_PARTS)}")
 
     @classmethod
-    def from_config(cls, config: Any, **overrides: Any) -> ModelShape:
+    def from_config(cls, config: HFConfig, **overrides: Unpack[ShapeFields]) -> ModelShape:
         """Read the shape from a ``transformers`` config (the text config of a multimodal one).
 
         The generic reading knows the common config spellings; the family's corrections then fix what it spells
@@ -152,44 +186,44 @@ class ModelShape:
         not describe well.
         """
         config = text_config(config)
-        hidden = config_value(config, "hidden_size")
-        heads = config_value(config, "num_attention_heads")
-        layers = config_value(config, "num_hidden_layers")
-        intermediate = _first(config, "intermediate_size", "ffn_dim", "n_inner") or 4 * hidden
-        experts = _first(config, "num_experts", "num_local_experts", "n_routed_experts") or 0
-        expert_intermediate = _first(config, "moe_intermediate_size") or intermediate
-        shared, shared_gate = _first(config, "shared_expert_intermediate_size") or 0, True
-        if not shared and (shared_experts := _first(config, "n_shared_experts")):
+        hidden = cast(int, config_value(config, "hidden_size"))
+        heads = cast(int, config_value(config, "num_attention_heads"))
+        layers = cast(int, config_value(config, "num_hidden_layers"))
+        intermediate = _int(config, "intermediate_size", "ffn_dim", "n_inner") or 4 * hidden
+        experts = _int(config, "num_experts", "num_local_experts", "n_routed_experts") or 0
+        expert_intermediate = _int(config, "moe_intermediate_size") or intermediate
+        shared, shared_gate = _int(config, "shared_expert_intermediate_size") or 0, True
+        if not shared and (shared_experts := _int(config, "n_shared_experts")):
             shared, shared_gate = shared_experts * expert_intermediate, False
         dense: set[int] = set()
         if experts:
-            moe_layers = config_value(config, "moe_layers")
+            moe_layers = cast("Iterable[int] | None", config_value(config, "moe_layers"))
             if moe_layers is not None:  # 0-indexed MoE layers (Llama-4)
                 dense.update(i + 1 for i in range(layers) if i not in set(moe_layers))
-            dense.update(i + 1 for i in _first(config, "mlp_only_layers") or ())
-            step = _first(config, "decoder_sparse_step") or 1
+            dense.update(i + 1 for i in cast("Iterable[int]", _first(config, "mlp_only_layers") or ()))
+            step = _int(config, "decoder_sparse_step") or 1
             dense.update(i + 1 for i in range(layers) if (i + 1) % step)
-            dense.update(range(1, (_first(config, "first_k_dense_replace") or 0) + 1))
-        layer_types = tuple(_first(config, "layer_types") or ())
-        window = _first(config, "sliding_window")
+            dense.update(range(1, (_int(config, "first_k_dense_replace") or 0) + 1))
+        layer_types = tuple(cast("Sequence[str]", _first(config, "layer_types") or ()))
+        window = _int(config, "sliding_window")
         if not layer_types and window and config_value(config, "use_sliding_window", True):
             layer_types = (_SLIDING,) * layers
-        fields: dict[str, Any] = dict(
+        fields: dict[str, object] = dict(
             num_layers=layers, hidden=hidden, heads=heads,
-            kv_heads=_first(config, "num_key_value_heads") or heads,
-            head_dim=_first(config, "head_dim") or hidden // heads,
+            kv_heads=_int(config, "num_key_value_heads") or heads,
+            head_dim=_int(config, "head_dim") or hidden // heads,
             intermediate=intermediate, vocab=config_value(config, "vocab_size"),
             gated=True,
-            experts=experts, active_experts=_first(config, "num_experts_per_tok") or 0 if experts else 0,
+            experts=experts, active_experts=_int(config, "num_experts_per_tok") or 0 if experts else 0,
             expert_intermediate=expert_intermediate if experts else 0, shared_intermediate=shared,
             shared_gate=shared_gate,
             dense_layers=frozenset(dense), layer_types=layer_types,
             sliding_window=window if _SLIDING in layer_types else None,
-            chunk_size=_first(config, "attention_chunk_size") if _CHUNKED in layer_types else None,
+            chunk_size=_int(config, "attention_chunk_size") if _CHUNKED in layer_types else None,
         )
         fields = family_fields(config, fields)
         fields.update(overrides)
-        return cls(**fields)
+        return cls(**cast(ShapeFields, fields))  # the generic reading and the family corrections name ModelShape fields
 
     # ---- weights ---------------------------------------------------------------------------------------------
     @property
@@ -414,8 +448,8 @@ class CostReport:
             totals[kind] = totals[kind] + cost if kind in totals else cost
         return totals
 
-    def to_dict(self, hardware: Hardware | str | None = None) -> dict[str, Any]:
-        result: dict[str, Any] = {"calls": len(self.calls), "flops": self.flops, "bytes": self.bytes,
+    def to_dict(self, hardware: Hardware | str | None = None) -> dict[str, object]:
+        result: dict[str, object] = {"calls": len(self.calls), "flops": self.flops, "bytes": self.bytes,
                                   "by_kind": {k: {"calls": c.calls, "flops": c.flops, "bytes": c.bytes}
                                               for k, c in self.by_kind().items()}}
         if hardware is not None:

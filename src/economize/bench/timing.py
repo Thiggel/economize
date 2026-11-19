@@ -12,13 +12,50 @@ import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any
+from typing import TypedDict, TypeVar
 
 import torch
 
 from ..errors import ConfigError
 
-__all__ = ["GenerationTiming", "PromptTiming", "Timing", "benchmark_generation", "count_tokens", "time_call"]
+__all__ = [
+    "GenerationRecord",
+    "GenerationTiming",
+    "PromptRecord",
+    "PromptTiming",
+    "Timing",
+    "TimingRecord",
+    "benchmark_generation",
+    "count_tokens",
+    "time_call",
+]
+
+_T = TypeVar("_T")
+
+
+class TimingRecord(TypedDict):
+    """:meth:`Timing.to_dict`: the statistics of the samples (seconds) and the samples."""
+
+    median: float
+    mean: float
+    min: float
+    iqr: float
+    samples: list[float]
+
+
+class PromptRecord(TimingRecord):
+    """One prompt of :meth:`GenerationTiming.to_dict`: its tokens and its timing."""
+
+    tokens: int
+
+
+class GenerationRecord(TypedDict):
+    """:meth:`GenerationTiming.to_dict`."""
+
+    tokens: int
+    seconds: float
+    tokens_per_second: float
+    prompts: list[PromptRecord]
 
 
 @dataclass(frozen=True)
@@ -47,7 +84,7 @@ class Timing:
         low, _, high = statistics.quantiles(self.samples, n=4, method="inclusive")
         return high - low
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> TimingRecord:
         return {"median": self.median, "mean": self.mean, "min": self.minimum, "iqr": self.spread,
                 "samples": list(self.samples)}
 
@@ -63,8 +100,8 @@ def _devices(devices: Iterable[torch.device | str | int] | None) -> list[torch.d
     return list(dict.fromkeys(result))
 
 
-def time_call(fn: Callable[[], Any], *, warmup: int = 1, repeats: int = 5,
-              devices: Iterable[torch.device | str | int] | None = None) -> tuple[Timing, Any]:
+def time_call(fn: Callable[[], _T], *, warmup: int = 1, repeats: int = 5,
+              devices: Iterable[torch.device | str | int] | None = None) -> tuple[Timing, _T]:
     """Time ``fn()`` ``repeats`` times after ``warmup`` untimed calls.
 
     Args:
@@ -83,7 +120,7 @@ def time_call(fn: Callable[[], Any], *, warmup: int = 1, repeats: int = 5,
     if repeats < 1 or warmup < 0:
         raise ConfigError(f"need repeats >= 1 and warmup >= 0, got {repeats}, {warmup}")
     cuda = _devices(devices)
-    result = None
+    result: _T  # assigned by every repeat (repeats >= 1)
     for _ in range(warmup):
         result = fn()
     samples = []
@@ -107,7 +144,7 @@ def time_call(fn: Callable[[], Any], *, warmup: int = 1, repeats: int = 5,
     return Timing(tuple(samples)), result
 
 
-def count_tokens(output: Any) -> int:
+def count_tokens(output: object) -> int:
     """Generated tokens in a generation's output: an int, a token tensor (all its elements, so a ``[B, N]`` batch
     counts ``B * N`` including any padding), a sequence of token ids, an object with a ``tokens`` attribute
     (``DecodeResult``, ``SSDResult``) or a sequence of such outputs (the results of ``decode_batch``), summed.
@@ -175,12 +212,12 @@ class GenerationTiming:
                               f"against a baseline of {len(baseline.prompts)}")
         return self.tokens_per_second / baseline.tokens_per_second
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> GenerationRecord:
         return {"tokens": self.tokens, "seconds": self.seconds, "tokens_per_second": self.tokens_per_second,
                 "prompts": [{"tokens": p.tokens, **p.timing.to_dict()} for p in self.prompts]}
 
 
-def benchmark_generation(generate: Callable[[torch.Tensor], Any], prompts: Sequence[torch.Tensor], *,
+def benchmark_generation(generate: Callable[[torch.Tensor], object], prompts: Sequence[torch.Tensor], *,
                          warmup: int = 1, repeats: int = 3, warmup_per_prompt: int = 0,
                          devices: Iterable[torch.device | str | int] | None = None) -> GenerationTiming:
     """Time ``generate(prompt)`` on every prompt.
