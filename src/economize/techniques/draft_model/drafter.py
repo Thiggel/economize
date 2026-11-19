@@ -104,6 +104,7 @@ class DraftModelDrafter(Drafter):
             self._clamped = torch.zeros((), dtype=torch.long, device=device)
             self._step_fn.reset()
         else:
+            # core types static_cache_class as type[KVCache], and only the static caches have activate
             self._cache.activate(batch_size)  # type: ignore[attr-defined]
         assert self._clamped is not None
         self._clamped.zero_()
