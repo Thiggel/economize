@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar, TypedDict
 
 import torch
 
@@ -36,9 +36,29 @@ from ..prune.technique import DepthPruneTechnique
 from .pattern import full_attention_heads, read_pattern, read_scores
 
 if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
     from ...arch import ArchAdapter
 
-__all__ = ["DuoAttentionCache", "DuoAttentionConfig", "DuoAttentionTechnique", "streaming_heads"]
+__all__ = ["DuoAttentionCache", "DuoAttentionConfig", "DuoAttentionFields", "DuoAttentionTechnique", "streaming_heads"]
+
+
+class DuoAttentionFields(TypedDict, total=False):
+    """The fields of :class:`DuoAttentionConfig` other than ``pattern``, as keyword arguments."""
+
+    method: str
+    sinks: int | None
+    recent: int
+    heavy: int
+    observation_window: int
+    kernel_size: int
+    pooling: str
+    beta: int
+    layers: tuple[int, ...]
+    storage: str | None
+    headroom: int
+    sparsity: float | None
+    threshold: float | None
 
 
 @dataclass(frozen=True)
@@ -97,16 +117,17 @@ class DuoAttentionConfig(KVEvictConfig):
             check_number("threshold", self.threshold)
 
     @classmethod
-    def from_pattern(cls, path: str | Path, **fields: Any) -> DuoAttentionConfig:
+    def from_pattern(cls, path: str | Path, **fields: Unpack[DuoAttentionFields]) -> DuoAttentionConfig:
         """The configuration of a reference pattern directory ``path``: its gate values, and its ``config.json``'s
         ``sink_size`` and ``recent_size`` unless ``fields`` sets ``sinks`` or ``recent``."""
         files = read_pattern(path)
-        settings: dict[str, Any] = {}
+        settings: DuoAttentionFields = {}
         if files.sinks is not None:
             settings["sinks"] = files.sinks
         if files.recent is not None:
             settings["recent"] = files.recent
-        return cls(pattern=str(path), **{**settings, **fields})
+        merged: DuoAttentionFields = {**settings, **fields}
+        return cls(pattern=str(path), **merged)
 
     def covered_layers(self) -> tuple[int, ...]:
         """The 1-indexed layers whose streaming heads evict: :attr:`layers`, else the trained layers recorded in the
@@ -258,7 +279,7 @@ class DuoAttentionTechnique(KVEvictTechnique):
     def make_wrapper(self, cache: KVCache) -> CacheWrapper:
         return DuoAttentionCache(cache, self)
 
-    def describe(self) -> dict[str, Any]:
+    def describe(self) -> dict[str, object]:
         """The window of the streaming heads and how many KV heads stream."""
         heads = sum(
             self.adapter.head_geometry(i).kv_heads
