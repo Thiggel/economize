@@ -38,7 +38,7 @@ from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 import torch
 from torch import Tensor, nn
@@ -53,6 +53,10 @@ from ..techniques.quant.readback import read_quantized_weight
 from ..unwrap import base_model_of
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from compressed_tensors.quantization import QuantizationArgs
+
     from ..techniques.quant.config import QuantSpec
 
 __all__ = [
@@ -85,7 +89,7 @@ class CtScheme:
     format: str
     activation_formats: Mapping[str, str] = field(default_factory=dict)
 
-    def weight_args(self, qweight: QuantizedWeight) -> dict[str, Any]:
+    def weight_args(self, qweight: QuantizedWeight) -> dict[str, object]:
         """The ``QuantizationArgs`` fields of one weight (per-channel or group-wise scales, symmetric or not).
 
         Args:
@@ -139,7 +143,7 @@ class Fp4CtScheme(CtScheme):
     strategy: str = "tensor_group"
     stored_scale_dtype: torch.dtype = torch.float8_e4m3fn
 
-    def weight_args(self, qweight: QuantizedWeight) -> dict[str, Any]:
+    def weight_args(self, qweight: QuantizedWeight) -> dict[str, object]:
         return {
             "num_bits": 4,
             "type": "float",
@@ -165,9 +169,15 @@ class Fp4CtScheme(CtScheme):
         if global_scale is None:  # MXFP4: the power-of-two scales, which the compressor stores as E8M0 exponents
             state["weight_scale"] = qweight.scale.float()
             return state
-        state["weight_scale"] = qweight.grid.local_scale(qweight.scale)  # type: ignore[attr-defined]
+        state["weight_scale"] = cast(_TwoLevelGrid, qweight.grid).local_scale(qweight.scale)
         state["weight_global_scale"] = torch.tensor([global_scale], dtype=torch.float32, device=qweight.scale.device)
         return state
+
+
+class _TwoLevelGrid(Protocol):
+    """A grid with a per-tensor scale over its group scales (NVFP4, which sets ``global_scale``)."""
+
+    def local_scale(self, scale: Tensor) -> Tensor: ...
 
 
 #: The compressed-tensors scheme of each exportable format, by economize format name (entry-point group
@@ -212,7 +222,7 @@ class CompressedTensorsBackend(QuantBackend):
             activations.install(module, config.activations)
 
 
-def quantized_modules(model: Any) -> dict[str, QuantizedWeight]:
+def quantized_modules(model: object) -> dict[str, QuantizedWeight]:
     """The base model's quantized modules by qualified name: the codes the ``"compressed-tensors"`` backend recorded,
     or those read back from a kernel weight (:func:`~economize.techniques.quant.readback.read_quantized_weight`)."""
     base = base_model_of(model)
@@ -226,12 +236,12 @@ def quantized_modules(model: Any) -> dict[str, QuantizedWeight]:
 
 
 def export_compressed_tensors(
-    model: Any,
+    model: object,
     save_directory: str | Path,
     *,
     scale_dtype: torch.dtype | None = None,
     state_dict: dict[str, Tensor] | None = None,
-    **save_kwargs: Any,
+    **save_kwargs: object,
 ) -> Path:
     """Write ``model``'s base model with its quantized linear maps in the compressed-tensors format.
 
@@ -266,7 +276,7 @@ def export_compressed_tensors(
     modules = dict(base.named_modules())
     state = dict((state_dict if state_dict is not None else base.state_dict()).items())
     groups: dict[str, list[str]] = defaultdict(list)
-    schemes: dict[str, Any] = {}
+    schemes: dict[str, tuple[QuantizationArgs, QuantizationArgs | None, str]] = {}
     for name, qweight in records.items():
         weights, fmt = _weight_args(qweight)
         inputs, fmt = _input_args(qweight, modules[name], fmt)
@@ -293,12 +303,14 @@ def export_compressed_tensors(
         quantization_status="compressed",
     )
     out = Path(save_directory)
-    base.save_pretrained(out, state_dict=state, **save_kwargs)
+    # save_pretrained's options are typed one by one; save_kwargs forwards them as one mapping
+    save: Callable[..., object] = base.save_pretrained
+    save(out, state_dict=state, **save_kwargs)
     ModelCompressor(quantization_config=qconfig).update_config(str(out))
     return out
 
 
-def _weight_args(qweight: QuantizedWeight) -> tuple[Any, str]:
+def _weight_args(qweight: QuantizedWeight) -> tuple[QuantizationArgs, str]:
     """compressed-tensors ``QuantizationArgs`` and storage format of one quantized weight."""
     from compressed_tensors.quantization import QuantizationArgs
 
@@ -306,7 +318,7 @@ def _weight_args(qweight: QuantizedWeight) -> tuple[Any, str]:
     return QuantizationArgs(**scheme.weight_args(qweight)), scheme.format
 
 
-def _input_args(qweight: QuantizedWeight, module: nn.Module, fmt: str) -> tuple[Any, str]:
+def _input_args(qweight: QuantizedWeight, module: nn.Module, fmt: str) -> tuple[QuantizationArgs | None, str]:
     """``(input_activations, storage format)`` of a module: ``(None, fmt)`` for a weight-only map.
 
     Raises:

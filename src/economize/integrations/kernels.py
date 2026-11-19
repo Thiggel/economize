@@ -29,7 +29,8 @@ import operator
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from enum import Flag
+from typing import TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
@@ -37,6 +38,9 @@ from torch import Tensor, nn
 
 from ..registry import Registry
 from ..unwrap import base_model_of
+
+if TYPE_CHECKING:
+    from transformers import KernelConfig
 
 __all__ = [
     "ENV_VAR",
@@ -56,7 +60,7 @@ logger = logging.getLogger(__name__)
 #: Debug override: set to ``0`` (or ``false`` / ``no`` / ``off``) to never load kernels from the Hub.
 ENV_VAR = "ECONOMIZE_HUB_KERNELS"
 
-Adapter = Callable[[Callable[..., Any]], Callable[..., Tensor]]
+Adapter = Callable[[Callable[..., object]], Callable[..., Tensor]]
 
 
 @dataclass(frozen=True)
@@ -162,7 +166,7 @@ class _Op:
         self.name = name
         self.__doc__ = KERNEL_OPS.get(name).fallback.__doc__
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Tensor:
+    def __call__(self, *args: object, **kwargs: object) -> Tensor:
         device = next((a.device for a in (*args, *kwargs.values()) if isinstance(a, Tensor)), torch.device("cpu"))
         return resolve(self.name, device)(*args, **kwargs)
 
@@ -176,7 +180,13 @@ def op(name: str) -> Callable[..., Tensor]:
 
 
 # ---- layers --------------------------------------------------------------------------------------------------------
-def kernelize(model: nn.Module, *, mode: Any = None, kernel_config: Any = None, use_fallback: bool = True) -> nn.Module:
+def kernelize(
+    model: nn.Module,
+    *,
+    mode: str | Flag | None = None,
+    kernel_config: KernelConfig | None = None,
+    use_fallback: bool = True,
+) -> nn.Module:
     """Replace layer forwards of ``model`` (an ``EfficientModel`` or a ``transformers`` model) by hub kernels.
 
     Args:
@@ -205,16 +215,16 @@ def kernelize(model: nn.Module, *, mode: Any = None, kernel_config: Any = None, 
     return model
 
 
-def _mode(mode_type: Any, mode: Any, training: bool) -> Any:
+def _mode(mode_type: type[Flag], mode: str | Flag | None, training: bool) -> Flag:
     if mode is None:
-        return mode_type.TRAINING if training else mode_type.INFERENCE
+        return mode_type["TRAINING"] if training else mode_type["INFERENCE"]
     if isinstance(mode, str):
         return functools.reduce(operator.or_, (mode_type[part.strip().upper()] for part in mode.split("|")))
     return mode
 
 
 # ---- built-in ops --------------------------------------------------------------------------------------------------
-def _halving_out_param(function: Callable[..., Any]) -> Callable[..., Tensor]:
+def _halving_out_param(function: Callable[..., object]) -> Callable[..., Tensor]:
     """vLLM-style gated activations ``function(out, x)`` with ``out`` half as wide as ``x``."""
 
     def call(x: Tensor) -> Tensor:
