@@ -3,11 +3,15 @@
 
 from __future__ import annotations
 
-from torch import nn
+from typing import TYPE_CHECKING, cast
 
+from ....core.technique import Technique
 from ...exporters import UnsupportedBackendError
 from .base import PlanBuilder, Support, register_vllm_technique
 from .drafters import JumpVllm
+
+if TYPE_CHECKING:
+    from ....techniques.redrafter.config import RedrafterConfig
 
 __all__ = ["RedrafterVllm"]
 
@@ -24,7 +28,7 @@ class RedrafterVllm(JumpVllm):
               "head run as one draft round over the target's last hidden state; vLLM verifies a chain")
     exporter = "redrafter"
 
-    def check(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def check(self, technique: Technique, builder: PlanBuilder) -> None:
         from ....errors import ConfigError
         from ....techniques.redrafter.export import RedrafterDrafterSpec
 
@@ -37,9 +41,9 @@ class RedrafterVllm(JumpVllm):
                                           f"{spec.num_drafts} tokens; asked for num_speculative_tokens="
                                           f"{builder.num_speculative_tokens}")
 
-    def contribute(self, technique: nn.Module, builder: PlanBuilder) -> None:
+    def contribute(self, technique: Technique, builder: PlanBuilder) -> None:
         super().contribute(technique, builder)
-        config = technique.config
+        config = cast("RedrafterConfig", technique.config)
         if config.beam_width > 1:
             builder.note(self.technique, f"vLLM 0.30 verifies one chain per request (no tree verification), so "
                                          f"it serves the greedy beam; the beam search over {config.beam_width} "
