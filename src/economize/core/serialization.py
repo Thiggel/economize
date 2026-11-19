@@ -36,11 +36,12 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 import torch
 from torch import nn
 
+from .._typing import JSONDict, JSONValue
 from .._version import __version__
 from ..decoding import DecodeConfig
 from ..errors import CalibrationMismatchWarning, CheckpointFormatError, ConfigError, TeacherMismatchWarning
@@ -87,7 +88,7 @@ WEIGHTS_FILE = "economize_model.safetensors"
 SCHEMA_VERSION = 1
 
 #: A step of :func:`migrate`: the metadata of schema version ``v`` turned into that of version ``v + 1``.
-Migration = Callable[[dict[str, Any]], dict[str, Any]]
+Migration = Callable[[JSONDict], JSONDict]
 
 #: Checkpoint migrations, registered under the version they upgrade from (``"0"`` upgrades to 1). A new schema version
 #: registers one more step here and never edits the existing ones.
@@ -95,12 +96,12 @@ MIGRATIONS: Registry[Migration] = Registry("checkpoint migration")
 
 
 @MIGRATIONS.register("0")
-def _unversioned(meta: dict[str, Any]) -> dict[str, Any]:
+def _unversioned(meta: JSONDict) -> JSONDict:
     """Checkpoints of releases up to 0.5, which wrote no ``schema_version``, have the layout of version 1."""
     return meta
 
 
-def migrate(meta: Mapping[str, Any]) -> dict[str, Any]:
+def migrate(meta: Mapping[str, JSONValue]) -> JSONDict:
     """``meta`` (the contents of a :data:`CONFIG_FILE`) upgraded to :data:`SCHEMA_VERSION` by the steps of
     :data:`MIGRATIONS`. Metadata without ``schema_version`` is version 0.
 
@@ -108,7 +109,7 @@ def migrate(meta: Mapping[str, Any]) -> dict[str, Any]:
         CheckpointFormatError: The checkpoint has a newer schema than this release reads.
     """
     out = dict(meta)
-    version = int(out.get("schema_version", 0))
+    version = int(cast("int | str", out.get("schema_version", 0)))
     if version > SCHEMA_VERSION:
         raise CheckpointFormatError(
             f"the checkpoint has schema version {version} (written by economize {out.get('economize_version')}), "
@@ -129,7 +130,7 @@ class Checkpoint:
     states: dict[str, dict[str, torch.Tensor]]
     decoding: DecodeConfig | None = None
     base_model: str | None = None
-    meta: dict[str, Any] = field(default_factory=dict)
+    meta: JSONDict = field(default_factory=dict)
 
 
 class CheckpointFormat(ABC):
@@ -164,15 +165,16 @@ class EconomizeFormat(CheckpointFormat):
         from safetensors.torch import load_file
 
         meta = migrate(json.loads((path / self.config_file).read_text()))
-        configs = [nested_config(entry) for entry in meta["techniques"]]
-        states: dict[str, dict[str, torch.Tensor]] = {t["technique"]: {} for t in meta["techniques"]}
+        entries = cast("list[JSONDict]", meta["techniques"])
+        configs = [nested_config(entry) for entry in entries]
+        states: dict[str, dict[str, torch.Tensor]] = {str(t["technique"]): {} for t in entries}
         for key, value in load_file(path / self.weights_file, device=str(map_location)).items():
             name, _, rest = key.partition(".")
             if name not in states:
                 raise CheckpointFormatError(f"weight {key!r} belongs to no technique in {self.config_file}")
             states[name][rest] = value
-        decoding = DecodeConfig.from_dict(meta["decoding"]) if meta.get("decoding") else None
-        return Checkpoint(configs, states, decoding, meta.get("base_model"), meta)
+        decoding = DecodeConfig.from_dict(cast("JSONDict", meta["decoding"])) if meta.get("decoding") else None
+        return Checkpoint(configs, states, decoding, cast("str | None", meta.get("base_model")), meta)
 
 
 class LegacyEffkitFormat(EconomizeFormat):
@@ -306,7 +308,7 @@ def _calibration_fingerprints(model: EfficientModel, exclude: Collection[str]) -
 
 
 def check_teacher_fingerprint(
-    model: nn.Module, meta: Mapping[str, Any], *, detail: str = "", stacklevel: int = 2
+    model: nn.Module, meta: Mapping[str, object], *, detail: str = "", stacklevel: int = 2
 ) -> bool:
     """Warn when ``model``'s base weights differ from those a checkpoint was saved with.
 
@@ -329,7 +331,7 @@ def check_teacher_fingerprint(
     recorded = meta.get("teacher_fingerprint")
     if recorded is None or _is_split(model):
         return True
-    trained = meta.get(TRAINED_ENTRY, ())
+    trained = cast("Collection[str]", meta.get(TRAINED_ENTRY, ()))
     digests: dict[str, str] | None = getattr(model, "source_digests", None)
     if "source_fingerprint" in meta and digests is not None:  # the checkpoint holds weight techniques
         if _combined(digests, trained) == meta["source_fingerprint"]:
@@ -365,7 +367,7 @@ def save(
     model: EfficientModel,
     path: str | Path,
     *,
-    extra_meta: Mapping[str, Any] | None = None,
+    extra_meta: Mapping[str, object] | None = None,
     trained: Iterable[nn.Parameter] = (),
 ) -> None:
     """Write ``model``'s technique configurations and weights in economize's format (never the base model's weights).
@@ -384,7 +386,7 @@ def save(
 
     path = Path(path)
     excluded = trained_parameter_names(model, trained)
-    meta: dict[str, Any] = {
+    meta: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "economize_version": __version__,
         "base_model": getattr(model.base_model.config, "_name_or_path", None),
@@ -503,7 +505,7 @@ def from_pretrained(
     decoding: DecodeConfig | None = None,
     calibration: object = None,
     check_teacher: bool = True,
-    **model_kwargs: Any,
+    **model_kwargs: object,
 ) -> EfficientModel:
     """Load the base model named in the checkpoint (or ``base_model``) with ``transformers`` and attach the techniques.
 
@@ -520,8 +522,9 @@ def from_pretrained(
 
 
 def resolve_base_model(
-    meta: Mapping[str, Any], base_model: str | None, model_kwargs: Mapping[str, Any], *, source: str = "the checkpoint"
-) -> tuple[str, dict[str, Any]]:
+    meta: Mapping[str, object], base_model: str | None, model_kwargs: Mapping[str, object], *,
+    source: str = "the checkpoint",
+) -> tuple[str, dict[str, object]]:
     """The base model to load for a checkpoint and the ``from_pretrained`` arguments to load it with.
 
     Every path that loads a base model for a checkpoint (:func:`from_pretrained`, the Hub loader, the lm-eval model)
@@ -555,7 +558,7 @@ def resolve_base_model(
     return str(name), kwargs
 
 
-def load_base_model(name: str | Path, **model_kwargs: Any) -> PreTrainedModel:
+def load_base_model(name: str | Path, **model_kwargs: object) -> PreTrainedModel:
     """Load a base model with ``AutoModelForCausalLM``, or with the class its config names.
 
     Multimodal wrappers such as ``Mistral3ForConditionalGeneration`` have no ``AutoModelForCausalLM`` mapping. For
