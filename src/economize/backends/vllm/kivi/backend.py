@@ -114,6 +114,7 @@ class EconomizeKIVIImpl(TritonAttentionImpl):
     """Triton attention over the dense part of KIVI's cells; quantization and the packed kernel on covered layers."""
 
     # forwards the arguments of vLLM's TritonAttentionImpl constructor unchanged, whatever types they have
+    # Any: forwarded unchanged to the vLLM base-class constructor, whose signature varies across vLLM versions.
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.kivi = SETTINGS.current()

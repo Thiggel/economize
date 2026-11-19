@@ -78,6 +78,7 @@ class StreamingManager(FullAttentionManager):
     """Full-attention manager that frees the blocks between the sinks and the window of a decoding request."""
 
     # forwards the keyword arguments of vLLM's SingleTypeKVCacheManager constructor unchanged, whatever types they have
+    # Any: forwarded unchanged to the vLLM base-class constructor, whose signature varies across vLLM versions.
     def __init__(self, kv_cache_spec: StreamingSpec, **kwargs: Any) -> None:
         super().__init__(kv_cache_spec, **kwargs)
         self.sinks = kv_cache_spec.sinks

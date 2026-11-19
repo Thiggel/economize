@@ -278,6 +278,7 @@ class EconomizeStreamingImpl(TritonAttentionImpl):
     """Triton attention that drops the streaming mask on the layers outside a layer subset."""
 
     # forwards the arguments of vLLM's TritonAttentionImpl constructor unchanged, whatever types they have
+    # Any: forwarded unchanged to the vLLM base-class constructor, whose signature varies across vLLM versions.
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         settings = SETTINGS.current()
