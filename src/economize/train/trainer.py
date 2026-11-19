@@ -26,6 +26,8 @@ parameter groups include them (``ce`` or ``layerskip`` with ``parameters="traina
 
 from __future__ import annotations
 
+import logging
+import math
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -34,12 +36,13 @@ from typing import TYPE_CHECKING, Any
 import torch
 from transformers import Trainer, TrainerCallback, TrainingArguments
 
-from ..errors import ConfigError
-from ..validation import check_registered
+from ..errors import ConfigError, NonFiniteLossError
+from ..validation import check_choice, check_registered
 from .checkpoint import load_trained, save_trained
 from .data import Example, collate
 from .data.masks import loss_mask_from_labels
 from .evaluate import MetricMeans, evaluate_batch
+from .loop import MAX_EMPTY_DRAWS, NonFinitePolicy
 from .module import ObjectiveModule
 from .objective import Batch, Objective, OptimDefaults, build_objective, default_objective
 from .optim import build_optimizer, build_scheduler
@@ -54,6 +57,8 @@ if TYPE_CHECKING:
 
 __all__ = ["EffCollator", "EffTrainer", "EffTrainingArguments", "economize_training_args"]
 
+logger = logging.getLogger("economize.train")
+
 
 
 @dataclass
@@ -67,6 +72,8 @@ class EffTrainingArguments(TrainingArguments):
         min_lr_ratio: Floor of the economize schedule as a fraction of the peak (``None``: the objective's).
         lr_backbone: Learning rate of every ``"backbone"`` parameter group (``None``: each group's own rate).
         offload_optimizer: Keep the AdamW moments in CPU memory (:class:`~economize.train.OffloadedAdamW`).
+        nonfinite: What an optimizer step with a ``NaN`` or infinite loss does (``"raise"``, ``"skip"`` or
+            ``"warn"``), as ``TrainConfig.nonfinite`` of :func:`~economize.train.fit` (see :class:`EffTrainer`).
     """
 
     economize_schedule: str | None = field(
@@ -75,9 +82,11 @@ class EffTrainingArguments(TrainingArguments):
     min_lr_ratio: float | None = field(default=None, metadata={"help": "floor of the economize schedule"})
     lr_backbone: float | None = field(default=None, metadata={"help": "learning rate of backbone parameter groups"})
     offload_optimizer: bool = field(default=False, metadata={"help": "keep the AdamW moments in CPU memory"})
+    nonfinite: str = field(default="raise", metadata={"help": "a step with a NaN or infinite loss: raise, skip, warn"})
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        check_choice("nonfinite", self.nonfinite, ("raise", "skip", "warn"))
         if self.economize_schedule is not None:
             # fail early on unknown names
             check_registered("learning-rate schedule", self.economize_schedule, SCHEDULES)
@@ -167,6 +176,22 @@ class _BeginStep(TrainerCallback):
         self.objective.begin_step(state.global_step, max(state.max_steps, 1))
 
 
+class _StepGuard(TrainerCallback):
+    """Drops the gradients of an optimizer step that :class:`EffTrainer` marked as skipped (a non-finite loss under
+    ``nonfinite="skip"``, or no micro-batch with a counted prediction), so AdamW leaves every parameter unchanged."""
+
+    def __init__(self, trainer: EffTrainer) -> None:
+        self.trainer = trainer
+
+    def on_step_begin(self, args: TrainingArguments, state: Any, control: Any, **kwargs: Any) -> None:
+        self.trainer._step_counted, self.trainer._step_dropped = 0, False
+
+    def on_pre_optimizer_step(self, args: TrainingArguments, state: Any, control: Any, **kwargs: Any) -> None:
+        if self.trainer._step_dropped or self.trainer._step_counted == 0:
+            for p in self.trainer.objective_module.params:
+                p.grad = None
+
+
 class EffTrainer(Trainer):
     """A ``transformers.Trainer`` that trains economize techniques with a registered objective.
 
@@ -186,6 +211,10 @@ class EffTrainer(Trainer):
             schedule of ``args``).
         min_lr_ratio: Floor of the economize schedule (``None``: ``args.min_lr_ratio``, else the objective's).
         offload_optimizer: Keep the AdamW moments in CPU memory (``None``: ``args.offload_optimizer``).
+        nonfinite: What an optimizer step whose loss is ``NaN`` or infinite does (``None``: ``args.nonfinite``,
+            else ``"raise"``): ``"raise"`` stops training with :class:`~economize.errors.NonFiniteLossError` before
+            the optimizer applies the step, ``"skip"`` drops the step's gradients with a warning (the step still
+            counts and the learning rate still advances) and ``"warn"`` logs a warning and applies the step.
         eval_with_objective: Also report the objective's evaluation protocol (:meth:`Objective.evaluate`, e.g.
             the teacher-forced curve of a drafter) on the evaluation batches. Scalar metrics are logged as
             ``eval_<name>``, per-step curves as ``eval_<name>1`` and ``eval_<name>K`` (first and last step), and the
@@ -199,7 +228,12 @@ class EffTrainer(Trainer):
     Training metrics of the objective (e.g. ``kl1``, ``nmse1``) are averaged over the steps since the last log and
     logged next to the loss (averaged over processes); evaluation metrics appear with the ``eval_`` prefix.
     :meth:`Objective.begin_step` runs once per optimizer step (a callback at ``on_step_begin``), as in
-    :func:`~economize.train.fit`. Checkpoints are written in economize's format and ``resume_from_checkpoint`` restores
+    :func:`~economize.train.fit`. A training micro-batch in which no next-token prediction counts (every position
+    masked by ``attention_mask`` or ``loss_mask``, e.g. chat rows whose answer was cut off) adds no gradient: it is
+    counted, logged as ``skipped_batches`` with a warning on the first one, and an optimizer step made only of such
+    batches leaves the parameters unchanged. ``Trainer`` cannot draw past a batch as :func:`~economize.train.fit`
+    does, and ``MAX_EMPTY_DRAWS`` such batches in a row raise :class:`~economize.errors.ConfigError`. Checkpoints are
+    written in economize's format and ``resume_from_checkpoint`` restores
     techniques, trained base parameters, optimizer and scheduler. Several GPUs need a distributed launch
     (``accelerate launch`` / ``torchrun``): ``DataParallel`` replicas would not share the techniques' state, so a
     single process always uses one device.
@@ -222,6 +256,7 @@ class EffTrainer(Trainer):
         schedule: str | None = None,
         min_lr_ratio: float | None = None,
         offload_optimizer: bool | None = None,
+        nonfinite: NonFinitePolicy | None = None,
         eval_with_objective: bool = False,
         data_collator: Any = None,
         **trainer_kwargs: Any,
@@ -247,6 +282,14 @@ class EffTrainer(Trainer):
         if offload_optimizer is None:
             offload_optimizer = bool(getattr(args, "offload_optimizer", False))
         self.offload_optimizer = offload_optimizer
+        if nonfinite is None:
+            nonfinite = getattr(args, "nonfinite", "raise")
+        check_choice("nonfinite", nonfinite, ("raise", "skip", "warn"))
+        self.nonfinite = nonfinite
+        #: Training micro-batches without a counted prediction so far (logged as ``skipped_batches``).
+        self.skipped_batches = 0
+        self._empty_run = 0
+        self._step_counted, self._step_dropped = 0, False
         self.eval_with_objective = eval_with_objective
         #: Averaged :meth:`Objective.evaluate` metrics of the last evaluation (``eval_with_objective``).
         self.last_eval: dict[str, float | list[float]] | None = None
@@ -254,7 +297,7 @@ class EffTrainer(Trainer):
         self.objective_module = ObjectiveModule(model, built, self.teacher_head)
         self._metrics: dict[str, MetricMeans] = {"train": MetricMeans(), "eval": MetricMeans()}
         self._protocol = MetricMeans()
-        callbacks = [*(trainer_kwargs.pop("callbacks", None) or []), _BeginStep(built)]
+        callbacks = [*(trainer_kwargs.pop("callbacks", None) or []), _BeginStep(built), _StepGuard(self)]
         super().__init__(model=self.objective_module, args=args, data_collator=data_collator, callbacks=callbacks,
                          **trainer_kwargs)
         self.model_accepts_loss_kwargs = False  # the objective's loss is a mean: Trainer divides by accumulation
@@ -306,6 +349,52 @@ class EffTrainer(Trainer):
         return self.lr_scheduler
 
     # ---- loss and evaluation -------------------------------------------------------------------------------------
+    def training_step(
+        self, model: nn.Module, inputs: dict[str, Any], num_items_in_batch: Any = None
+    ) -> torch.Tensor:
+        """``Trainer.training_step`` with the checks of the class docstring: batches without a counted prediction
+        are counted and add no gradient, and a non-finite loss is handled under :attr:`nonfinite`."""
+        self._count_targets(inputs)
+        loss = super().training_step(model, inputs, num_items_in_batch)
+        self._check_finite(loss)
+        return loss
+
+    def _count_targets(self, inputs: Mapping[str, Any]) -> None:
+        loss_mask = inputs.get("loss_mask")
+        if loss_mask is None and inputs.get("labels") is not None:
+            loss_mask = loss_mask_from_labels(inputs["labels"])
+        if Batch(inputs["input_ids"], inputs.get("attention_mask"), loss_mask).has_targets():
+            self._step_counted += 1
+            self._empty_run = 0
+            return
+        if self.skipped_batches == 0:
+            logger.warning("a training batch has every prediction masked (attention_mask, loss_mask): it adds no "
+                           "gradient, and the training logs count such batches as skipped_batches")
+        self.skipped_batches += 1
+        self._empty_run += 1
+        if self._empty_run >= MAX_EMPTY_DRAWS:
+            raise ConfigError(f"{MAX_EMPTY_DRAWS} consecutive training batches have no position that counts in the "
+                              "loss: check the attention_mask and loss_mask of the data")
+
+    def _check_finite(self, loss: torch.Tensor) -> None:
+        bad = (~torch.isfinite(loss.detach().float())).float().reshape(())
+        if self.args.world_size > 1:  # every process takes the same decision (no process raises alone)
+            bad = self._sum_over_processes(bad)
+        if not bad.item():
+            return
+        step, value = self.state.global_step, float(loss)
+        if self.nonfinite == "raise":
+            raise NonFiniteLossError(
+                f"step {step}: the loss is {value if not math.isfinite(value) else 'not finite on another process'}; "
+                "the step was not applied. Lower the learning rate, use bfloat16 or float32, or pass "
+                "nonfinite='skip' to drop such steps"
+            )
+        if self.nonfinite == "skip":
+            logger.warning("step %d: the loss is %s, the step is skipped", step, value)
+            self._step_dropped = True
+        else:
+            logger.warning("step %d: the loss is %s", step, value)
+
     def compute_loss(
         self,
         model: nn.Module,
@@ -390,6 +479,8 @@ class EffTrainer(Trainer):
             logs.update({f"eval_{k}": v for k, v in metrics.items() if f"eval_{k}" not in logs})
         elif "loss" in logs:
             logs.update({k: v for k, v in self._drain("train").items() if k not in logs})
+            if self.skipped_batches:
+                logs["skipped_batches"] = self.skipped_batches
         super().log(logs, start_time)
 
     # ---- checkpoints ---------------------------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import warnings
 from pathlib import Path
@@ -15,7 +16,10 @@ from helpers import VOCAB, make_tiny_model
 pytest.importorskip("accelerate")
 pytest.importorskip("transformers")
 
+from transformers import TrainerCallback
+
 import economize
+from economize.errors import ConfigError, NonFiniteLossError
 from economize.techniques.jump import JumpRollout
 from economize.train import CrossEntropy, EffCollator, EffTrainer, Example, economize_training_args, fit
 from economize.train.checkpoint import BASE_FILE, load_trained
@@ -176,6 +180,104 @@ def test_trainer_defaults_to_the_drafter_objective(tmp_path: Path) -> None:
 
 
 # ---- PEFT -------------------------------------------------------------------------------------------------------
+class _NanAt(JumpRollout):
+    """The jump rollout with a ``NaN`` loss at optimizer step ``at``."""
+
+    def __init__(self, at: int) -> None:
+        super().__init__(horizon=4, stride=4)
+        self.at, self.step = at, -1
+
+    def begin_step(self, step: int, total_steps: int) -> None:
+        super().begin_step(step, total_steps)
+        self.step = step
+
+    def loss(self, model: Any, batch: Any, teacher: Any) -> Any:
+        out = super().loss(model, batch, teacher)
+        return type(out)(out.loss * math.nan, out.metrics) if self.step == self.at else out
+
+
+def _nan_trainer(tmp_path: Path, **kwargs: Any) -> EffTrainer:
+    objective = _NanAt(at=2)
+    args = _args(objective, tmp_path, max_steps=4, save_strategy="no", logging_steps=1)
+    return EffTrainer(_jump_model(), objective, args, train_dataset=_dataset(), **kwargs)
+
+
+def test_trainer_stops_on_a_nonfinite_loss_before_the_step_is_applied(tmp_path: Path) -> None:
+    trainer = _nan_trainer(tmp_path)
+    with pytest.raises(NonFiniteLossError, match="step 2: the loss is nan"):
+        trainer.train()
+    trainer.close()
+    assert trainer.state.global_step == 2
+    assert all(torch.isfinite(value).all() for value in _state(trainer.economize_model).values())
+
+
+def test_trainer_skips_or_applies_a_nonfinite_step_on_request(tmp_path: Path,
+                                                              caplog: pytest.LogCaptureFixture) -> None:
+    skipped = _nan_trainer(tmp_path / "skip", nonfinite="skip")
+    with caplog.at_level(logging.WARNING, "economize.train"):
+        skipped.train()
+    skipped.close()
+    assert "step 2: the loss is nan, the step is skipped" in caplog.text
+    assert skipped.state.global_step == 4
+    assert all(torch.isfinite(value).all() for value in _state(skipped.economize_model).values())
+    objective = _NanAt(at=2)
+    args = _args(objective, tmp_path / "warn", max_steps=4, save_strategy="no", nonfinite="warn")
+    warned = EffTrainer(_jump_model(), objective, args, train_dataset=_dataset())
+    warned.train()
+    warned.close()
+    assert not all(torch.isfinite(value).all() for value in _state(warned.economize_model).values())
+    with pytest.raises(ConfigError, match="nonfinite"):
+        _args(objective, tmp_path, nonfinite="ignore")
+    with pytest.raises(ConfigError, match="nonfinite"):
+        EffTrainer(_jump_model(), objective, args, train_dataset=_dataset(), nonfinite="ignore")  # type: ignore[arg-type]
+
+
+def test_trainer_counts_batches_without_a_counted_prediction(tmp_path: Path,
+                                                            caplog: pytest.LogCaptureFixture) -> None:
+    rows = _dataset()
+    for row in rows[:4]:  # the first optimizer step sees only masked rows
+        row["loss_mask"] = torch.zeros_like(row["input_ids"])
+    objective = _objective()
+    trainer = EffTrainer(_jump_model(), objective,
+                         _args(objective, tmp_path, max_steps=2, save_strategy="no", logging_steps=1,
+                               train_sampling_strategy="sequential"),
+                         train_dataset=rows)
+    before = _state(trainer.economize_model)
+    first_step: dict[str, torch.Tensor] = {}
+    trainer.add_callback(_SnapshotAfterFirstStep(trainer, first_step))
+    with caplog.at_level(logging.WARNING, "economize.train"):
+        trainer.train()
+    trainer.close()
+    assert "every prediction masked" in caplog.text
+    assert trainer.skipped_batches == 1
+    assert any(entry.get("skipped_batches") == 1 for entry in trainer.state.log_history)
+    for name, value in before.items():
+        torch.testing.assert_close(first_step[name], value, msg=name)
+
+
+class _SnapshotAfterFirstStep(TrainerCallback):
+    def __init__(self, trainer: EffTrainer, into: dict[str, torch.Tensor]) -> None:
+        self.trainer, self.into = trainer, into
+
+    def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+        if state.global_step == 1:
+            self.into.update(_state(self.trainer.economize_model))
+
+
+def test_trainer_gives_up_on_data_without_a_counted_prediction(tmp_path: Path,
+                                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    from economize.train import trainer as trainer_module
+
+    monkeypatch.setattr(trainer_module, "MAX_EMPTY_DRAWS", 3)
+    rows = [{**row, "loss_mask": torch.zeros_like(row["input_ids"])} for row in _dataset()]
+    objective = _objective()
+    trainer = EffTrainer(_jump_model(), objective, _args(objective, tmp_path, max_steps=4, save_strategy="no"),
+                         train_dataset=rows)
+    with pytest.raises(ConfigError, match="3 consecutive training batches"):
+        trainer.train()
+    trainer.close()
+
+
 def test_trainer_trains_peft_adapters(tmp_path: Path) -> None:
     peft = pytest.importorskip("peft")
     hf = make_tiny_model()

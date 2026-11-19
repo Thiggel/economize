@@ -34,6 +34,11 @@
   and checkpointed.
 - `fit` draws past batches in which no next-token prediction counts (logged as `skipped_batches`), and `evaluate`
   leaves them out instead of averaging a 0/0. A source that only yields such batches raises `ConfigError`.
+- `EffTrainer` handles a NaN or infinite loss like `fit`: it raises `NonFiniteLossError` before the optimizer applies
+  the step (`transformers` applied it and only hid the NaN from the logs), and `nonfinite="skip"` or `"warn"`
+  (an `EffTrainer` argument or an `EffTrainingArguments` field) drops the step's gradients or applies it with a
+  warning. A micro-batch in which no prediction counts is logged as `skipped_batches` with a warning, an optimizer
+  step made only of such batches leaves the parameters unchanged, and 1000 of them in a row raise `ConfigError`.
 - `larger_teacher` keeps the teacher in evaluation mode, so dropout in the larger model no longer perturbs the
   distillation targets.
 - `economize_training_args` sets the objective's schedule with its `min_lr_ratio` floor as `economize_schedule`,

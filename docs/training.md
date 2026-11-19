@@ -253,6 +253,12 @@ lists of `Example`s, and `EffCollator` pads them. Logged metrics are the objecti
 `eval_kl1`, ... in evaluation). Each checkpoint holds the economize weights as in `final/` above next to the
 Trainer's own files, and `resume_from_checkpoint` works as usual. Add `bf16=True` on a GPU.
 
+A NaN or infinite loss is handled as in `fit`: `EffTrainer` raises `NonFiniteLossError` before the optimizer applies
+the step, and `nonfinite="skip"` or `"warn"` (an argument of `EffTrainer` or of `economize_training_args`) drops the
+step's gradients or applies the step with a warning. A batch in which no prediction counts adds no gradient and is
+logged as `skipped_batches`, an optimizer step made only of such batches leaves the weights unchanged, and 1000 of
+them in a row raise `ConfigError`.
+
 PEFT works in both loops: wrap the base with `peft.get_peft_model` before `economize.apply`, and train with
 `CrossEntropy(parameters="trainable")` or `LayerSkip(parameters="trainable")`. Only the adapters are trained and
 saved.
