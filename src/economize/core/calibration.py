@@ -26,7 +26,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, MutableMapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Literal, Protocol, TypeVar, cast
 
 import torch
 from torch import Tensor, nn
@@ -65,6 +65,7 @@ logger = logging.getLogger(__name__)
 Propagation = Literal["transformed", "original"]
 O = TypeVar("O", bound="Observer")
 M = TypeVar("M", bound=nn.Module)
+T = TypeVar("T")
 
 
 # ---- calibration data ----------------------------------------------------------------------------------------------
@@ -131,7 +132,7 @@ def _token_tensor(batch: object) -> Tensor:
     return batch.long().view(1, -1) if batch.dim() == 1 else batch.long()
 
 
-def _unpadded(batch: Mapping[str, Any]) -> list[Tensor]:
+def _unpadded(batch: Mapping[str, object]) -> list[Tensor]:
     """The sequences of a tokenizer batch (``input_ids``, ``attention_mask``) without their padding."""
     if "input_ids" not in batch:
         raise ConfigError(f"a calibration mapping needs 'input_ids', got keys {sorted(batch)}")
@@ -139,7 +140,7 @@ def _unpadded(batch: Mapping[str, Any]) -> list[Tensor]:
     mask = batch.get("attention_mask")
     if mask is None:
         return [ids]
-    mask = torch.as_tensor(mask).reshape(ids.shape).bool()
+    mask = torch.as_tensor(cast("Tensor", mask)).reshape(ids.shape).bool()  # a tensor or a nested list of 0/1
     if bool(mask.all()):
         return [ids]
     rows = []
@@ -159,7 +160,8 @@ def _unpadded(batch: Mapping[str, Any]) -> list[Tensor]:
 def _as_token_batches(batches: Sequence[object]) -> list[Tensor]:
     """``batches`` unchanged if they are all tensors, else normalized by :func:`token_batches`."""
     items = list(batches)
-    return items if all(isinstance(b, Tensor) for b in items) else token_batches(items)  # type: ignore[return-value]
+    tensors = [b for b in items if isinstance(b, Tensor)]
+    return tensors if len(tensors) == len(items) else token_batches(items)
 
 
 # ---- module selection ----------------------------------------------------------------------------------------------
@@ -205,7 +207,7 @@ def observing(modules: Mapping[str, M], factory: Callable[[M], O]) -> Iterator[d
     for name, module in modules.items():
         observer = observers[name]
 
-        def hook(_module: nn.Module, args: tuple[Any, ...], observer: Observer = observer) -> None:
+        def hook(_module: nn.Module, args: tuple[Tensor, ...], observer: Observer = observer) -> None:
             observer.update(args[0].detach())
 
         handles.append(module.register_forward_pre_hook(hook))
@@ -337,22 +339,23 @@ class MagnitudeSampleObserver:
 class LayerCall:
     """Positional (after the hidden state) and keyword arguments of one decoder-layer call."""
 
-    args: tuple[Any, ...] = ()
-    kwargs: dict[str, Any] = field(default_factory=dict)
+    args: tuple[object, ...] = ()
+    kwargs: dict[str, object] = field(default_factory=dict)
 
     def to(self, device: torch.device) -> LayerCall:
         return LayerCall(_to_device(self.args, device), _to_device(self.kwargs, device))
 
 
-def _to_device(obj: Any, device: torch.device) -> Any:
+def _to_device(obj: T, device: torch.device) -> T:
+    """``obj`` with every tensor inside its tuples, lists and dicts moved to ``device`` (same structure and types)."""
     if isinstance(obj, Tensor):
-        return obj.to(device)
+        return cast("T", obj.to(device))
     if isinstance(obj, tuple):
-        return tuple(_to_device(o, device) for o in obj)
+        return cast("T", tuple(_to_device(o, device) for o in obj))
     if isinstance(obj, list):
-        return [_to_device(o, device) for o in obj]
+        return cast("T", [_to_device(o, device) for o in obj])
     if isinstance(obj, dict):
-        return {k: _to_device(v, device) for k, v in obj.items()}
+        return cast("T", {k: _to_device(v, device) for k, v in obj.items()})
     return obj
 
 
@@ -366,8 +369,8 @@ def _move_layer_state(call: LayerCall, device: torch.device) -> None:
                 value[key] = _to_device(value[key], device)
 
 
-def _first_output(output: Any) -> Tensor:
-    return output[0] if isinstance(output, (tuple, list)) else output
+def _first_output(output: Tensor | Sequence[Tensor]) -> Tensor:
+    return output[0] if isinstance(output, (tuple, list)) else cast(Tensor, output)
 
 
 def layer_types(adapter: ArchAdapter) -> list[Hashable]:
@@ -409,8 +412,8 @@ def capture_inputs(
     calls: list[dict[object, LayerCall]] = []
 
     def make_hook(i: int) -> Callable[..., None]:
-        def hook(_module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
-            state = args[0] if args else kwargs["hidden_states"]
+        def hook(_module: nn.Module, args: tuple[object, ...], kwargs: dict[str, object]) -> None:
+            state = cast(Tensor, args[0] if args else kwargs["hidden_states"])
             rest = {k: v for k, v in kwargs.items() if k != "hidden_states"}
             if i == 0:
                 hidden.append(state.detach().cpu() if offload else state.detach())
@@ -552,7 +555,7 @@ def shared_input_groups(step: CalibrationStep, modules: Mapping[str, nn.Module])
     handles = []
     for name, module in modules.items():
 
-        def hook(_module: nn.Module, args: tuple[Any, ...], name: str = name) -> None:
+        def hook(_module: nn.Module, args: tuple[Tensor, ...], name: str = name) -> None:
             for tensor, names in seen:
                 if tensor is args[0]:
                     if name not in names:

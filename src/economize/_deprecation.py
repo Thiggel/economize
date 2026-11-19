@@ -28,7 +28,7 @@ def moved_getattr(
     moved: Mapping[str, str] | Iterable[str],
     new_home: str | None = None,
     load: Callable[[], object] | None = None,
-) -> Callable[[str], Any]:
+) -> Callable[[str], Any]:  # Any: a module __getattr__'s return type is what type checkers give old names
     """A module ``__getattr__`` (PEP 562) that resolves deprecated names with a :class:`DeprecationWarning`.
 
     Args:
@@ -49,7 +49,7 @@ def moved_getattr(
     names = dict(moved) if isinstance(moved, Mapping) else {name: name for name in moved}
     home = new_home or module
 
-    def _getattr(name: str) -> Any:
+    def _getattr(name: str) -> object:
         if name not in names:
             raise AttributeError(f"module {module!r} has no attribute {name!r}")
         target = load() if load is not None else sys.modules[module]
