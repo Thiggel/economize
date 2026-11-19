@@ -4,6 +4,9 @@
 
 ### Changed
 
+- The core dependencies are capped below their next major release (`torch<3`, `transformers<6`, `safetensors<1`,
+  `huggingface_hub<3`), since economize relies on transformers' cache and modeling classes and on torch custom ops
+  that a major release may change.
 - The sdist and wheel ship a `NOTICE` file that names the third-party code and data the distribution contains (the
   Medusa tree, vLLM's Marlin packing, and the MInference, SmoothQuant, KVCache-Factory and TriForce transcriptions
   that the tests use as references) with their licenses and copyright notices.

@@ -81,3 +81,19 @@ def test_notice_ships_and_names_every_file_with_third_party_material() -> None:
     assert copied, "the marker no longer matches anything: update COPIED"
     missing = sorted(path for path in copied if path not in notice)
     assert not missing, f"add the upstream source and license of {missing} to NOTICE"
+
+
+@pytest.mark.parametrize("requirement", read_pyproject()["project"]["dependencies"])
+def test_core_dependencies_are_capped_below_the_next_major_release(requirement: str) -> None:
+    from importlib.metadata import version
+
+    from packaging.requirements import Requirement
+    from packaging.version import Version
+
+    parsed = Requirement(requirement)
+    caps = [spec for spec in parsed.specifier if spec.operator == "<"]
+    assert len(caps) == 1, f"{requirement!r} needs one upper cap at its next major release"
+    cap, floor = Version(caps[0].version), min(Version(s.version) for s in parsed.specifier if s.operator == ">=")
+    assert cap.release[1:] in ((), (0,)) and cap > floor, f"{requirement!r}: cap at a major release above the floor"
+    installed = version(parsed.name)
+    assert parsed.specifier.contains(installed, prereleases=True), f"the tested {parsed.name} {installed} is outside"

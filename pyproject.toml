@@ -30,11 +30,15 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Typing :: Typed",
 ]
+# Each core dependency is capped below its next major release, the one its deprecation policy allows to remove
+# APIs: economize subclasses transformers' cache and modeling classes, registers torch custom ops, and writes
+# safetensors and Hub checkpoints, so a new major is admitted only after the full CI passes on it
+# (tests/unit/test_packaging.py requires a cap and checks that it admits the tested release).
 dependencies = [
-    "torch>=2.4",
-    "transformers>=5.0",
-    "safetensors>=0.4",
-    "huggingface_hub>=1.0",
+    "torch>=2.4,<3",
+    "transformers>=5.0,<6",
+    "safetensors>=0.4,<1",
+    "huggingface_hub>=1.0,<3",
 ]
 
 [project.urls]
