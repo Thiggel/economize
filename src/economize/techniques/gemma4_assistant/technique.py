@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import torch
 from torch import nn
@@ -14,13 +14,14 @@ from .config import Gemma4AssistantDraftConfig
 from .drafter import Gemma4AssistantDrafter
 
 if TYPE_CHECKING:
-    from ...arch import ArchAdapter
+    from ...arch import ArchAdapter, HFConfig
     from ...runtime import LayerRunner
+    from .hf import AssistantModel, Gemma4Attention
 
 __all__ = ["Gemma4AssistantTechnique", "buildable_assistant_config", "context_layers", "load_assistant"]
 
 
-def _geometry(attention: Any) -> tuple[Any, ...]:
+def _geometry(attention: Gemma4Attention) -> tuple[int, int, int, bool]:
     """What fixes the shape of the cache entries an HF Gemma-4 attention reads: head width, query heads, query heads
     per key head and whether keys double as values (read from the module, as layers of one type may differ)."""
     return (attention.head_dim, attention.q_proj.out_features // attention.head_dim, attention.num_key_value_groups,
@@ -34,7 +35,7 @@ def _reusing_every_layer(text_class: type) -> type:
     """A subclass of the Gemma-4 text config class ``text_class`` whose layers all reuse cache entries (one per
     class, so configs built from the same class share it)."""
 
-    def kv_sharing_modes(self: Any) -> list[str | None]:
+    def kv_sharing_modes(self: HFConfig) -> list[str | None]:
         return ["reuse"] * int(self.num_hidden_layers)
 
     if text_class not in _REUSING:
@@ -43,7 +44,7 @@ def _reusing_every_layer(text_class: type) -> type:
     return _REUSING[text_class]
 
 
-def buildable_assistant_config(config: Any) -> Any:
+def buildable_assistant_config(config: HFConfig) -> HFConfig:
     """``config`` (a ``Gemma4AssistantConfig``), changed in place where needed so that ``transformers`` can build the
     assistant from it.
 
@@ -95,12 +96,13 @@ def context_layers(adapter: ArchAdapter) -> dict[str, int]:
     """
     layers: dict[str, int] = {}
     for index in range(1, adapter.num_layers + 1):
-        attention: Any = getattr(adapter.layer(index), "self_attn", None)
-        if attention is None or not hasattr(attention, "store_full_length_kv"):
+        found = getattr(adapter.layer(index), "self_attn", None)
+        if found is None or not hasattr(found, "store_full_length_kv"):
             raise UnsupportedModelError(
                 f"the Gemma-4 assistant drafts for Gemma-4 decoders only; layer {index} of this "
                 f"{adapter.model_type!r} model has no Gemma-4 attention"
             )
+        attention = cast("Gemma4Attention", found)
         if not attention.is_kv_shared_layer:
             layers[attention.layer_type] = index
     return layers
@@ -161,12 +163,13 @@ class Gemma4AssistantTechnique(Technique):
 def check_assistant(assistant: nn.Module, adapter: ArchAdapter, layers: dict[str, int]) -> dict[str, int]:
     """The context layer of every attention type the assistant uses, after checking that the assistant fits the base
     model (raises :class:`~economize.ConfigError` otherwise)."""
-    config: Any = assistant.config
+    model = cast("AssistantModel", assistant)
+    config: HFConfig = model.config
     if int(config.backbone_hidden_size) != adapter.hidden_size:
         raise ConfigError(f"the assistant reads states of width {config.backbone_hidden_size}, the model's are "
                           f"{adapter.hidden_size} wide: it belongs to another Gemma-4 model")
     context: dict[str, int] = {}
-    for index, layer in enumerate(cast(Any, assistant).model.layers, 1):
+    for index, layer in enumerate(model.model.layers, 1):
         attention = layer.self_attn
         kind = attention.layer_type
         if not attention.is_kv_shared_layer:
@@ -174,7 +177,7 @@ def check_assistant(assistant: nn.Module, adapter: ArchAdapter, layers: dict[str
                               "must read the model's (num_kv_shared_layers = num_hidden_layers)")
         if kind not in layers:
             raise ConfigError(f"assistant layer {index} is a {kind} layer; the model stores no entries of that type")
-        source = adapter.layer(layers[kind]).self_attn
+        source = cast("Gemma4Attention", adapter.layer(layers[kind]).self_attn)
         if _geometry(attention) != _geometry(source):
             raise ConfigError(f"assistant layer {index} ({kind}) has the attention geometry {_geometry(attention)}, "
                               f"the model's entries of layer {layers[kind]} {_geometry(source)} (head width, query "

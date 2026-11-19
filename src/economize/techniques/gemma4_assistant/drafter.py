@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 import torch
 from torch import nn
@@ -13,9 +13,10 @@ from ...runtime.mask import MASK_FORMATS
 from .._drafting import CommittedColumns, GraphedStep, take_rows
 
 if TYPE_CHECKING:
-    from ...arch import ArchAdapter
+    from ...arch import ArchAdapter, HFConfig
     from ...runtime import ExactPass, KVCache, LayerRunner
     from .._drafting import StepWrap
+    from .hf import AssistantModel
 
 __all__ = ["MODULE", "Gemma4AssistantDrafter"]
 
@@ -54,11 +55,11 @@ class Gemma4AssistantDrafter(Drafter):
     layer_span = (1, 0)
 
     def __init__(self, assistant: nn.Module, adapter: ArchAdapter, context: dict[str, int]) -> None:
-        module: Any = assistant  # HF Gemma4AssistantForCausalLM
-        self.assistant: Any = module
+        module = cast("AssistantModel", assistant)
+        self.assistant = module
         self.adapter = adapter
         self.context = dict(context)
-        text: Any = module.config.get_text_config()
+        text: HFConfig = module.config.get_text_config()
         # transformers' bidirectional window (|q - k| <= sliding_window) includes its boundary: one entry more
         self.window = int(text.sliding_window) + 1
         self.footprint = LayerFootprint(1, int(text.num_hidden_layers), MODULE)
