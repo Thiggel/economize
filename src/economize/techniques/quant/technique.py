@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
-from torch import Tensor
+from torch import Tensor, nn
 
 from ...core.config import TechniqueConfig
 from ...core.metadata import Family, KernelChoice, Saving, TechniqueInfo
@@ -16,8 +16,12 @@ from .._weights.technique import CalibratedWeightTransform
 from .backends import QUANT_BACKENDS
 from .config import DraftQuantConfig, QuantConfig
 from .draft import DraftSnapshot, quantize_draft, restore_draft, split_draft_modules
-from .methods import QUANT_METHODS
+from .methods import QUANT_METHODS, QuantMethod
 from .model import quantize_model
+
+if TYPE_CHECKING:
+    from ...arch import ArchAdapter
+    from ...core.technique import AttachContext
 
 __all__ = ["DraftQuantTechnique", "QuantTechnique"]
 
@@ -41,7 +45,7 @@ class QuantTechnique(CalibratedWeightTransform):
     capabilities: ClassVar[Capability] = Capability.WEIGHTS
     order: ClassVar[int] = 30
     draft_copies: ClassVar[DraftCopies | None] = DraftCopies.OWNED
-    methods: ClassVar[Registry[Any]] = QUANT_METHODS
+    methods: ClassVar[Registry[type[QuantMethod]]] = QUANT_METHODS
     config: QuantConfig
 
     @classmethod
@@ -49,7 +53,7 @@ class QuantTechnique(CalibratedWeightTransform):
         """Why no installed package runs the configured kernel backend (see :meth:`.QuantBackend.unavailable`)."""
         return _kernel_unavailable(config if isinstance(config, QuantConfig) else QuantConfig())
 
-    def transform(self, adapter: Any, batches: Sequence[Tensor] | None) -> dict[str, Any]:
+    def transform(self, adapter: ArchAdapter, batches: Sequence[Tensor] | None) -> dict[str, object]:
         return quantize_model(adapter, self.config, batches)
 
 
@@ -91,8 +95,8 @@ class DraftQuantTechnique(Technique):
         """Why no installed package runs the configured kernel backend (see :meth:`.QuantBackend.unavailable`)."""
         return _kernel_unavailable(config if isinstance(config, DraftQuantConfig) else DraftQuantConfig())
 
-    def attach(self, model: Any, adapter: Any, context: Any = None) -> None:
-        drafter = _the_drafter(getattr(context, "techniques", ()) if context is not None else ())
+    def attach(self, model: nn.Module, adapter: ArchAdapter, context: AttachContext | None = None) -> None:
+        drafter = _the_drafter(context.techniques if context is not None else ())
         modules, skipped = split_draft_modules(drafter, self.config, adapter.model.parameters())
         if not modules:
             raise ConfigError(f"draft_quant found no quantizable linear maps in drafter {drafter.name!r}")

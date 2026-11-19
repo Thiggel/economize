@@ -25,6 +25,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from typing import cast
 
 import torch
 from torch import Tensor, nn
@@ -299,7 +300,7 @@ def quantize_rtn(weight: Tensor, grid: QuantGrid, group_size: int | None = None)
         codes[:, start : start + size] = grid.encode(block, params)
         scales.append(params.scale)
         zeros.append(params.zero)
-    zero = None if zeros[0] is None else torch.cat(zeros, 1)  # type: ignore[arg-type]
+    zero = None if zeros[0] is None else torch.cat(cast("list[Tensor]", zeros), 1)  # one grid: all or none
     return QuantizedWeight(grid, codes, torch.cat(scales, 1), zero, size)
 
 
