@@ -28,7 +28,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import torch
 import torch.nn.functional as F
@@ -50,6 +50,13 @@ from ..sparsity.sparsify import track_layer_tokens
 from .backends import MLP_SPARSITY_BACKENDS, MlpOps, fallback_simulation
 from .config import DejaVuConfig
 from .mlp import GatedMlp, MlpPatch, dense_first_half, ffn_width, gated_mlps, masked, topk_mask
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
+
+    from ...arch import ArchAdapter
+    from ...core.model import EfficientModel
+    from ...core.technique import AttachContext
 
 __all__ = [
     "DejaVuObjective",
@@ -137,7 +144,7 @@ def fit_predictor(
     return last
 
 
-def _first(output: Any) -> Tensor:
+def _first(output: object) -> Tensor:
     return cast(Tensor, output[0] if isinstance(output, tuple) else output)
 
 
@@ -178,7 +185,7 @@ class DejaVuTechnique(Technique):
     config: DejaVuConfig
     fitted: torch.Tensor
 
-    def __init__(self, config: DejaVuConfig, adapter: Any) -> None:
+    def __init__(self, config: DejaVuConfig, adapter: ArchAdapter) -> None:
         super().__init__(config, adapter)
         mlps = gated_mlps(adapter, config)
         self.layers = list(mlps)
@@ -196,12 +203,12 @@ class DejaVuTechnique(Technique):
                 predictors[str(index)] = predictor.to(device=adapter.layer_device(index), dtype=dtype)
         self.predictors = predictors
         self.register_buffer("fitted", torch.tensor(False))
-        self._patches: list[Any] = []
+        self._patches: list[MlpPatch | RemovableHandle] = []
         self._sources: dict[int, Tensor] = {}  # the lookahead norm outputs of the running layer call
         self._records: list[_Record] | None = None
 
     # ---- attach / detach -----------------------------------------------------------------------------------------
-    def attach(self, model: nn.Module, adapter: Any, context: Any = None) -> None:
+    def attach(self, model: nn.Module, adapter: ArchAdapter, context: AttachContext | None = None) -> None:
         self.config.validate(adapter)
         self.detach()  # the fit reads the dense MLPs
         MLP_SPARSITY_BACKENDS.get(self.config.backend)().check(gated_mlps(adapter, self.config))
@@ -236,7 +243,7 @@ class DejaVuTechnique(Technique):
         self._sources.clear()
 
     @property
-    def summary(self) -> dict[str, Any]:
+    def summary(self) -> dict[str, object]:
         """Target sparsity, number of sparsified MLPs, whether the predictors are fitted and installed."""
         return {
             "target": self.config.sparsity,
@@ -257,7 +264,7 @@ class DejaVuTechnique(Technique):
     def scores(self, layer: int, source: Tensor) -> Tensor:
         """The predictor's channel scores for ``source`` (the MLP input or the lookahead norm output)."""
         predictor = self.predictor(layer)
-        weight = cast(Tensor, predictor[0].weight)  # type: ignore[index]
+        weight = cast(nn.Linear, cast(nn.Sequential, predictor)[0]).weight
         return cast(Tensor, predictor(source.to(weight.dtype)))
 
     def _norm(self, layer: nn.Module, index: int) -> nn.Module:
@@ -266,7 +273,7 @@ class DejaVuTechnique(Technique):
             raise UnsupportedModelError(f"layer {index} has no module {self.config.lookahead_norm!r} to look ahead")
         return norm
 
-    def _keep_source(self, index: int, _module: nn.Module, _args: Any, output: Any) -> None:
+    def _keep_source(self, index: int, _module: nn.Module, _args: tuple[object, ...], output: object) -> None:
         self._sources[index] = _first(output)
 
     def _source(self, index: int, x: Tensor) -> Tensor:
@@ -290,7 +297,7 @@ class DejaVuTechnique(Technique):
         pieces = zip(flat.split(PREFILL_CHUNK), keep.split(PREFILL_CHUNK))
         return torch.cat([kept_mlp(mlp, part, ops, mask) for part, mask in pieces]).reshape(*x.shape[:-1], -1)
 
-    def _record(self, index: int, mlp: GatedMlp, _module: nn.Module, args: tuple[Any, ...]) -> None:
+    def _record(self, index: int, mlp: GatedMlp, _module: nn.Module, args: tuple[object, ...]) -> None:
         if self._records is None or not args:
             return
         x = cast(Tensor, args[0])
@@ -351,12 +358,14 @@ class DejaVuTechnique(Technique):
         return losses
 
 
-def _collect_input(store: list[Tensor], device: torch.device | None, _module: nn.Module, args: tuple[Any, ...]) -> None:
-    store.append(_flat(args[0], device))
+def _collect_input(
+    store: list[Tensor], device: torch.device | None, _module: nn.Module, args: tuple[object, ...]
+) -> None:
+    store.append(_flat(cast(Tensor, args[0]), device))
 
 
 def _collect_output(
-    store: list[Tensor], device: torch.device | None, _module: nn.Module, _args: Any, output: Any
+    store: list[Tensor], device: torch.device | None, _module: nn.Module, _args: tuple[object, ...], output: object
 ) -> None:
     store.append(_flat(_first(output), device))
 
@@ -400,10 +409,10 @@ class DejaVuObjective(TechniqueObjective[DejaVuTechnique]):
     defaults: ClassVar[OptimDefaults] = OptimDefaults(lr=1e-3, warmup_steps=20)
     technique: str = DejaVuTechnique.name
 
-    def teacher_request(self, model: Any) -> None:
+    def teacher_request(self, model: EfficientModel) -> None:
         return None
 
-    def loss(self, model: Any, batch: Batch, teacher: TeacherOutputs | None) -> ObjectiveOutput:
+    def loss(self, model: EfficientModel, batch: Batch, teacher: TeacherOutputs | None) -> ObjectiveOutput:
         dejavu = self.trained(model)
         with dejavu.recording() as records, torch.no_grad():
             model.base_model(input_ids=batch.input_ids, attention_mask=batch.attention_mask, use_cache=False)
@@ -424,6 +433,8 @@ class DejaVuObjective(TechniqueObjective[DejaVuTechnique]):
         dejavu.fitted.fill_(True)
         return ObjectiveOutput(loss, {"recall": recall.detach()})
 
-    def evaluate(self, model: Any, batch: Batch, teacher: TeacherOutputs | None) -> dict[str, Any]:
+    def evaluate(
+        self, model: EfficientModel, batch: Batch, teacher: TeacherOutputs | None
+    ) -> dict[str, Tensor | float]:
         output = self.loss(model, batch, teacher)
         return {"loss": output.loss.detach(), **output.metrics}

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 from functools import partial
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import torch
 from torch import Tensor, nn
@@ -32,6 +32,12 @@ from ..sparsity.sparsify import magnitude_quantile, track_layer_tokens
 from .backends import MLP_SPARSITY_BACKENDS, MlpOps, fallback_simulation
 from .config import CatsConfig
 from .mlp import GatedMlp, MlpPatch, dense_first_half, gated_mlps, masked
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
+
+    from ...arch import ArchAdapter
+    from ...core.technique import AttachContext
 
 __all__ = ["CatsTechnique", "GateMagnitudeObserver", "calibrate_cats", "cats_mlp"]
 
@@ -62,7 +68,7 @@ def _gate_observer(_module: nn.Module, *, mlp: GatedMlp, max_samples: int, seed:
 
 
 @torch.no_grad()
-def calibrate_cats(adapter: Any, config: CatsConfig, batches: list[Tensor]) -> dict[int, float]:
+def calibrate_cats(adapter: ArchAdapter, config: CatsConfig, batches: list[Tensor]) -> dict[int, float]:
     """The threshold of every selected layer: the ``config.sparsity`` quantile of the dense model's ``|g|``.
 
     Every layer sees the dense model's inputs, so the thresholds do not depend on the order of the layers.
@@ -103,11 +109,11 @@ class CatsTechnique(Technique):
     config: CatsConfig
     thresholds: torch.Tensor
 
-    def __init__(self, config: CatsConfig, adapter: Any) -> None:
+    def __init__(self, config: CatsConfig, adapter: ArchAdapter) -> None:
         super().__init__(config, adapter)
         self.layers = list(gated_mlps(adapter, config))
         self.register_buffer("thresholds", torch.full((len(self.layers),), math.nan))
-        self._patches: list[Any] = []
+        self._patches: list[MlpPatch | RemovableHandle] = []
         self._live: list[Tensor] = []  # the installed 0-dim thresholds, updated in place on a load
         self.register_load_state_dict_post_hook(_refresh_installed)
 
@@ -116,7 +122,7 @@ class CatsTechnique(Technique):
         """Whether every layer has a threshold (computed by :meth:`attach` or loaded from a checkpoint)."""
         return bool(torch.isfinite(self.thresholds).all())
 
-    def attach(self, model: nn.Module, adapter: Any, context: Any = None) -> None:
+    def attach(self, model: nn.Module, adapter: ArchAdapter, context: AttachContext | None = None) -> None:
         self.config.validate(adapter)
         self.detach()  # calibration reads the dense MLPs
         MLP_SPARSITY_BACKENDS.get(self.config.backend)().check(gated_mlps(adapter, self.config))
@@ -155,7 +161,7 @@ class CatsTechnique(Technique):
         return dict(zip(self.layers, self.thresholds.tolist()))
 
     @property
-    def summary(self) -> dict[str, Any]:
+    def summary(self) -> dict[str, object]:
         """Target sparsity, number of sparsified MLPs and whether the patches are installed."""
         return {"target": self.config.sparsity, "layers": len(self.layers), "installed": bool(self._patches)}
 
@@ -171,7 +177,7 @@ def _rule(mlp: GatedMlp, x: Tensor, ops: MlpOps, mode: str, *, threshold: Tensor
     return cats_mlp(mlp, x, ops, mode, threshold)
 
 
-def _refresh_installed(module: nn.Module, incompatible: Any) -> None:
+def _refresh_installed(module: nn.Module, incompatible: object) -> None:
     """Load-state-dict post hook: :meth:`CatsTechnique.refresh_thresholds` (a checkpoint loaded after attach)."""
     assert isinstance(module, CatsTechnique)
     module.refresh_thresholds()
