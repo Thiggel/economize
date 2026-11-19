@@ -21,8 +21,9 @@ This module imports vLLM; :mod:`economize.backends.vllm.linear` imports it from 
 does not use postponed annotations, since an op's schema is inferred from the annotations of its function.
 """
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Optional, Protocol, TypedDict, cast
 
 import torch
 from torch import Tensor
@@ -49,6 +50,9 @@ from ...exporters import UnsupportedBackendError
 from . import FACTORED_OP, QUANT_METHOD, TEAL_OP
 from .factored import Unit, factored_linear, layer_units
 from .teal import ALL, DENSE, SECOND_HALF, row_mode, sparse_rows, teal_linear
+
+if TYPE_CHECKING:
+    from vllm.model_executor.models.utils import WeightsMapper
 
 __all__ = ["EconomizeLinearConfig", "FactoredLinearMethod", "TealLinearMethod", "factored_linear_op", "teal_linear_op"]
 
@@ -100,7 +104,7 @@ def _factored_linear_fake(x: Tensor, bias: Optional[Tensor], weight: Optional[Te
     return x.new_empty((*x.shape[:-1], sum(sizes)))
 
 
-def _register(name: str, op: Any, fake: Any) -> None:
+def _register(name: str, op: Callable[..., Tensor], fake: Callable[..., Tensor]) -> None:
     """Register ``op`` for the platform's device and for CPU tensors, which it computes in plain PyTorch too
     (vLLM registers a custom op for the platform's dispatch key only, CUDA on a GPU host)."""
     from vllm.platforms import current_platform
@@ -136,7 +140,7 @@ class TealLinearMethod(UnquantizedLinearMethod):
 
     def create_weights(self, layer: torch.nn.Module, input_size_per_partition: int,
                        output_partition_sizes: list[int], input_size: int, output_size: int,
-                       params_dtype: torch.dtype, **extra_weight_attrs: Any) -> None:
+                       params_dtype: torch.dtype, **extra_weight_attrs: object) -> None:
         super().create_weights(layer, input_size_per_partition, output_partition_sizes, input_size, output_size,
                                params_dtype, **extra_weight_attrs)
         sizes = [int(size) for size in output_partition_sizes]
@@ -229,7 +233,7 @@ class FactoredLinearMethod(LinearMethodBase):
 
     def create_weights(self, layer: torch.nn.Module, input_size_per_partition: int,
                        output_partition_sizes: list[int], input_size: int, output_size: int,
-                       params_dtype: torch.dtype, **extra_weight_attrs: Any) -> None:
+                       params_dtype: torch.dtype, **extra_weight_attrs: object) -> None:
         local_sizes = [int(size) for size in output_partition_sizes]
         partitions = _partitions(layer, local_sizes)
         if len(self.units) == len(partitions):
@@ -273,7 +277,7 @@ class FactoredLinearMethod(LinearMethodBase):
         for name, values in thresholds.items():
             layer.register_buffer(f"factored_{name}", torch.tensor(values, dtype=torch.float32), persistent=False)
 
-    def _unit(self, layer: torch.nn.Module, shard_id: Any) -> int:
+    def _unit(self, layer: torch.nn.Module, shard_id: object) -> int:
         if shard_id is None:
             if len(self.units) != 1:
                 raise UnsupportedBackendError(
@@ -289,8 +293,8 @@ class FactoredLinearMethod(LinearMethodBase):
             raise ConfigError(f"{layer.prefix!r}: shard {shard_id!r} out of range")
         return index
 
-    def _loader(self, layer: torch.nn.Module, kind: str) -> Any:
-        def load(param: Tensor, loaded: Tensor, shard_id: Any = None) -> None:
+    def _loader(self, layer: torch.nn.Module, kind: str) -> "_WeightLoader":
+        def load(param: Tensor, loaded: Tensor, shard_id: object = None) -> None:
             index = self._unit(layer, shard_id)
             unit = self.units[index]
             name = f"{layer.prefix}.{kind}[{unit.name}]"
@@ -343,7 +347,32 @@ class FactoredLinearMethod(LinearMethodBase):
             layer.factored_ranks, self.single, self.multi)
 
 
-def _floats(table: Any) -> dict[str, float]:
+class _WeightLoader(Protocol):
+    """vLLM's ``weight_loader`` attribute: copies a checkpoint tensor (of one shard, if ``shard_id`` is given)."""
+
+    def __call__(self, param: Tensor, loaded: Tensor, shard_id: object = None) -> None: ...
+
+
+class _TealEntry(TypedDict, total=False):
+    thresholds: dict[str, float]
+    factor_thresholds: dict[str, float]
+    single: str
+    multi: str
+
+
+class _LowRankEntry(TypedDict, total=False):
+    ranks: dict[str, int]
+
+
+class _QuantEntry(TypedDict, total=False):
+    """The ``economize`` quantization config (see :mod:`economize.backends.vllm.linear`)."""
+
+    teal: _TealEntry
+    lowrank: _LowRankEntry
+    kv_cache_scheme: dict[str, object]
+
+
+def _floats(table: Optional[Mapping[str, float]]) -> dict[str, float]:
     return {str(name): float(value) for name, value in dict(table or {}).items()}
 
 
@@ -353,7 +382,7 @@ class EconomizeLinearConfig(QuantizationConfig):
 
     def __init__(self, thresholds: Optional[dict[str, float]] = None,
                  factor_thresholds: Optional[dict[str, float]] = None, single: str = "dense", multi: str = "dense",
-                 ranks: Optional[dict[str, int]] = None, kv_cache_scheme: Optional[dict[str, Any]] = None) -> None:
+                 ranks: Optional[dict[str, int]] = None, kv_cache_scheme: Optional[dict[str, object]] = None) -> None:
         super().__init__()
         self.thresholds = _floats(thresholds)
         self.factor_thresholds = _floats(factor_thresholds)
@@ -386,14 +415,15 @@ class EconomizeLinearConfig(QuantizationConfig):
         return []
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "EconomizeLinearConfig":
-        teal = dict(config.get("teal") or {})
-        lowrank = dict(config.get("lowrank") or {})
+    def from_config(cls, config: Mapping[str, object]) -> "EconomizeLinearConfig":
+        entry = cast(_QuantEntry, config)
+        teal = entry.get("teal") or _TealEntry()
+        lowrank = entry.get("lowrank") or _LowRankEntry()
         default = "all" if teal else "dense"
         return cls(teal.get("thresholds"), teal.get("factor_thresholds"), str(teal.get("single", default)),
-                   str(teal.get("multi", "dense")), lowrank.get("ranks"), config.get("kv_cache_scheme"))
+                   str(teal.get("multi", "dense")), lowrank.get("ranks"), entry.get("kv_cache_scheme"))
 
-    def apply_vllm_mapper(self, hf_to_vllm_mapper: Any) -> None:
+    def apply_vllm_mapper(self, hf_to_vllm_mapper: "WeightsMapper") -> None:
         self.thresholds = hf_to_vllm_mapper.apply_dict(self.thresholds)
         self.factor_thresholds = hf_to_vllm_mapper.apply_dict(self.factor_thresholds)
         self.ranks = hf_to_vllm_mapper.apply_dict(self.ranks)

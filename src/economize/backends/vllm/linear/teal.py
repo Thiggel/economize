@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from itertools import pairwise
-from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -47,7 +46,7 @@ MODES = ("dense", "all", "second_half")
 DENSE, ALL, SECOND_HALF = range(len(MODES))
 
 
-def map_names(prefix: str, packed: Mapping[str, Sequence[str]], *tables: Mapping[str, Any]) -> list[str] | None:
+def map_names(prefix: str, packed: Mapping[str, Sequence[str]], *tables: Mapping[str, object]) -> list[str] | None:
     """The HF map names that vLLM's linear map ``prefix`` computes, when any table names one of them.
 
     Args:
@@ -101,7 +100,7 @@ def row_mode(mode: str) -> int:
     return MODES.index(mode)
 
 
-def _first_metadata(attn_metadata: Any) -> Any:
+def _first_metadata(attn_metadata: object) -> object:
     """One attention metadata object of the pass (every KV cache group sees the same requests), or ``None``."""
     if attn_metadata is None:
         return None
@@ -114,7 +113,7 @@ def _first_metadata(attn_metadata: Any) -> Any:
     return attn_metadata
 
 
-def single_rows(metadata: Any, rows: int) -> bool | Tensor:
+def single_rows(metadata: object, rows: int) -> bool | Tensor:
     """Which rows of a pass belong to requests that run one token in it (a decoding step).
 
     Args:
@@ -158,7 +157,7 @@ def single_rows(metadata: Any, rows: int) -> bool | Tensor:
         "query_start_loc (FLASH_ATTN, TRITON_ATTN, FLEX_ATTENTION) or a decode count (FLASHINFER)")
 
 
-def second_half_rows(metadata: Any, rows: int, single: bool) -> bool | Tensor:
+def second_half_rows(metadata: object, rows: int, single: bool) -> bool | Tensor:
     """The rows of a pass in the last half of their request's rows (``max(1, n // 2)`` of ``n``).
 
     A one-token request's row is its own last half; ``single`` replaces that rule for one-token requests (the mode
@@ -186,7 +185,7 @@ def second_half_rows(metadata: Any, rows: int, single: bool) -> bool | Tensor:
     return torch.where(length == 1, torch.full_like(last, single), last)
 
 
-def sparse_rows(attn_metadata: Any, rows: int, single: int, multi: int) -> bool | Tensor:
+def sparse_rows(attn_metadata: object, rows: int, single: int, multi: int) -> bool | Tensor:
     """Which rows of a pass to threshold: mode ``single`` for one-token requests, mode ``multi`` for the others.
 
     Args:
