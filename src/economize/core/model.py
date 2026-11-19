@@ -29,6 +29,7 @@ from .cache_wrapping import CacheWrapping
 from .config import TechniqueConfig
 from .hub import EconomizeHubMixin
 from .metadata import Simulation
+from .plain_generate import guard_plain_generate, release_plain_generate
 from .plain_save import guard_plain_save
 from .recipe import States, attach_techniques
 from .serialization import source_digests
@@ -162,6 +163,7 @@ class EfficientModel(nn.Module, EconomizeHubMixin):
         self._graph_decoders.clear()
         for technique in reversed(list(self.techniques.values())):
             technique.detach()
+        release_plain_generate(self.base_model)
         return self.base_model
 
     # ---- decoding ----------------------------------------------------------------------------------------------
@@ -368,4 +370,8 @@ def build_model(
         decoding = DecodeConfig(cycle_length=4 if drafts else 1)
     result = EfficientModel(model, adapter, techniques, decoding)
     result.source_digests = digests
+    # lossy techniques that act only in economize's decoder (a cache wrapper or a layer policy)
+    loop_only = [t.name for t in techniques
+                 if not t.lossless and (t.wraps_cache or Capability.DEPTH in t.capabilities)]
+    guard_plain_generate(model, loop_only)
     return result

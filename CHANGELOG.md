@@ -34,6 +34,9 @@
   and checkpointed.
 - `fit` draws past batches in which no next-token prediction counts (logged as `skipped_batches`), and `evaluate`
   leaves them out instead of averaging a 0/0. A source that only yields such batches raises `ConfigError`.
+- The base model's own `generate` raises `ConfigError` while a lossy technique that acts only in economize's decoding
+  loop is attached (a KV-cache technique or dynamic depth): it used to decode the unmodified model without any error.
+  Call `generate` on the `EfficientModel`, or `detach()` it first.
 - `EffTrainer` handles a NaN or infinite loss like `fit`: it raises `NonFiniteLossError` before the optimizer applies
   the step (`transformers` applied it and only hid the NaN from the logs), and `nonfinite="skip"` or `"warn"`
   (an `EffTrainer` argument or an `EffTrainingArguments` field) drops the step's gradients or applies it with a

@@ -39,6 +39,7 @@ import torch
 from torch import nn
 from transformers import TrainerCallback
 
+from ..core.plain_generate import PlainGenerateGuard
 from ..errors import ConfigError
 from ..unwrap import base_model_of, peft_base
 from ._trl_common import inject_logs, is_eval_log
@@ -279,7 +280,8 @@ def attach_rollouts(
     if not _is_policy(policy, base_model_of(model)):
         raise ConfigError("the EfficientModel must wrap the trainer's policy object: build it with "
                           "economize.apply(trainer.model, ...) after constructing the trainer")
-    if "generate" in vars(policy):
+    guard = vars(policy).get("generate")
+    if guard is not None and not isinstance(guard, PlainGenerateGuard):
         raise ConfigError("the policy already has an instance-level generate (are rollouts attached twice?)")
     techniques = getattr(model, "techniques", None)
     parameter = next(policy.parameters(), None)
@@ -295,6 +297,8 @@ def attach_rollouts(
     def undo() -> None:
         if policy.__dict__.get("generate") is rollouts:
             del policy.__dict__["generate"]
+            if guard is not None:  # economize.apply's refusal of the policy's plain generate
+                policy.__dict__["generate"] = guard
         if callback in trainer.callback_handler.callbacks:
             trainer.callback_handler.callbacks.remove(callback)
 
