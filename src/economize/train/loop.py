@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import time
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import nullcontext
@@ -501,8 +502,7 @@ class _Run:
         # evaluation: for a trainable copy of large layers they and the allocator's cached blocks decide whether
         # the teacher pass fits
         self.optimizer.zero_grad(set_to_none=True)
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        _release_cached_memory()
         self.module.train(False)
         try:
             eval_data = cast("EvalData", self.eval_data)  # _evaluate runs only with eval_data
@@ -579,3 +579,24 @@ class _Run:
         tmp = self.output_dir / (LOG_FILE + ".tmp")
         tmp.write_text(text)
         tmp.replace(self.output_dir / LOG_FILE)
+
+
+
+def _release_cached_memory() -> None:
+    """Returns the allocator's cached blocks to the driver before an evaluation, once every device is idle.
+
+    With ``expandable_segments`` the cache does not fragment, so the evaluation reuses the cached blocks as they
+    are and releasing them gains nothing. There it is skipped: unmapping the segments of a model spread over several
+    GPUs (``device_map="auto"``) failed with "unspecified launch failure" in long runs (torch 2.13, H100).
+    """
+    if not torch.cuda.is_available():
+        return
+    for index in range(torch.cuda.device_count()):
+        torch.cuda.synchronize(index)
+    if not _expandable_segments():
+        torch.cuda.empty_cache()
+
+
+def _expandable_segments() -> bool:
+    conf = os.environ.get("PYTORCH_ALLOC_CONF") or os.environ.get("PYTORCH_CUDA_ALLOC_CONF") or ""
+    return "expandable_segments:true" in conf.replace(" ", "").lower()

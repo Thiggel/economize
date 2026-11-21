@@ -76,13 +76,18 @@ class OffloadedAdamW(torch.optim.Optimizer):
                 master.grad.copy_(param.grad, non_blocking=True)
             else:  # upcast on the CPU: an upcast on the device would allocate a float32 gradient there
                 master.grad.copy_(param.grad.to("cpu"))
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        devices = self._devices()
+        _synchronize(devices)  # the copies above run on every device holding a parameter, not the current one only
         self.inner.step()
         for param, master in self._pairs():
             if master.grad is not None:
                 param.copy_(master, non_blocking=True)
+        # the next step updates the masters in place on the CPU: the copies reading them must have finished
+        _synchronize(devices)
         return loss
+
+    def _devices(self) -> set[torch.device]:
+        return {param.device for param, _ in self._pairs() if param.device.type == "cuda"}
 
     def state_dict(self) -> StateDict:
         return {"adamw": self.inner.state_dict(), "master": [master.detach().clone() for _, master in self._pairs()]}
@@ -99,6 +104,11 @@ class OffloadedAdamW(torch.optim.Optimizer):
             for (param, master), saved in zip(self._pairs(), masters, strict=True):
                 master.copy_(saved)
                 param.copy_(master)
+
+
+def _synchronize(devices: Iterable[torch.device]) -> None:
+    for device in devices:
+        torch.cuda.synchronize(device)
 
 
 def _master_dtype(param: torch.Tensor) -> torch.dtype:
