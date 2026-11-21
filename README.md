@@ -12,6 +12,8 @@
 
 <h3 align="center">Composable efficiency techniques for Hugging Face language models</h3>
 
+<p align="center">by <a href="https://github.com/Thiggel">Filipe Laitenberger</a></p>
+
 economize makes text generation with Hugging Face causal language models faster and cheaper. It implements more
 than 50 published efficiency techniques, from speculative decoding and early exit to pruning, quantization and
 KV-cache compression, and attaches them, alone or in validated combinations, to an unmodified `transformers` model
@@ -148,7 +150,7 @@ If you use economize in your research, please cite it:
   title   = {economize: Composable Efficiency Techniques for Hugging Face Language Models},
   year    = {2026},
   url     = {https://github.com/Thiggel/economize},
-  version = {0.5.0}
+  version = {0.6.0}
 }
 ```
 

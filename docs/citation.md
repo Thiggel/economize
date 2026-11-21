@@ -8,7 +8,7 @@ If you use economize in your research, please cite it:
   title   = {economize: Composable Efficiency Techniques for Hugging Face Language Models},
   year    = {2026},
   url     = {https://github.com/Thiggel/economize},
-  version = {0.5.0}
+  version = {0.6.0}
 }
 ```
 
