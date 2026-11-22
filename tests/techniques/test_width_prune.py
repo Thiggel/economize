@@ -527,6 +527,32 @@ def test_copies_get_the_compensation_biases_of_a_bias_free_family(tmp_path: Path
     assert result.tokens.tolist() == reference_greedy(economize.unwrap.base_model_of(loaded), prompt, 12).tolist()
 
 
+def test_a_draft_layer_keeps_its_biases_when_the_compensation_switches_on_the_models(tmp_path: Path, calib) -> None:
+    # FLAP's compensation sets attention_bias on a bias-free family (Llama); EAGLE-3, rebuilt after the rewrite, must
+    # keep the bias-free q/k/v projections it was trained with, or its saved state does not load.
+    from economize import DecodeConfig
+    from economize.arch.base import adapter_for
+    from economize.core.serialization import Checkpoint, read_checkpoint
+    from economize.techniques.eagle3 import Eagle3Config
+
+    width = WidthPruneConfig(method="flap", sparsity=0.4)
+    trained = economize.apply(make_family_model("llama"), Eagle3Config())
+    perturb(trained.techniques["eagle3"])
+    economize.save(trained, tmp_path / "eagle3")
+    saved = read_checkpoint(tmp_path / "eagle3")
+    base = make_family_model("llama")
+    fresh = WidthPruneTechnique(width, adapter_for(base)).state_dict()
+    model = economize.attach(base, Checkpoint([*saved.configs, width], {**saved.states, "width_prune": fresh}),
+                             calibration=[calib], check_teacher=False)
+    assert adapter_for(economize.unwrap.base_model_of(model)).config.attention_bias
+    assert model.techniques["eagle3"].layer.self_attn.q_proj.bias is None
+    economize.save(model, tmp_path / "pruned")
+    loaded = economize.load(make_family_model("llama"), tmp_path / "pruned")  # strict
+    prompt = TOKENS[:1, :8]
+    result = loaded.decode(prompt, 12, decoding=DecodeConfig(cycle_length=3))
+    assert result.tokens.tolist() == reference_greedy(economize.unwrap.base_model_of(loaded), prompt, 12).tolist()
+
+
 def test_the_recovery_merge_holds_one_merged_map_at_a_time() -> None:
     from economize.techniques.width_prune.recovery import RecoveryLoRA
 

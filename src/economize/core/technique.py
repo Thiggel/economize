@@ -249,6 +249,14 @@ class Technique(nn.Module):
     def detach(self) -> None:
         """Undo every change made to the base model."""
 
+    def rebuild_config(self, requested: TechniqueConfig) -> TechniqueConfig:
+        """The configuration this technique is built from again once a weight transform has rewritten the base
+        model (see :func:`~economize.core.recipe.attach_techniques`), given the ``requested`` one. A technique pins
+        here what it resolved against the original model and must not resolve against the rewritten one (EAGLE-3's
+        q/k/v biases, which a compensating width prune would switch on). Default: the requested configuration.
+        """
+        return requested
+
     def plain_save_issue(self) -> str | None:
         """Why the base model, once this technique attached, no longer survives ``transformers``' plain
         ``save_pretrained`` followed by ``from_pretrained`` (``None`` if it does). A reason makes the base model's

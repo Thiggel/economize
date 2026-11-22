@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, ClassVar
 
 import torch
@@ -25,6 +25,7 @@ from .layer import DraftLayer
 
 if TYPE_CHECKING:
     from ...arch import ArchAdapter
+    from ...core.config import TechniqueConfig
     from ...core.model import EfficientModel
     from ...runtime import LayerRunner
     from ...train.objective import Batch, ParamGroup, TeacherOutputs, TeacherRequest
@@ -117,7 +118,17 @@ class DraftLayerTechnique(StepDrafterDefaults, Technique, ABC):
 
     # ---- construction helpers ------------------------------------------------------------------------------------
     def _shape(self) -> DraftLayerShape:
-        return DraftLayerShape.of(self.config, self.adapter)
+        shape = DraftLayerShape.of(self.config, self.adapter)
+        self._attention_bias = shape.attention_bias
+        return shape
+
+    def rebuild_config(self, requested: TechniqueConfig) -> TechniqueConfig:
+        """The configuration with the q/k/v biases resolved against the original model (a compensating width prune
+        gives the base model's attention biases, which the draft layer does not have)."""
+        bias = getattr(self, "_attention_bias", None)
+        if not isinstance(requested, DraftLayerConfig) or requested.attention_bias is not None or bias is None:
+            return requested
+        return replace(requested, attention_bias=bias)
 
     def _init_rotary(self, shape: DraftLayerShape) -> None:
         """The draft layer's own rotary table (``config.rope_theta`` set), else the name of the model's table it

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import torch
@@ -21,6 +22,7 @@ from .config import KangarooConfig
 
 if TYPE_CHECKING:
     from ...arch import ArchAdapter
+    from ...core.config import TechniqueConfig
     from ...core.model import EfficientModel
     from ...runtime import LayerContext, LayerRunner
     from ...train.objective import Batch, ParamGroup, TeacherOutputs, TeacherRequest
@@ -63,6 +65,7 @@ class KangarooTechnique(StepDrafterDefaults, Technique):
         kv_heads = config.num_kv_heads or (geometry.kv_heads if config.num_heads is None else heads)
         eps = config.rms_norm_eps or float(getattr(text, "rms_norm_eps", None) or 1e-6)
         bias = config.attention_bias if config.attention_bias is not None else _target_bias(adapter)
+        self._attention_bias = bias
         self.adapter_net = KangarooAdapter(d, heads, kv_heads, config.head_dim or geometry.head_dim, eps, bias)
         self.rope_table: str = adapter.attention_spec(full).rope if full is not None else "default"
         for linear in self.adapter_net.modules():
@@ -72,6 +75,13 @@ class KangarooTechnique(StepDrafterDefaults, Technique):
                     nn.init.zeros_(linear.bias)
         self._init_norm(eps)
         self.to(device=adapter.head_device, dtype=copy_dtype_of(config.param_dtype, adapter.dtype))
+
+    def rebuild_config(self, requested: TechniqueConfig) -> TechniqueConfig:
+        """The configuration with the q/k/v biases resolved against the original model (a compensating width prune
+        gives the base model's attention biases, which the adapter does not have)."""
+        if not isinstance(requested, KangarooConfig) or requested.attention_bias is not None:
+            return requested
+        return replace(requested, attention_bias=self._attention_bias)
 
     @torch.no_grad()
     def _init_norm(self, eps: float) -> None:

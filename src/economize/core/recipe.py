@@ -109,8 +109,10 @@ def attach_techniques(
                 _attach(attaching, model, adapter, context)
                 attached.append(attaching)
             attaching = None
-            # rebuilt from the requested configs: a technique may resolve its config against the old depth
-            rest = [c for c in configs if Capability.WEIGHTS not in technique_for(c).capabilities]
+            # rebuilt from the requested configs (a technique may resolve its config against the old depth), with
+            # what a technique pins against the original model (Technique.rebuild_config)
+            requested = {technique_for(c): c for c in configs}  # build_techniques sorts by attach rank
+            rest = [t.rebuild_config(requested[type(t)]) for t in techniques if t not in rewrites]
             after = _states_after(techniques, rewrites, states)
             rebuilt = build_techniques(adapter, rest, _subset(None if after is None else {**after, **rewritten}, rest))
             for technique in rebuilt:
