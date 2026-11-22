@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 import torch
 from safetensors.torch import load_file
-from vllm_fakes import reference_jump_step, vllm_target
+from vllm_fakes import VllmStyleLayer, reference_jump_step, vllm_target
 
 from economize.backends.vllm import DRAFTER_ARCHITECTURE, drafter_config, drafter_weights, export_drafter
 from economize.backends.vllm.drafters import SYNC_PREFIX
@@ -247,6 +247,37 @@ def test_vllm_draft_step_matches_technique(applied_jump: Callable[..., Any], tmp
     # the draft K/V of every jump-path layer went to the target's attention; the target's weights are untouched
     assert [len(layer.self_attn.attn.kv_cache) for layer in layers] == [1, 1, 1]
     assert all(torch.equal(p, weights[name]) for name, p in target.model.named_parameters())
+
+
+class _ResidualFreeLayer(VllmStyleLayer):
+    """A layer that adds its residual itself and returns ``(state, None)``, as vLLM's Gemma 4 layers do."""
+
+    def forward(self, positions: torch.Tensor, hidden: torch.Tensor,
+                residual: torch.Tensor | None) -> tuple[torch.Tensor, None]:  # type: ignore[override]
+        hidden, residual = super().forward(positions, hidden, residual)
+        return hidden + residual, None
+
+
+@pytest.mark.parametrize("adaptation", ["frozen", "lora", "full"])
+def test_vllm_draft_step_with_layers_that_return_no_residual(applied_jump: Callable[..., Any], tmp_path: Path,
+                                                             adaptation: str) -> None:
+    """Gemma 4 layers return ``(state, None)``: the jump step must not add a ``None`` residual (Tensor + NoneType in
+    the engine's dummy run at every tensor-parallel size, RWTH bs31_vlt1_ours_s0 and bs31_vlh_s0)."""
+    base = make_tiny_model(seed=0)
+    model = applied_jump(base=base, adaptation=adaptation, **RICH)
+    technique = model.techniques["jump"]
+    target = vllm_target(base)
+    for layer in target.model.layers:
+        layer.__class__ = _ResidualFreeLayer
+    draft = _tied(export_drafter(model, tmp_path / adaptation), target)
+    assert all(isinstance(layer, _ResidualFreeLayer) for layer in draft.jump_path)
+
+    states, ids, _ = _inputs(technique, seed=3)
+    logits, sources = _draft_step(draft, ids, states)
+    expected_logits, expected_sources = reference_jump_step(technique, ids, states)
+    torch.testing.assert_close(logits, expected_logits, rtol=1e-4, atol=1e-4)
+    # source layer 4 lies on the jump path (3..5): its column is the full state of this step
+    torch.testing.assert_close(sources, torch.cat(expected_sources, dim=-1), rtol=1e-4, atol=1e-4)
 
 
 @pytest.mark.parametrize("adaptation", ["frozen", "lora", "full"])
