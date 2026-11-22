@@ -152,6 +152,23 @@ def test_skipdecode_schedule() -> None:
     assert config.budget(LAYERS) == (6, 2) and SkipDecodeConfig().budget(LAYERS) == (6, 6)
 
 
+@pytest.mark.skipif(torch.cuda.device_count() < 1, reason="needs a GPU")
+def test_depth_meter_accepts_counts_from_several_devices() -> None:
+    """A model split over devices (device_map="auto") records later layers' counts on another device."""
+    meter = DepthMeter(LAYERS)
+    meter.start_rows(2)
+    rows = torch.arange(2)
+    meter.record(1, torch.tensor([3, 2]), torch.tensor([3, 1]), 0, phase="decode", rows=rows)
+    cuda = torch.device("cuda")
+    meter.record(2, torch.tensor([3, 2], device=cuda), torch.tensor([1, 1], device=cuda), 0, phase="decode",
+                 rows=rows.to(cuda))
+    meter.add("confidence_head_tokens", torch.tensor([3, 2]), rows)
+    meter.add("confidence_head_tokens", torch.tensor([1, 1], device=cuda), rows.to(cuda))
+    table = meter.per_layer("decode")
+    assert table[0].tolist()[:2] == [5, 4] and table[1].tolist()[:2] == [5, 2]
+    assert float(meter.extra["confidence_head_tokens"]) == 7
+
+
 def test_calm_threshold_decay() -> None:
     generated = torch.tensor([0, 64, 256, 1024])
     assert torch.equal(CalmConfig(threshold=0.8).threshold_at(generated), torch.full((4,), 0.8))

@@ -117,7 +117,8 @@ class DepthMeter:
         if table is None:
             table = self.counts[key] = torch.zeros(self.num_layers + 1, 3, dtype=torch.long, device=device)
         for column, value in zip((_ENTERED, _RAN, _FILLED), values):
-            table[index, column] += value.sum() if isinstance(value, torch.Tensor) else value
+            # a model split over several GPUs (device_map="auto") passes later layers' counts on another device
+            table[index, column] += value.sum().to(table.device) if isinstance(value, torch.Tensor) else value
         if rows is None or not self.num_rows:
             return
         per_row = self.row_counts.get(key)
@@ -142,7 +143,10 @@ class DepthMeter:
             total: torch.Tensor | float = value.sum() if value.dim() else value
         else:
             total = value
-        self.extra[name] = self.extra.get(name, 0) + total
+        previous = self.extra.get(name, 0)
+        if isinstance(previous, torch.Tensor) and isinstance(total, torch.Tensor):
+            total = total.to(previous.device)
+        self.extra[name] = previous + total
         if rows is None or not self.num_rows or not isinstance(value, torch.Tensor) or value.dim() != 1:
             return
         per_row = self.row_extra.get(name)
