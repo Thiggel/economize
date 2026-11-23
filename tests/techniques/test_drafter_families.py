@@ -103,6 +103,25 @@ def test_eagle3_uses_the_full_attention_rotary_table() -> None:
     model.detach()
 
 
+def test_eagle3_pinned_shape_on_wider_full_attention_heads() -> None:
+    """On Gemma-4 the full-attention heads are wider than the sliding ones. The draft layer borrows the full-attention
+    rotary table, so a config pinned to the shape it resolves itself (as before width pruning) validates, and a head
+    width of the sliding layers without a rotary table of its own is rejected."""
+    from economize.errors import ConfigError
+    from economize.techniques._draft_layer import DraftLayerShape
+
+    reason = family_skip_reason("gemma4_text")
+    if reason is not None:
+        pytest.skip(reason)
+    adapter = adapter_for(make_family_model("gemma4_text"))
+    shape = DraftLayerShape.of(Eagle3Config(head="shared"), adapter)
+    assert shape.head_dim != adapter.head_dim, "the tiny Gemma-4 config should have wider full-attention heads"
+    Eagle3Config(head="shared", num_heads=shape.num_heads, num_kv_heads=shape.num_kv_heads,
+                 head_dim=shape.head_dim, intermediate_size=shape.intermediate_size).validate(adapter)
+    with pytest.raises(ConfigError, match="needs rope_theta"):
+        Eagle3Config(head="shared", head_dim=adapter.head_dim).validate(adapter)
+
+
 def test_mtp_block_layer_needs_own_kv() -> None:
     """On Gemma-4 the default MTP template is the last full-attention layer that projects K/V of its own, and an
     explicit block_layer that reads another layer's cache is rejected."""

@@ -97,5 +97,11 @@ class DraftLayerConfig(TechniqueConfig):
         kv_heads = self.num_kv_heads or (adapter.num_kv_heads if self.num_heads is None else heads)
         if heads % kv_heads:
             raise ConfigError(f"the draft layer's {heads} heads are not a multiple of its {kv_heads} key/value heads")
-        if self.rope_theta is None and (self.head_dim or adapter.head_dim) != adapter.head_dim:
-            raise ConfigError("a draft head width other than the model's needs rope_theta (its own rotary table)")
+        if self.rope_theta is None and self.head_dim is not None:
+            # the borrowed table is that of the last full-attention layer, whose heads can be wider (Gemma-4)
+            from .technique import last_full_attention_layer
+
+            full = last_full_attention_layer(adapter)
+            width = adapter.head_geometry(full).head_dim if full is not None else adapter.head_dim
+            if self.head_dim != width:
+                raise ConfigError("a draft head width other than the model's needs rope_theta (its own rotary table)")
