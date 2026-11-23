@@ -37,7 +37,7 @@ from economize.techniques.jump import JumpConfig
 from economize.techniques.kv_quant.fp8 import FP8KVConfig
 from economize.techniques.lookup.config import LookupConfig
 from economize.techniques.quant.config import QuantConfig
-from helpers import VOCAB, make_tiny_model, perturb
+from helpers import VOCAB, make_tiny_model, perturb, subprocess_env
 
 needs_ct = pytest.mark.skipif(importlib.util.find_spec("compressed_tensors") is None, reason="needs compressed-tensors")
 JUMP = JumpConfig(target_layer=2, source_layer=4)
@@ -85,11 +85,13 @@ def test_every_technique_has_an_adapter() -> None:
     assert all(row[3] for row in rows.values())  # every adapter says what SGLang runs, or why it cannot
 
 
-def test_importing_the_backend_imports_no_engine() -> None:
+def test_importing_the_backend_imports_no_engine(tmp_path: Path) -> None:
     code = ("import sys, economize.backends.sglang, economize.backends.sglang.serving; "
             "print(sorted(m for m in sys.modules if m.split('.')[0] in ('sglang', 'vllm')))")
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
-    assert out.strip() == "[]"
+    run = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=subprocess_env(),
+                         cwd=tmp_path)
+    assert run.returncode == 0, run.stderr
+    assert run.stdout.strip() == "[]", run.stdout
 
 
 def test_a_plain_model_serves_its_folder(tiny_dir: Path, tmp_path: Path) -> None:
