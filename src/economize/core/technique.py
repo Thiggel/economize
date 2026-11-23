@@ -300,6 +300,11 @@ class Technique(nn.Module):
         """The per-token layer policy of the exact path (techniques with :attr:`Capability.DEPTH`)."""
         return None
 
+    def reuse_layer_policy(self, policy: LayerPolicy) -> None:
+        """Prepare ``policy``, made by :meth:`layer_policy` for a decoder that records CUDA graphs, for that
+        decoder's next generation (the decoder and its policy are kept, since its graphs read the policy's buffers).
+        Default: nothing."""
+
     def wrap_cache(self, cache: KVCache, previous: KVCache | None = None) -> KVCache:
         """Wrap the KV cache of one generation (techniques with :attr:`Capability.KV_CACHE`).
 

@@ -34,7 +34,17 @@ from ...core.technique import register_technique
 from ...errors import ConfigError
 from ...runtime import LayerRunner
 from ...validation import check_positive
-from .base import DepthPolicy, DepthTechnique, LayeredDepthConfig, layer_modules, module_at, valid_mask
+from .base import (
+    STEP_RUN,
+    DepthPolicy,
+    DepthTechnique,
+    LayeredDepthConfig,
+    StepAction,
+    StepOps,
+    layer_modules,
+    module_at,
+    valid_mask,
+)
 
 if TYPE_CHECKING:
     from ...arch import ArchAdapter
@@ -42,6 +52,12 @@ if TYPE_CHECKING:
 
 __all__ = ["AnchorStore", "LoRADropConfig", "LoRADropPolicy", "LoRADropTechnique", "LowRankUpdate",
            "redundant_layers"]
+
+#: Step actions: a full token runs a droppable layer and keeps its output as the anchor; a dropped token fills the
+#: K/V and adds the low-rank update to the anchor (or, before any full token, to its own input).
+_ANCHOR = StepAction("anchor", runs=True)
+_DROP = StepAction("drop", runs=False, fills_kv=True)
+_DROP_UNANCHORED = StepAction("drop_unanchored", runs=False, fills_kv=True)
 
 _MIN = torch.iinfo(torch.long).min
 _MAX = torch.iinfo(torch.long).max
@@ -159,9 +175,47 @@ class LoRADropPolicy(DepthPolicy):
         self._full: torch.Tensor | None = None
         self._positions: torch.Tensor | None = None
         self._anchors: dict[int, AnchorStore] = {}
+        self._full_step = True
+        self._anchored: set[int] = set()  # layers whose step anchor buffer holds a full token's output
+        self._step_anchors: dict[int, torch.Tensor] = {}  # [1, 1, D] per droppable layer, read by recorded graphs
 
     def begin_prompt(self) -> None:
         self._anchors.clear()
+        self._anchored.clear()
+
+    # ---- steps: the schedule is known on the host; anchors live in fixed buffers -----------------------------
+    supports_steps: ClassVar[bool] = True
+
+    def start_step(self, generated: int) -> None:
+        self._full_step = generated % self.technique.config.period == 0
+
+    def plan(self, index: int) -> StepAction:
+        if not self.technique.droppable(index):
+            return STEP_RUN
+        if self._full_step:
+            self._anchored.add(index)
+            return _ANCHOR
+        return _DROP if index in self._anchored else _DROP_UNANCHORED
+
+    def step_op(self, index: int, action: StepAction, hidden: torch.Tensor,
+                ops: StepOps) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if action is _ANCHOR:
+            out = ops.run(index, hidden)
+            self._anchor_buffer(index, out).copy_(out)
+            return out, None
+        if action is _DROP or action is _DROP_UNANCHORED:
+            ops.fill(index, hidden)
+            base = self._anchor_buffer(index, hidden) if action is _DROP else hidden
+            return base + self.technique.update(index, hidden).to(hidden.dtype), None
+        return super().step_op(index, action, hidden, ops)
+
+    def _anchor_buffer(self, index: int, like: torch.Tensor) -> torch.Tensor:
+        """The fixed anchor buffer of layer ``index`` (allocated outside graph capture: the engine runs every
+        new step eagerly once before it records it)."""
+        buffer = self._step_anchors.get(index)
+        if buffer is None or buffer.shape != like.shape or buffer.device != like.device or buffer.dtype != like.dtype:
+            buffer = self._step_anchors[index] = torch.zeros_like(like)
+        return buffer
 
     def begin_pass(self, hidden: torch.Tensor, ctx: LayerContext) -> None:
         self._positions = self.generated_positions(hidden, ctx)

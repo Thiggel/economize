@@ -11,6 +11,7 @@
 * :class:`StopChecker` turns a :data:`StopCondition` into the check run after every committed token.
 * :class:`CostLog` records every model call for cost accounting.
 * :class:`DecodeGraphs` holds the CUDA graphs and static cache of a decoder with ``cuda_graphs=True``.
+* :class:`DepthSteps` runs the decode steps of a dynamic-depth technique without its skipped layers.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from __future__ import annotations
 from .capabilities import BatchDistributions, BatchSelector, DistributionSelector, SeededSelector
 from .config import DecodeConfig
 from .cost import CostEvent, CostKind, CostLog, CostSummary, LayerFootprint
+from .depth_steps import DepthSteps
 from .dynamic_tree import DynamicTreeDrafter, DynamicTreePolicy, TreeOptions, TreeStepDrafter
 from .graphs import DecodeGraphs
 from .loop import CycleDecoder, DecodeResult, StopCondition, VerifyObserver
@@ -63,6 +65,7 @@ __all__ = [
     "DecodeConfig",
     "DecodeGraphs",
     "DecodeResult",
+    "DepthSteps",
     "DistributionSelector",
     "Draft",
     "DraftPolicy",

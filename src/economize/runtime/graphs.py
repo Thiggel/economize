@@ -20,14 +20,14 @@ import contextlib
 import gc
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Generic, TypeVar
+from typing import TYPE_CHECKING, Generic, Protocol, TypeVar
 
 import torch
 
 if TYPE_CHECKING:
     from torch.cuda import _POOL_HANDLE
 
-__all__ = ["GraphPool", "StaticStep", "capture"]
+__all__ = ["GraphPool", "PoolMember", "StaticStep", "capture"]
 
 _Key = tuple[tuple[tuple[int, ...], torch.dtype, torch.device], ...]
 _R = TypeVar("_R")
@@ -154,6 +154,18 @@ class StaticStep(Generic[_R_co]):
         return output
 
 
+class PoolMember(Protocol):
+    """What a :class:`GraphPool` holds besides its :class:`StaticStep` objects (:meth:`GraphPool.attach`): an owner
+    of graphs recorded into ``pool`` that drops them on :meth:`reset`."""
+
+    pool: _POOL_HANDLE | None
+
+    def reset(self) -> None: ...
+
+    @property
+    def num_graphs(self) -> int: ...
+
+
 class GraphPool:
     """The steps of one owner that share a CUDA graph memory pool and drop their graphs together.
 
@@ -170,7 +182,7 @@ class GraphPool:
     def __init__(self, device: torch.device | None = None, *, enabled: bool = True) -> None:
         self.device = device
         self.enabled = enabled
-        self.steps: list[StaticStep[object]] = []
+        self.steps: list[PoolMember] = []
         self.handle: _POOL_HANDLE | None = self._new_handle()
 
     def step(self, fn: Callable[..., _R], *, warmup: int = 2, enabled: bool = True) -> StaticStep[_R]:
@@ -178,6 +190,11 @@ class GraphPool:
         step = StaticStep(fn, pool=self.handle, enabled=self.enabled and enabled, warmup=warmup)
         self.steps.append(step)
         return step
+
+    def attach(self, member: PoolMember) -> None:
+        """Let ``member`` record into this pool and drop its graphs with the steps' (it gets the current handle)."""
+        member.pool = self.handle
+        self.steps.append(member)
 
     def reset(self) -> None:
         """Drop the graphs of every step and record the next ones into a fresh pool."""

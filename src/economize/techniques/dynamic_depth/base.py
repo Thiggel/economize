@@ -40,7 +40,17 @@ from ...core.technique import Capability, Technique
 from ...errors import ConfigError
 from ...modules.norm import rms_normalize
 from ...runtime import current_phase
-from ...runtime.policy import Decision, LayerAction, LayerPolicy, Route
+from ...runtime.policy import (
+    STEP_FILL,
+    STEP_RUN,
+    STEP_SKIP,
+    Decision,
+    LayerAction,
+    LayerPolicy,
+    Route,
+    StepAction,
+    StepOps,
+)
 from ...validation import check_choice, check_layers
 
 if TYPE_CHECKING:
@@ -51,6 +61,9 @@ if TYPE_CHECKING:
 __all__ = [
     "ALL_PHASES",
     "GENERATION_PHASES",
+    "STEP_FILL",
+    "STEP_RUN",
+    "STEP_SKIP",
     "DepthMeter",
     "DepthPolicy",
     "DepthTechnique",
@@ -58,6 +71,8 @@ __all__ = [
     "RoutedDepthPolicy",
     "ScalarScore",
     "ScoredDepthPolicy",
+    "StepAction",
+    "StepOps",
     "gated_residual",
     "layer_modules",
     "module_at",
@@ -134,6 +149,23 @@ class DepthMeter:
                 continue
             else:
                 raise ConfigError("per-row counts need a [B] tensor per column (or 0)")
+
+    def record_table(self, phase: str, table: torch.Tensor, row: int | None = None) -> None:
+        """Add a whole ``[L + 1, 3]`` table of counts (the step engine's per-step table) to phase ``phase``, and to
+        row ``row`` of the per-row counts when they are kept."""
+        counts = self.counts.get(phase)
+        if counts is None:  # next to the other phases' counts, so that summaries add them up
+            device = next((t.device for t in self.counts.values()), table.device)
+            counts = self.counts[phase] = torch.zeros(self.num_layers + 1, 3, dtype=torch.long, device=device)
+        counts += table.to(counts.device)
+        if row is None or not self.num_rows:
+            return
+        per_row = self.row_counts.get(phase)
+        if per_row is None:
+            per_row = self.row_counts[phase] = torch.zeros(
+                self.num_rows, self.num_layers + 1, 3, dtype=torch.long, device=counts.device
+            )
+        per_row[row] += table.to(per_row.device)
 
     def add(self, name: str, value: torch.Tensor | float, rows: torch.Tensor | None = None) -> None:
         """Add ``value`` to the counter ``name``: a number, or a ``[B]`` tensor of per-row values, kept per row
@@ -347,7 +379,6 @@ class DepthPolicy(LayerPolicy):
 
     #: Whether skipped tokens get K/V (``SKIP_FILL_KV``) when the whole pass skips a layer.
     fill_kv: bool = True
-
     def __init__(self, num_layers: int, phases: Iterable[str | None] = ALL_PHASES) -> None:
         self.num_layers = num_layers
         self.phases = tuple(phases)
@@ -359,6 +390,9 @@ class DepthPolicy(LayerPolicy):
         self._active = True
         self._prompt_end: torch.Tensor | None = None  # [B], set by the prefill passes, kept by reorder
         self._row_ids: torch.Tensor | None = None  # [B] row ids of the meter, set by the prefill, kept by reorder
+        self._step_active = True
+        self._step_prompt_end: int | None = None  # host copies for the step interface, read once per generation
+        self._step_row: int | None = None
 
     # ---- the LayerPolicy interface -------------------------------------------------------------------------
     def decide(self, index: int, hidden: torch.Tensor, ctx: LayerContext) -> Decision:
@@ -366,6 +400,7 @@ class DepthPolicy(LayerPolicy):
             if current_phase() == "prefill":  # chunked prefill: the last chunk sets the end
                 positions = torch.where(valid_mask(hidden, ctx), ctx.positions.to(hidden.device), -1)
                 self._prompt_end = positions.max(-1).values + 1
+                self._step_prompt_end = self._step_row = None
                 if self._row_ids is None or len(self._row_ids) != len(positions):
                     self._row_ids = torch.arange(len(positions), device=hidden.device)
                     self.meter.start_rows(len(positions))
@@ -400,6 +435,7 @@ class DepthPolicy(LayerPolicy):
             self._prompt_end = self._prompt_end.index_select(0, rows.to(self._prompt_end.device))
         if self._row_ids is not None:
             self._row_ids = self._row_ids.index_select(0, rows.to(self._row_ids.device))
+        self._step_prompt_end = self._step_row = None
 
     def row_ids(self, batch: int) -> torch.Tensor | None:
         """``[batch]`` ids of the rows of the current pass in the meter's per-row counts (the rows of the batch the
@@ -416,6 +452,43 @@ class DepthPolicy(LayerPolicy):
         if self.training or start is None or len(start) != len(positions):
             return positions
         return positions - start.to(hidden.device)[:, None]
+
+    def reset(self) -> None:
+        """Fresh counts and schedule state. Buffers that recorded step graphs read stay allocated."""
+        self.meter = DepthMeter(self.num_layers)
+        self._inputs.clear()
+        self._masks.clear()
+        self._last = 0
+        self._prompt_end = None
+        self._row_ids = None
+        self._step_prompt_end = self._step_row = None
+        self.begin_prompt()
+
+    # ---- the step interface (see LayerPolicy): a template; subclasses implement start_step and plan -----------
+    def begin_step(self, position: int) -> None:
+        self._step_active = current_phase() in self.phases
+        if not self._step_active:
+            return
+        if self._step_prompt_end is None:  # read once per generation
+            self._step_prompt_end = int(self._prompt_end[0]) if self._prompt_end is not None else 0
+        self.start_step(position - self._step_prompt_end)
+
+    def planned(self, index: int) -> StepAction | None:
+        return self.plan(index) if self._step_active else STEP_RUN
+
+    def end_step(self, counts: torch.Tensor) -> None:
+        if self._step_row is None:
+            ids = self.row_ids(1)
+            self._step_row = int(ids[0]) if ids is not None else -1
+        self.meter.record_table(str(current_phase()), counts, self._step_row if self._step_row >= 0 else None)
+
+    def start_step(self, generated: int) -> None:
+        """Start the decode step of the ``generated``-th generated token (``0``: the first), in a phase the policy
+        acts in."""
+
+    def plan(self, index: int) -> StepAction | None:
+        """:meth:`planned` in a phase the policy acts in (default: run)."""
+        return STEP_RUN
 
     # ---- hooks for subclasses ------------------------------------------------------------------------------
     def begin_prompt(self) -> None:
@@ -474,6 +547,11 @@ class DepthPolicy(LayerPolicy):
         return Route.from_mask(chosen)
 
 
+_SCORED_RUN = StepAction("scored_run", runs=True)
+_SCORED_SKIP = StepAction("scored_skip", runs=False)
+_SCORED_FILL = StepAction("scored_fill", runs=False, fills_kv=True)
+
+
 class ScoredDepthPolicy(DepthPolicy):
     """Template of the policies that score every token of a layer with a learned module.
 
@@ -509,8 +587,44 @@ class ScoredDepthPolicy(DepthPolicy):
         """The state passed on from the input ``x``, the output ``out``, the score and the tokens that ran
         (``None``: all of them)."""
 
+    supports_steps: ClassVar[bool] = True
+
+    @abstractmethod
+    def scored(self, index: int) -> bool:
+        """Whether layer ``index`` has a score (:meth:`score` returns a tensor for it)."""
+
     def begin_pass(self, hidden: torch.Tensor, ctx: LayerContext) -> None:
         self.scores = {}
+
+    # ---- steps: probe the score, decide on the host, record the chosen branch -------------------------------
+    def plan(self, index: int) -> StepAction | None:
+        return None if self.scored(index) else STEP_RUN
+
+    def probe(self, index: int, hidden: torch.Tensor) -> torch.Tensor:
+        score = self.score(index, hidden)
+        assert score is not None
+        return score.float().reshape(-1)
+
+    def after_probe(self, index: int, value: float) -> StepAction:
+        score = torch.tensor([[value]], dtype=torch.float32)
+        runs = bool(self.select(index, score, torch.ones(1, 1, dtype=torch.bool))[0, 0])
+        return _SCORED_RUN if runs else (_SCORED_FILL if self.fill_kv else _SCORED_SKIP)
+
+    def step_op(self, index: int, action: StepAction, hidden: torch.Tensor,
+                ops: StepOps) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if action not in (_SCORED_RUN, _SCORED_FILL, _SCORED_SKIP):
+            return super().step_op(index, action, hidden, ops)
+        score = self.score(index, hidden)
+        assert score is not None
+        if action.runs:
+            return self.combine(index, hidden, ops.run(index, hidden), score, None), None
+        if action.fills_kv:
+            ops.fill(index, hidden)
+        return self.step_skip_state(index, hidden, score), None
+
+    def step_skip_state(self, index: int, x: torch.Tensor, score: torch.Tensor) -> torch.Tensor:
+        """The state a skipped token passes on in a step (what :meth:`combine` gives with ``out == x``)."""
+        return self.combine(index, x, x, score, None)
 
     def choose(self, index: int, hidden: torch.Tensor, ctx: LayerContext) -> torch.Tensor | None:
         score = self.score(index, hidden)
@@ -554,13 +668,18 @@ class RoutedDepthPolicy(ScoredDepthPolicy):
         """The state passed on by the tokens that skipped layer ``index``."""
         return x
 
+    def step_skip_state(self, index: int, x: torch.Tensor, score: torch.Tensor) -> torch.Tensor:
+        return self.skip_state(index, x, score)
+
 
 class DepthTechnique(Technique, ABC):
     """Base of the dynamic-depth techniques: a fresh :class:`DepthPolicy` per generation, and its counts in the
     cost summary. Subclasses implement :meth:`make_policy`."""
 
     capabilities: ClassVar[Capability] = Capability.DEPTH
-    graph_safe: ClassVar[bool] = False  # decisions read token masks on the host
+    #: One-token decode steps run under CUDA graphs through the step engine when the policy class has
+    #: ``supports_steps`` (every built-in policy); other passes with a policy run eagerly.
+    graph_safe: ClassVar[bool] = True
 
     def __init__(self, config: TechniqueConfig, adapter: ArchAdapter) -> None:
         super().__init__(config, adapter)
@@ -573,6 +692,12 @@ class DepthTechnique(Technique, ABC):
     def layer_policy(self) -> DepthPolicy:
         self.last_policy = self.make_policy()
         return self.last_policy
+
+    def reuse_layer_policy(self, policy: LayerPolicy) -> None:
+        """Fresh counts for the next generation; :meth:`depth_stats` reads them."""
+        assert isinstance(policy, DepthPolicy)
+        policy.reset()
+        self.last_policy = policy
 
     def depth_stats(self, row: int | None = None) -> dict[str, object]:
         """Layer applications of the last generation, of the whole batch or of row ``row`` (see

@@ -223,6 +223,9 @@ class EfficientModel(nn.Module, EconomizeHubMixin):
         cached = self._graph_decoders.get(config)
         if cached is not None:
             cached.observers = tuple(self._verify_observers.values())
+            depth = self._first(Capability.DEPTH)
+            if depth is not None and cached.layer_policy is not None:
+                depth.reuse_layer_policy(cached.layer_policy)
             return cached
         decoder = self._new_decoder(config)
         if decoder.graphs is not None:

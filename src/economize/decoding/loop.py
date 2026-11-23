@@ -18,7 +18,9 @@ whose pass included rejected drafts or padding (:meth:`~economize.runtime.LayerR
 With ``cycle_length = 1`` the loop is ordinary greedy or sampled decoding with a static cache.
 
 With ``DecodeConfig.cuda_graphs`` the exact chain and tree passes, and the draft steps of drafters that opt in, are
-replayed from CUDA graphs (:mod:`economize.decoding.graphs`). Prefills stay eager.
+replayed from CUDA graphs (:mod:`economize.decoding.graphs`). Prefills stay eager. A dynamic-depth layer policy that
+implements the step interface decodes through :class:`~economize.decoding.DepthSteps`, whose graphs leave the skipped
+layers out.
 
 This module holds the decoder and its cycle; the parts of a cycle live in :mod:`.generation` (the state of one
 call and its batch bookkeeping), :mod:`.passes` (exact passes), :mod:`.commit` (verification and commits),
@@ -37,6 +39,7 @@ from ..errors import ConfigError
 from ..runtime import CACHES, KVCache, LayerPolicy, LayerRunner
 from .commit import verify_and_commit
 from .config import DecodeConfig
+from .depth_steps import DepthSteps
 from .drafting import draft
 from .generation import Generation
 from .graphs import DecodeGraphs
@@ -66,9 +69,10 @@ class CycleDecoder:
         wrap_cache: Wraps the KV cache of every generation (KV-cache techniques, e.g. quantized or sparse caches).
         graph_safe: Whether the attached techniques allow CUDA graphs (``config.cuda_graphs``). Graphs also need a
             CUDA model on one device, a cache kind with a static variant (:meth:`DecodeGraphs.supports_cache`), no
-            recurrent layers, no ``layer_policy``, and no ``wrap_cache`` unless it has a true ``graph_safe``
-            attribute (a :class:`~economize.core.cache_wrapping.CacheWrapping` of graph-safe KV-cache techniques);
-            otherwise the decoder runs eagerly.
+            recurrent layers, no ``layer_policy`` unless it implements the step interface
+            (:attr:`~economize.runtime.LayerPolicy.supports_steps`) and ``cycle_length = 1``, and no ``wrap_cache``
+            unless it has a true ``graph_safe`` attribute (a :class:`~economize.core.cache_wrapping.CacheWrapping` of
+            graph-safe KV-cache techniques); otherwise the decoder runs eagerly.
 
     Attributes:
         active_drafter: The drafter that runs, ``None`` with ``cycle_length = 1`` (ordinary decoding ignores it).
@@ -76,6 +80,9 @@ class CycleDecoder:
             The eager passes and the graphed passes capture exactly these.
         graphs: The decoder's CUDA graphs and static cache, ``None`` when it runs eagerly. They are kept across
             :meth:`decode_batch` calls, so reuse one decoder for repeated generations.
+        depth_steps: With ``config.cuda_graphs``, ``cycle_length = 1`` and a layer policy that implements the step
+            interface, the engine that runs its one-token decode steps without the skipped layers
+            (:class:`~economize.decoding.DepthSteps`, graphed when :attr:`graphs` is set); else ``None``.
 
     Raises:
         ConfigError: ``cycle_length > 1`` without a drafter, ``lossless=True`` with a lossy verifier,
@@ -116,6 +123,15 @@ class CycleDecoder:
             self.graphs = DecodeGraphs(runner, self.capture, "decode" if config.cycle_length == 1 else "refresh")
             if self.active_drafter is not None:
                 self.active_drafter.enable_graphs(self.graphs.wrap)
+        self.depth_steps: DepthSteps | None = None
+        if config.cuda_graphs and self._steps_policy() and not runner.has_recurrent_layers:
+            assert layer_policy is not None
+            self.depth_steps = DepthSteps(runner, layer_policy, self.graphs)
+
+    def _steps_policy(self) -> bool:
+        """Whether the layer policy runs through :class:`DepthSteps` (its step interface, ordinary decoding)."""
+        policy = self.layer_policy
+        return policy is not None and policy.supports_steps and self.config.cycle_length == 1
 
     def _check_chunked_prefill(self) -> None:
         """Raise :class:`ConfigError` for a decoder that cannot run :attr:`DecodeConfig.prefill_chunk` (and
@@ -142,7 +158,7 @@ class CycleDecoder:
     def _graphable(self) -> bool:
         """Whether the exact passes of this decoder can be CUDA graphs."""
         adapter = self.runner.adapter
-        if self.layer_policy is not None or self.runner.has_recurrent_layers:
+        if (self.layer_policy is not None and not self._steps_policy()) or self.runner.has_recurrent_layers:
             return False
         if self.wrap_cache is not None and not getattr(self.wrap_cache, "graph_safe", False):
             return False

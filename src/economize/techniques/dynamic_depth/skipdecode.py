@@ -31,7 +31,7 @@ from ...core.metadata import Family, Saving, TechniqueInfo
 from ...core.technique import register_technique
 from ...errors import ConfigError
 from ...validation import check_choice, check_non_negative, check_positive
-from .base import GENERATION_PHASES, DepthPolicy, DepthTechnique, valid_mask
+from .base import GENERATION_PHASES, STEP_FILL, STEP_RUN, STEP_SKIP, DepthPolicy, DepthTechnique, StepAction, valid_mask
 
 if TYPE_CHECKING:
     from ...arch import ArchAdapter
@@ -99,6 +99,7 @@ class SkipDecodePolicy(DepthPolicy):
         super().__init__(technique.adapter.num_layers, GENERATION_PHASES)
         self.technique = technique
         self.fill_kv = technique.config.fill_kv
+        self._step_budget = self.num_layers
         self.budget: torch.Tensor | None = None  # [B, S] (or [1, S] when batch-uniform) layers run by each token
 
     def begin_pass(self, hidden: torch.Tensor, ctx: LayerContext) -> None:
@@ -109,6 +110,18 @@ class SkipDecodePolicy(DepthPolicy):
             active = active.masked_fill(~valid, 0).max(0, keepdim=True).values
             active = active.masked_fill(~valid.any(0, keepdim=True), self.num_layers)
         self.budget = active
+
+    supports_steps: ClassVar[bool] = True
+
+    def start_step(self, generated: int) -> None:
+        self._step_budget = int(self.technique.config.active_layers(torch.tensor(generated), self.num_layers))
+
+    def plan(self, index: int) -> StepAction:
+        budget = self._step_budget
+        runs = index > self.num_layers - budget if self.technique.config.skip == "bottom" else index <= budget
+        if runs:
+            return STEP_RUN
+        return STEP_FILL if self.fill_kv else STEP_SKIP
 
     def choose(self, index: int, hidden: torch.Tensor, ctx: LayerContext) -> torch.Tensor | None:
         assert self.budget is not None
