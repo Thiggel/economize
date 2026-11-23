@@ -4,8 +4,8 @@ validates, covers every listed technique, renders, and README.md holds the curre
 from __future__ import annotations
 
 import copy
-import re
 import importlib.util
+import re
 import sys
 import types
 from pathlib import Path

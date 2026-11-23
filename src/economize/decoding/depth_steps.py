@@ -190,6 +190,7 @@ class DepthSteps:
             recorded[0].replay()
             return recorded[1]
         device = self.runner.adapter.device
+        assert self._positions is not None
         output = StaticStep._side_stream(lambda _: self._segment_body(key), self._positions)  # the step's own run
         graph = torch.cuda.CUDAGraph()
         static = capture(graph, lambda: self._segment_body(key), device, pool=self.pool)
