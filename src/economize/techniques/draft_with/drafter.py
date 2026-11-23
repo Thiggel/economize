@@ -44,6 +44,12 @@ class DraftWithDrafter(SelfDrafter):
         self._started = False
 
     @property
+    def depth_steps(self) -> DepthSteps | None:
+        """The step engine of the draft steps (built by :meth:`enable_graphs` or the first single-row draft), or
+        ``None`` (no layer policy, a recurrent model, or no single-row draft yet)."""
+        return self._steps
+
+    @property
     def _depth(self) -> bool:
         """Whether the draft path has a layer policy (decisions on the host)."""
         return self.technique.policy is not None
