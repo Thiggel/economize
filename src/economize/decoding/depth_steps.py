@@ -6,8 +6,9 @@ the kernel launches of its decision. :class:`DepthSteps` runs a one-token decode
 policy's step interface instead (:attr:`~economize.runtime.LayerPolicy.supports_steps`):
 
 * the policy plans each layer on the host (``planned``: run, skip, fill the K/V only, or a technique's own action);
-* a layer whose action depends on the token's state gets a *probe* (a router score): the layers planned before it
-  run as one graph that ends with the probe, the host reads the probe's value and the policy decides;
+* a layer whose action depends on the token's state gets a *probe* (a router score, or the scores of a group of
+  layers): the layers planned before it run as one graph that ends with the probe, the host reads the probe's values
+  and the policy decides;
 * an action that emits a signal (CALM's exit confidence) ends its graph the same way;
 * the layers after the last probe or signal and the LM head run as one final graph.
 
@@ -23,9 +24,11 @@ pool and are dropped with its other graphs whenever the static cache is rebuilt.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 import torch
+from torch import nn
 
 from ..errors import ConfigError
 from ..runtime import ExactPass, LayerContext, LayerPolicy, LayerRunner, StepAction, phase
@@ -50,14 +53,18 @@ _Key = tuple[tuple[tuple[int, StepAction], ...], int | None, bool]
 class _LayerOps:
     """:class:`~economize.runtime.StepOps` over the context of one step."""
 
-    def __init__(self, runner: LayerRunner, ctx: LayerContext) -> None:
-        self.adapter, self.ctx = runner.adapter, ctx
+    def __init__(self, runner: LayerRunner, ctx: LayerContext, overrides: Mapping[int, nn.Module]) -> None:
+        self.adapter, self.ctx, self.overrides = runner.adapter, ctx, overrides
+
+    def _layer(self, index: int) -> nn.Module:
+        layer = self.overrides.get(index)
+        return layer if layer is not None else self.adapter.layer(index)
 
     def run(self, index: int, hidden: torch.Tensor) -> torch.Tensor:
-        return self.adapter.call_layer(index, self.adapter.layer(index), hidden, self.ctx)
+        return self.adapter.call_layer(index, self._layer(index), hidden, self.ctx)
 
     def fill(self, index: int, hidden: torch.Tensor) -> None:
-        self.adapter.fill_kv(index, self.adapter.layer(index), hidden, self.ctx)
+        self.adapter.fill_kv(index, self._layer(index), hidden, self.ctx)
 
 
 class DepthSteps:
@@ -67,6 +74,10 @@ class DepthSteps:
         runner: Runs the model's layers (all on one device).
         policy: The decoder's layer policy (``supports_steps``).
         graphs: The decoder's CUDA graphs; ``None`` runs the steps eagerly.
+        overrides: Modules that replace decoder layers (by 1-based index), as in
+            :meth:`~economize.runtime.LayerRunner.run` (a draft view's layer copies).
+        head: Turns the output of the last layer ``[1, 1, d]`` into what a step returns (default: the model's
+            float logits ``[1, 1, V]``); a drafter passes its own head (``[1, V]`` draft logits).
 
     Attributes:
         graphed: Whether the steps are recorded as CUDA graphs (``graphs`` given and the model on a CUDA device;
@@ -74,10 +85,20 @@ class DepthSteps:
         pool: Memory pool of the step graphs (set by the decoder's :class:`~economize.runtime.GraphPool`).
     """
 
-    def __init__(self, runner: LayerRunner, policy: LayerPolicy, graphs: DecodeGraphs | None) -> None:
+    def __init__(
+        self,
+        runner: LayerRunner,
+        policy: LayerPolicy,
+        graphs: DecodeGraphs | None,
+        *,
+        overrides: Mapping[int, nn.Module] | None = None,
+        head: Callable[[torch.Tensor], torch.Tensor] | None = None,
+    ) -> None:
         if not policy.supports_steps:
             raise ConfigError(f"{type(policy).__name__} does not implement the step interface")
         self.runner, self.policy, self.graphs = runner, policy, graphs
+        self.overrides = dict(overrides or {})
+        self.head = head
         self.graphed = graphs is not None and runner.adapter.device.type == "cuda"
         self.num_layers = runner.adapter.num_layers
         self.pool: _POOL_HANDLE | None = None
@@ -112,35 +133,45 @@ class DepthSteps:
     def step(self, gen: Generation) -> Pass:
         """The exact pass over the pending token of the single row of ``gen``."""
         start = gen.starts[0]
-        policy, num_layers = self.policy, self.num_layers
-        counts = [(0, 0, 0)] * (num_layers + 1)
-        with phase(gen.phase):
-            policy.begin_step(start)
-            with gen.cache.external_pass([start]):
-                if self.graphs is not None:
-                    self.graphs._check_state()  # may drop the graphs (reset)
-                self._begin(gen.cache, gen.seq[:, start:start + 1], start)
-                pending: list[tuple[int, StepAction]] = []
-                for index in range(1, num_layers + 1):
-                    action = policy.planned(index)
-                    if action is None:
-                        value = self._segment((tuple(pending), index, False))
-                        pending = []
-                        action = policy.after_probe(index, float(value.item()))
-                    pending.append((index, action))
-                    counts[index] = (1, int(action.runs), int(action.fills_kv and not action.runs))
-                    if action.emits_signal:
-                        signal = self._segment((tuple(pending), None, False))
-                        pending = []
-                        policy.after_op(index, action, float(signal.item()))
-                logits = self._segment((tuple(pending), None, True))
-            policy.end_step(torch.tensor(counts, dtype=torch.long))
+        with phase(gen.phase), gen.cache.external_pass([start]):
+            logits = self._run(gen.cache, gen.seq[:, start:start + 1], start)
         gen.record_exact([1], [start])
         assert self._ctx is not None and self._hidden is not None
         exact = ExactPass(self._hidden, {}, self._ctx)
         return Pass(exact, logits, Draft.empty(1, gen.device), [start], [0], [1], 1)
 
+    def draft(self, cache: KVCache, token: torch.Tensor, position: int) -> torch.Tensor:
+        """A draft step: the output of :attr:`head` for the token ``[1, 1]`` at ``position``, whose K/V the layers
+        it runs write into ``cache`` (the next exact pass overwrites them). Runs in the caller's phase."""
+        return self._run(cache, token, position)
+
     # ---- internals ---------------------------------------------------------------------------------------------
+    def _run(self, cache: KVCache, token: torch.Tensor, position: int) -> torch.Tensor:
+        """One step of the token ``[1, 1]`` at ``position``: plan, probe and run the layers, return the head's
+        output."""
+        policy, num_layers = self.policy, self.num_layers
+        counts = [(0, 0, 0)] * (num_layers + 1)
+        policy.begin_step(position)
+        if self.graphs is not None:
+            self.graphs._check_state()  # may drop the graphs (reset)
+        self._begin(cache, token, position)
+        pending: list[tuple[int, StepAction]] = []
+        for index in range(1, num_layers + 1):
+            action = policy.planned(index)
+            if action is None:
+                value = self._segment((tuple(pending), index, False))
+                pending = []
+                action = policy.after_probe(index, tuple(float(v) for v in value.tolist()))
+            pending.append((index, action))
+            counts[index] = (1, int(action.runs), int(action.fills_kv and not action.runs))
+            if action.emits_signal:
+                signal = self._segment((tuple(pending), None, False))
+                pending = []
+                policy.after_op(index, action, float(signal.item()))
+        output = self._segment((tuple(pending), None, True))
+        policy.end_step(torch.tensor(counts, dtype=torch.long))
+        return output
+
     def _begin(self, cache: KVCache, token: torch.Tensor, position: int) -> None:
         """Embed the step's token and build its context (:attr:`_ctx`, :attr:`_hidden`)."""
         device = self.runner.adapter.device
@@ -203,7 +234,7 @@ class DepthSteps:
         ops, probe, logits = key
         ctx, hidden = self._ctx, self._hidden
         assert ctx is not None and hidden is not None
-        layer_ops = _LayerOps(self.runner, ctx)
+        layer_ops = _LayerOps(self.runner, ctx, self.overrides)
         signal: torch.Tensor | None = None
         x = hidden
         with ctx.cache.writing_at(ctx.slots):
@@ -212,7 +243,7 @@ class DepthSteps:
             if probe is not None:
                 out = self.policy.probe(probe, x)
             elif logits:
-                out = self.runner.logits(x).float()
+                out = self.runner.logits(x).float() if self.head is None else self.head(x)
             else:
                 assert signal is not None, "a segment that ends without probe or logits ends with a signal"
                 out = signal

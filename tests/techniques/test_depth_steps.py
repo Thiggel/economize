@@ -34,9 +34,15 @@ CONFIGS = [
     (CalmConfig(confidence="softmax", threshold=0.3), False),
     (CalmConfig(confidence="classifier", threshold=0.4, decay_temperature=4.0), True),
     (LoRADropConfig(period=2), True),
+    (GateSkipConfig(gate_bias=0.0, gate_init_std=0.5, decision_group=4), False),
+    (GateSkipConfig(gate_bias=0.0, gate_init_std=0.5, decision_group=0), False),
+    (MoDConfig(router_bias=0.0, router_init_std=0.3, decision_group=2), False),
+    (FlexiDepthConfig(router_bias=0.0, decision_group=0), True),
+    (CalmConfig(confidence="softmax", threshold=0.3, min_layer=2, exit_stride=2), False),
 ]
 IDS = ["gateskip", "mod", "flexidepth", "skipdecode-bottom", "skipdecode-top", "calm-state", "calm-softmax",
-       "calm-classifier", "loradrop"]
+       "calm-classifier", "loradrop", "gateskip-group4", "gateskip-group-all", "mod-group2", "flexidepth-group-all",
+       "calm-stride2"]
 MAX_NEW = 24
 EAGER = DecodeConfig(cycle_length=1)
 STEPS = DecodeConfig(cycle_length=1, cuda_graphs=True)
@@ -87,6 +93,21 @@ def test_steps_decode_like_the_eager_policy(cpu_graphs: None, config: object, no
     model = _model(config, noise, "cpu")
     decoder = _compare(model, _prompts("cpu"))
     assert not decoder.depth_steps.graphed
+
+
+@pytest.mark.parametrize("group, probes", [(1, 6), (4, 2), (0, 1)])
+@torch.no_grad()
+def test_decision_groups_read_one_probe_per_group(cpu_graphs: None, monkeypatch: pytest.MonkeyPatch, group: int,
+                                                  probes: int) -> None:
+    model = _model(GateSkipConfig(gate_bias=0.0, gate_init_std=0.5, decision_group=group), False, "cpu")
+    policy = model.techniques["gateskip"].layer_policy()
+    assert [len(members) for members in policy.groups().values()] == {1: [1] * 6, 4: [4, 2], 0: [6]}[group]
+    calls: list[int] = []
+    after_probe = type(policy).after_probe
+    monkeypatch.setattr(type(policy), "after_probe",
+                        lambda self, index, values: calls.append(index) or after_probe(self, index, values))
+    model.decode(_prompts("cpu")[0], 4, decoding=STEPS)
+    assert len(calls) == 3 * probes  # the first token comes from the prefill, the other three from steps
 
 
 @torch.no_grad()

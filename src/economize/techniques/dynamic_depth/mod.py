@@ -31,9 +31,9 @@ from ...errors import ConfigError
 from ...validation import check_choice, check_number, check_unit_interval
 from .base import (
     DepthTechnique,
-    LayeredDepthConfig,
     RoutedDepthPolicy,
     ScalarScore,
+    ScoredDepthConfig,
     layer_modules,
     module_at,
     runtime_supports_routed_kv,
@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class MoDConfig(LayeredDepthConfig):
+class MoDConfig(ScoredDepthConfig):
     """Mixture-of-Depths.
 
     Attributes:
@@ -111,7 +111,8 @@ class MoDPolicy(RoutedDepthPolicy):
     the top-k routing of each sequence and collects the auxiliary losses in :attr:`aux_losses`."""
 
     def __init__(self, technique: MoDTechnique) -> None:
-        super().__init__(technique.adapter.num_layers, technique.config.phases)
+        super().__init__(technique.adapter.num_layers, technique.config.phases,
+                         decision_group=technique.config.decision_group)
         self.technique = technique
         self.fill_kv = technique.config.kv == "fill"
         self.aux_losses: list[torch.Tensor] = []

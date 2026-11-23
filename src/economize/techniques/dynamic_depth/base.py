@@ -36,7 +36,7 @@ import torch
 from torch import nn
 
 from ...core.config import TechniqueConfig
-from ...core.technique import Capability, Technique
+from ...core.technique import Capability, DraftCopies, Technique
 from ...errors import ConfigError
 from ...modules.norm import rms_normalize
 from ...runtime import current_phase
@@ -51,7 +51,7 @@ from ...runtime.policy import (
     StepAction,
     StepOps,
 )
-from ...validation import check_choice, check_layers
+from ...validation import check_choice, check_layers, check_number
 
 if TYPE_CHECKING:
     from ...arch import ArchAdapter
@@ -70,6 +70,7 @@ __all__ = [
     "LayeredDepthConfig",
     "RoutedDepthPolicy",
     "ScalarScore",
+    "ScoredDepthConfig",
     "ScoredDepthPolicy",
     "StepAction",
     "StepOps",
@@ -309,6 +310,27 @@ class LayeredDepthConfig(TechniqueConfig):
         return ALL_PHASES if self.skip_prompt else GENERATION_PHASES
 
 
+@dataclass(frozen=True)
+class ScoredDepthConfig(LayeredDepthConfig):
+    """Fields shared by the techniques that score tokens per layer with a learned module (GateSkip, MoD,
+    FlexiDepth).
+
+    Attributes:
+        decision_group: Number of consecutive scored layers decided together at inference from the input of the
+            group's first layer, each by its own module (``1``: every layer decides on its own input; ``0``: all
+            scored layers at the first one). A decode step then reads one probe per group (see
+            :class:`ScoredDepthPolicy`).
+    """
+
+    decision_group: int = 1
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        check_number("decision_group", self.decision_group, low=0)
+        if self.decision_group != int(self.decision_group):
+            raise ConfigError("decision_group must be an integer")
+
+
 def second_half(num_layers: int) -> tuple[int, ...]:
     """Layers ``L // 2 + 1 .. L``."""
     return tuple(range(num_layers // 2 + 1, num_layers + 1))
@@ -453,6 +475,14 @@ class DepthPolicy(LayerPolicy):
             return positions
         return positions - start.to(hidden.device)[:, None]
 
+    def begin_generation(self, prompt_ends: torch.Tensor) -> None:
+        """Start a generation whose prompts end at ``prompt_ends`` ``[B]`` without a prefill pass through the policy
+        (a draft path, which sees the draft steps only): the schedule counts generated positions from these ends."""
+        self.reset()
+        self._prompt_end = prompt_ends.to(torch.long)
+        self._row_ids = torch.arange(len(prompt_ends), device=prompt_ends.device)
+        self.meter.start_rows(len(prompt_ends))
+
     def reset(self) -> None:
         """Fresh counts and schedule state. Buffers that recorded step graphs read stay allocated."""
         self.meter = DepthMeter(self.num_layers)
@@ -563,11 +593,33 @@ class ScoredDepthPolicy(DepthPolicy):
     At inference :meth:`choose` scores the layer input and :meth:`transform` combines with the stored score; in
     training mode every token runs, and :meth:`transform` scores the input, selects with :meth:`train_select` and
     combines, which keeps the computation differentiable.
+
+    ``decision_group`` (inference only) decides consecutive scored layers together: the scored layers are split
+    into groups of that many (``0``: one group of all of them), and at the first layer of a group every layer of the
+    group is scored by its own module on the group's input, so a decode step reads one probe per group instead of
+    one per layer. A layer that runs still combines with the score of its own input.
     """
 
-    def __init__(self, num_layers: int, phases: Iterable[str | None] = ALL_PHASES) -> None:
+    def __init__(self, num_layers: int, phases: Iterable[str | None] = ALL_PHASES, *,
+                 decision_group: int = 1) -> None:
         super().__init__(num_layers, phases)
+        if decision_group < 0:
+            raise ConfigError("decision_group must be >= 0")
         self.scores: dict[int, torch.Tensor] = {}
+        self.decision_group = decision_group
+        self._groups: dict[int, tuple[int, ...]] | None = None  # leader -> its group (lazy: scored() needs modules)
+        self._group_masks: dict[int, torch.Tensor] = {}  # eager: masks decided at the group's first layer
+        self._step_plan: dict[int, StepAction] = {}  # steps: actions decided at the group's first layer
+
+    def groups(self) -> dict[int, tuple[int, ...]]:
+        """The decision groups, keyed by their first layer (one group per scored layer when ``decision_group`` is
+        ``1``)."""
+        if self._groups is None:
+            scored = [i for i in range(1, self.num_layers + 1) if self.scored(i)]
+            size = self.decision_group or max(1, len(scored))
+            chunks = [tuple(scored[i:i + size]) for i in range(0, len(scored), size)]
+            self._groups = {chunk[0]: chunk for chunk in chunks}
+        return self._groups
 
     @abstractmethod
     def score(self, index: int, x: torch.Tensor) -> torch.Tensor | None:
@@ -595,20 +647,32 @@ class ScoredDepthPolicy(DepthPolicy):
 
     def begin_pass(self, hidden: torch.Tensor, ctx: LayerContext) -> None:
         self.scores = {}
+        self._group_masks = {}
 
-    # ---- steps: probe the score, decide on the host, record the chosen branch -------------------------------
+    # ---- steps: probe the scores of a group, decide on the host, record the chosen branches -----------------
+    def start_step(self, generated: int) -> None:
+        self._step_plan = {}
+
     def plan(self, index: int) -> StepAction | None:
-        return None if self.scored(index) else STEP_RUN
+        if not self.scored(index):
+            return STEP_RUN
+        if self.decision_group == 1 or index in self.groups():
+            return None
+        return self._step_plan.pop(index)
 
     def probe(self, index: int, hidden: torch.Tensor) -> torch.Tensor:
-        score = self.score(index, hidden)
-        assert score is not None
-        return score.float().reshape(-1)
+        members = self.groups()[index] if self.decision_group != 1 else (index,)
+        scores = [self.score(member, hidden) for member in members]
+        assert all(score is not None for score in scores)
+        return torch.cat([score.float().reshape(-1) for score in scores])
 
-    def after_probe(self, index: int, value: float) -> StepAction:
-        score = torch.tensor([[value]], dtype=torch.float32)
-        runs = bool(self.select(index, score, torch.ones(1, 1, dtype=torch.bool))[0, 0])
-        return _SCORED_RUN if runs else (_SCORED_FILL if self.fill_kv else _SCORED_SKIP)
+    def after_probe(self, index: int, values: tuple[float, ...]) -> StepAction:
+        members = self.groups()[index] if self.decision_group != 1 else (index,)
+        for member, value in zip(members, values, strict=True):
+            score = torch.tensor([[value]], dtype=torch.float32)
+            runs = bool(self.select(member, score, torch.ones(1, 1, dtype=torch.bool))[0, 0])
+            self._step_plan[member] = _SCORED_RUN if runs else (_SCORED_FILL if self.fill_kv else _SCORED_SKIP)
+        return self._step_plan.pop(index)
 
     def step_op(self, index: int, action: StepAction, hidden: torch.Tensor,
                 ops: StepOps) -> tuple[torch.Tensor, torch.Tensor | None]:
@@ -631,7 +695,17 @@ class ScoredDepthPolicy(DepthPolicy):
         if score is None:
             return None
         self.scores[index] = score
-        return self.select(index, score, valid_mask(hidden, ctx))
+        valid = valid_mask(hidden, ctx)
+        if self.decision_group == 1:
+            return self.select(index, score, valid)
+        group = self.groups().get(index)
+        if group is not None:  # the group's first layer decides every layer of the group from its input
+            for member in group:
+                member_score = score if member == index else self.score(member, hidden)
+                assert member_score is not None
+                self._group_masks[member] = self.select(member, member_score, valid)
+        mask = self._group_masks.pop(index, None)
+        return self.select(index, score, valid) if mask is None else mask
 
     def transform(self, index: int, x: torch.Tensor, out: torch.Tensor, ran: torch.Tensor | None,
                   ctx: LayerContext) -> torch.Tensor | None:
@@ -680,6 +754,9 @@ class DepthTechnique(Technique, ABC):
     #: One-token decode steps run under CUDA graphs through the step engine when the policy class has
     #: ``supports_steps`` (every built-in policy); other passes with a policy run eagerly.
     graph_safe: ClassVar[bool] = True
+    #: On a draft path (:class:`~economize.techniques.draft_with.DraftWith`) the technique acts through
+    #: :meth:`draft_policy` on the base layers; its own modules (routers, heads, LoRA maps) are not layer modules.
+    draft_copies: ClassVar[DraftCopies | None] = DraftCopies.NONE
 
     def __init__(self, config: TechniqueConfig, adapter: ArchAdapter) -> None:
         super().__init__(config, adapter)
@@ -698,6 +775,15 @@ class DepthTechnique(Technique, ABC):
         assert isinstance(policy, DepthPolicy)
         policy.reset()
         self.last_policy = policy
+
+    def draft_policy(self) -> DepthPolicy:
+        """A policy that acts in the ``"draft"`` phase only: the technique as a self-speculative drafter, which the
+        unchanged model verifies. Its drafter starts each generation with :meth:`DepthPolicy.begin_generation`;
+        :meth:`depth_stats` reads its counts (phase ``"draft"``)."""
+        policy = self.make_policy()
+        policy.phases = ("draft",)
+        self.last_policy = policy
+        return policy
 
     def depth_stats(self, row: int | None = None) -> dict[str, object]:
         """Layer applications of the last generation, of the whole batch or of row ``row`` (see

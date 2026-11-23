@@ -124,9 +124,10 @@ class LayerPolicy(ABC):
     # ---- the step interface ------------------------------------------------------------------------------------
     # One-token decode steps of a single row can leave skipped layers out of the computation under CUDA graphs
     # (:class:`economize.decoding.DepthSteps`). Per step the engine calls :meth:`begin_step`, then per layer
-    # :meth:`planned`; ``None`` makes it record :meth:`probe` in a graph, read the scalar on the host and ask
-    # :meth:`after_probe`. Every layer's action is recorded with :meth:`step_op`; an action with ``emits_signal``
-    # ends the graph and the host passes the signal to :meth:`after_op`. :meth:`end_step` receives the step's counts.
+    # :meth:`planned`; ``None`` makes it record :meth:`probe` in a graph, read its values on the host (one
+    # synchronization, however many values the probe returns) and ask :meth:`after_probe`. Every layer's action is
+    # recorded with :meth:`step_op`; an action with ``emits_signal`` ends the graph and the host passes the signal
+    # to :meth:`after_op`. :meth:`end_step` receives the step's counts.
     # Host-side decisions use Python numbers, so nothing but the probes and signals synchronizes. A policy that
     # implements the interface sets ``supports_steps``; its steps must give what :meth:`decide` and :meth:`after`
     # give for a pass of one token.
@@ -145,12 +146,13 @@ class LayerPolicy(ABC):
         return STEP_RUN
 
     def probe(self, index: int, hidden: torch.Tensor) -> torch.Tensor:
-        """A one-element float tensor computed from the input ``hidden`` of layer ``index`` (recorded in a graph)
-        that :meth:`after_probe` decides on."""
+        """A 1-D float tensor computed from the input ``hidden`` of layer ``index`` (recorded in a graph) that
+        :meth:`after_probe` decides on. It may hold several values (e.g. the scores that decide a group of layers),
+        which the host reads with one synchronization."""
         raise NotImplementedError(f"{type(self).__name__} plans every layer without a probe")
 
-    def after_probe(self, index: int, value: float) -> StepAction:
-        """The action at layer ``index`` given the value of :meth:`probe`."""
+    def after_probe(self, index: int, values: tuple[float, ...]) -> StepAction:
+        """The action at layer ``index`` given the values of :meth:`probe`."""
         raise NotImplementedError(f"{type(self).__name__} plans every layer without a probe")
 
     def step_op(self, index: int, action: StepAction, hidden: torch.Tensor,
