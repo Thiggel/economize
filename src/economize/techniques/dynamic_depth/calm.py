@@ -2,8 +2,8 @@
 
 After every ``exit_stride``-th layer ``l`` from ``min_layer`` to ``L - 1`` the tokens of a generation step that
 have not exited yet compute a confidence ``c_l``; a token with ``c_l > threshold(t)`` exits, keeps its hidden state
-for the remaining layers, and is read out by the model's own final norm and head. Its K/V at the skipped layers are computed from the
-exit state, which is the paper's state propagation. Three confidence measures are registered in
+for the remaining layers, and is read out by the model's own final norm and head. Its K/V at the skipped layers
+are computed from the exit state, which is the paper's state propagation. Three confidence measures are registered in
 :data:`CONFIDENCE_MEASURES`:
 
 * ``softmax``: the gap between the two largest probabilities of the head's distribution at layer ``l``;
