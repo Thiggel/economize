@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
+from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 import torch
 from torch import nn
 
+from ...core.config import TechniqueConfig
 from ...core.metadata import Family, Saving, TechniqueInfo
 from ...core.technique import AttachContext, Capability, Technique, register_technique
 from ...errors import ConfigError, IncompatibleTechniquesError
@@ -62,6 +65,13 @@ class JumpTechnique(Float32Parameters, Technique):
         self.exit_layer = config.exit_layer_of(adapter.num_layers)
         self.source_layers = config.source_layers
         span = range(self.target_layer + 1, self.exit_layer + 1)
+        # the decoder layers the configuration names, followed through depth pruning (rebuild_config); a plain dict,
+        # so they are neither submodules nor part of the state
+        self._named_layers: dict[int, nn.Module] = {
+            layer: adapter.layer(layer)
+            for layer in sorted({*self.source_layers, self.target_layer, *span}) if layer >= 1
+        }
+        self._trained = False  # whether saved weights were loaded (they belong to the layers the configuration named)
 
         self.predictor: Predictor = PREDICTORS.get(config.predictor)(d, config)
         mixer = config.resolved_mixer
@@ -86,6 +96,59 @@ class JumpTechnique(Float32Parameters, Technique):
                 str(layer): trainable_copy(adapter.layer(layer), dtype).to(adapter.layer_device(layer))
                 for layer in span
             })
+
+    # ---- building again on a depth-pruned model -------------------------------------------------------------------
+    def load_state_dict(
+        self, state_dict: Mapping[str, torch.Tensor], strict: bool = True, assign: bool = False
+    ) -> torch.nn.modules.module._IncompatibleKeys:
+        result = super().load_state_dict(state_dict, strict=strict, assign=assign)
+        self._trained = True
+        return result
+
+    def _renumbering(self) -> dict[int, int]:
+        """The current index of every layer the configuration names (``0``, the embedding, stays ``0``), for a drafter
+        with saved weights. An untrained drafter is built on the pruned model from the requested indices.
+
+        Raises:
+            ConfigError: A weight transform removed one of them.
+        """
+        if not self._trained:
+            return {index: index for index in (0, *self._named_layers)}
+        current = {id(layer): index for index, layer in enumerate(self.adapter.layers, start=1)}
+        removed = sorted(index for index, layer in self._named_layers.items() if id(layer) not in current)
+        if removed:
+            raise ConfigError(
+                f"a weight transform removed layers {removed}, which the jump path (m={self.target_layer}, "
+                f"sources {list(self.source_layers)}, layers m+1..r up to r={self.exit_layer}) uses; keep them, "
+                "e.g. with depth_prune's keep_first/keep_last or explicit layers"
+            )
+        return {0: 0, **{index: current[id(layer)] for index, layer in self._named_layers.items()}}
+
+    def rebuild_config(self, requested: TechniqueConfig) -> TechniqueConfig:
+        """For a drafter with saved weights, the configuration with its layer indices renumbered after depth pruning
+        removed layers (the trained jump path keeps its layers; the predictor's target ``m`` then follows fewer layers
+        below it). An untrained drafter keeps the requested indices, which then address the pruned model."""
+        if not isinstance(requested, JumpConfig):
+            return requested
+        new = self._renumbering()
+        if all(old == index for old, index in new.items()):
+            return requested
+        return replace(
+            requested,
+            target_layer=new[requested.target_layer],
+            source_layer=new[requested.source_layer],
+            exit_layer=None if requested.exit_layer is None else new[requested.exit_layer],
+            extra_source_layers=tuple(new[layer] for layer in requested.extra_source_layers),
+        )
+
+    def rebuild_state(self, state: Mapping[str, torch.Tensor]) -> Mapping[str, torch.Tensor]:
+        """``state`` with the per-layer parts (``blocks.<i>``, ``lora.layers.<i>``) renamed like :meth:`rebuild_config`
+        renumbers the layers."""
+        new = self._renumbering()
+        if all(old == index for old, index in new.items()):
+            return state
+        pattern = re.compile(r"^(blocks|lora\.layers)\.(\d+)\.")
+        return {pattern.sub(lambda m: f"{m[1]}.{new[int(m[2])]}.", key): value for key, value in state.items()}
 
     # ---- the pieces of a draft step ----------------------------------------------------------------------------
     @property

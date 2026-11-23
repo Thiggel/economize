@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import cast
 
 import torch
@@ -22,6 +24,7 @@ __all__ = [
     "Float32Parameters",
     "InModelDtype",
     "copy_dtype_of",
+    "reusing_copies",
     "trainable_copy",
 ]
 
@@ -109,6 +112,49 @@ def _dense_linears(layer: nn.Module) -> dict[int, nn.Module]:
     return dense
 
 
+#: Copies made earlier that :func:`trainable_copy` hands out again, by ``id`` of the layer they copy (the layer is
+#: kept alongside, so that a recycled ``id`` never matches). Set by :func:`reusing_copies`.
+_EARLIER_COPIES: ContextVar[dict[int, tuple[nn.Module, nn.Module]] | None] = ContextVar("earlier_copies", default=None)
+
+
+@contextmanager
+def reusing_copies(copies: Mapping[nn.Module, nn.Module]) -> Iterator[None]:
+    """Within the block, :func:`trainable_copy` of a layer in ``copies`` returns the copy given for it (once) instead
+    of copying the layer again.
+
+    The recipe builds a technique a second time after a weight transform rewrote the base model (see
+    :func:`~economize.core.recipe.attach_techniques`). The second build takes over the first build's copies, which
+    were made from the untransformed layers: copies of quantized, sparse or low-rank layers would otherwise be
+    dequantized, densified, or keep the factorization (or fail), while the trained state they load is that of a copy
+    of the original layer. A transform that changes a layer's shapes changes the first build's copies the same way
+    (:meth:`~economize.core.technique.Technique.layer_copies`). A copy taken over keeps its weights; its attention
+    modules are renumbered like the layer's own (depth pruning renumbers the layers it keeps).
+    """
+    token = _EARLIER_COPIES.set({id(layer): (layer, block) for layer, block in copies.items()})
+    try:
+        yield
+    finally:
+        _EARLIER_COPIES.reset(token)
+
+
+def _earlier_copy(layer: nn.Module) -> nn.Module | None:
+    copies = _EARLIER_COPIES.get()
+    entry = copies.get(id(layer)) if copies else None
+    if entry is None or entry[0] is not layer:
+        return None
+    del copies[id(layer)]  # type: ignore[union-attr]  # ``copies`` is not None when ``entry`` was found
+    return entry[1]
+
+
+def _renumber_like(block: nn.Module, layer: nn.Module) -> None:
+    """Give the attention modules of ``block`` the ``layer_idx`` of the modules of the same name in ``layer``."""
+    own = dict(layer.named_modules())
+    for name, module in block.named_modules():
+        index = getattr(own.get(name), "layer_idx", None)
+        if isinstance(index, int) and isinstance(getattr(module, "layer_idx", None), int):
+            module.layer_idx = index
+
+
 def trainable_copy(layer: nn.Module, dtype: torch.dtype | None = torch.float32,
                    layer_idx: int | None = None) -> nn.Module:
     """A copy of a decoder layer in ``dtype`` (``None``: the layer's own) with trainable dense weights (the layers
@@ -120,11 +166,15 @@ def trainable_copy(layer: nn.Module, dtype: torch.dtype | None = torch.float32,
     Weights held as quantized tensor subclasses (torchao, or any tensor with a working ``dequantize()``) are copied
     in dequantized form, and quantized linear modules known to :data:`DENSE_LINEARS` (bitsandbytes 4-bit and 8-bit)
     become float32 ``nn.Linear`` modules; the quantized originals are never copied. Stand-in modules (e.g. low-rank
-    factorizations) are copied as they are.
+    factorizations) are copied as they are. Inside :func:`reusing_copies` a copy made earlier is returned instead.
 
     Raises:
         ConfigError: A weight is neither a float tensor nor dequantizable.
     """
+    earlier = _earlier_copy(layer)
+    if earlier is not None:
+        _renumber_like(earlier, layer)
+        return _finish_copy(earlier, dtype, layer_idx)
     memo: dict[int, object] = dict(_dense_linears(layer))  # copy.deepcopy's memo: originals by id -> stand-ins
     replaced = {id(p) for module in layer.modules() if id(module) in memo for p in module.parameters()}
     for name, param in layer.named_parameters():
@@ -144,6 +194,10 @@ def trainable_copy(layer: nn.Module, dtype: torch.dtype | None = torch.float32,
         memo[id(param)] = nn.Parameter(dense)
     block = copy.deepcopy(layer, memo)
     copy_tensor_parallel_forwards(layer, block)
+    return _finish_copy(block, dtype, layer_idx)
+
+
+def _finish_copy(block: nn.Module, dtype: torch.dtype | None, layer_idx: int | None) -> nn.Module:
     if layer_idx is not None:
         for module in block.modules():
             if isinstance(getattr(module, "layer_idx", None), int):

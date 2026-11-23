@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, TypeVar
 
+import torch
 from torch import nn
 
 from ..errors import ConfigError, IncompatibleTechniquesError
@@ -256,6 +257,12 @@ class Technique(nn.Module):
         q/k/v biases, which a compensating width prune would switch on). Default: the requested configuration.
         """
         return requested
+
+    def rebuild_state(self, state: Mapping[str, torch.Tensor]) -> Mapping[str, torch.Tensor]:
+        """This technique's ``state``, as the technique built again from :meth:`rebuild_config` loads it. A technique
+        whose configuration addresses layers by index renames here what it keeps per layer when depth pruning
+        renumbered the layers. Default: ``state`` unchanged."""
+        return state
 
     def plain_save_issue(self) -> str | None:
         """Why the base model, once this technique attached, no longer survives ``transformers``' plain
