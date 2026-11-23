@@ -9,6 +9,7 @@ from .dtype import (
     Float32Parameters,
     InModelDtype,
     copy_dtype_of,
+    reusing_copies,
     trainable_copy,
 )
 from .kv_cache import DraftKVCache
@@ -34,6 +35,7 @@ __all__ = [
     "SwiGLU",
     "apply_rotary",
     "copy_dtype_of",
+    "reusing_copies",
     "rms_normalize",
     "rope_frequencies",
     "rotary_tables",
