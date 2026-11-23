@@ -110,6 +110,8 @@ def chunked_prefill(gen: Generation, chunk: int) -> Pass:
 
 def chain_pass(gen: Generation, draft: Draft) -> Pass:
     """The right-padded pass over every row's pending tokens followed by its chain of drafts."""
+    if gen.depth_steps is not None and gen.depth_steps.applies(gen, draft):  # a dynamic-depth decode step
+        return gen.depth_steps.step(gen)
     starts = list(gen.starts)
     pending = [end - start for end, start in zip(gen.ends, starts)]
     widths = [n + k for n, k in zip(pending, draft.lengths)]
@@ -123,7 +125,7 @@ def chain_pass(gen: Generation, draft: Draft) -> Pass:
     tokens = gen.seq.gather(1, index)
     last = device_tensor([n - 1 for n in pending], gen.device)
     picks = (last[:, None] + torch.arange(draft.width + 1, device=gen.device)).clamp(max=width - 1)
-    if gen.graphs is not None:  # one graph per (batch size, width): the mask is always given
+    if gen.graphs is not None and gen.layer_policy is None:  # one graph per (batch size, width): the mask is given
         if valid is None:
             valid = torch.ones_like(positions, dtype=torch.bool)
         exact, logits = gen.graphs.exact(tokens, positions, valid, picks, cast("list[int | None]", starts))  # read only
@@ -164,7 +166,7 @@ def tree_pass(gen: Generation, draft: Draft) -> Pass:
     root_parent = torch.full((batch, 1), -1, dtype=torch.long, device=gen.device)
     parents = torch.cat([root_parent, draft.parents.to(gen.device) + 1], 1)
     valid = torch.arange(width, device=gen.device) < device_tensor(draft.lengths, gen.device)[:, None] + 1
-    if gen.graphs is not None:  # one graph per (batch size, tree width)
+    if gen.graphs is not None and gen.layer_policy is None:  # one graph per (batch size, tree width)
         exact, logits = gen.graphs.tree(tokens, parents, starts_t, valid, cast("list[int | None]", starts))  # read only
     else:
         tree = TreeLayout.build(parents, starts_t, valid, trash_slot=gen.cache.trash_slot)

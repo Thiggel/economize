@@ -99,6 +99,9 @@ class GateSkipPolicy(ScoredDepthPolicy):
     def score(self, index: int, x: torch.Tensor) -> torch.Tensor | None:
         return self.technique.gate(index, x)
 
+    def scored(self, index: int) -> bool:
+        return module_at(self.technique.gates, index) is not None
+
     def select(self, index: int, score: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
         config = self.technique.config
         if config.rule == "budget":

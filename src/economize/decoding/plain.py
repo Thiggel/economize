@@ -37,7 +37,8 @@ def run_plain(gen: Generation) -> list[DecodeResult]:
         picked = []
         # every pass of the window holds one token per row: its inputs are built on the device
         position = device_tensor(gen.ends, gen.device)[:, None]  # where the next committed token goes
-        if gen.graphs is not None:
+        graphed = gen.graphs is not None and gen.layer_policy is None  # else chain_pass (DepthSteps or eager)
+        if graphed:
             ones = torch.ones_like(position, dtype=torch.bool)
             zeros = torch.zeros_like(position)
         for i in range(steps):
@@ -48,7 +49,7 @@ def run_plain(gen: Generation) -> list[DecodeResult]:
             gen.ends = [end + 1 for end in gen.ends]
             gen.starts = [end - 1 for end in gen.ends]
             if i + 1 < steps or launch_last:
-                if gen.graphs is None:
+                if not graphed:
                     current = chain_pass(gen, Draft.empty(len(gen.rows), gen.device))
                 else:
                     current = single_token_pass(gen, next_t, position, ones, zeros)

@@ -97,6 +97,7 @@ class Generation:
         self.snapshot: RecurrentSnapshot | None = None
         self.prefilled = False  # whether the layer policy has seen this generation's rows (set by the prefill)
         self.graphs = decoder.graphs
+        self.depth_steps = decoder.depth_steps
         ring = window_ring(runner, self.config, max(n_cycle, span)) if self.config.window_cache else None
         if ring is not None and ring.buffer_slots >= self.capacity + 1:
             ring = None  # the prompt and its continuation fit in the window: a ring would not save memory

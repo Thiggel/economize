@@ -186,6 +186,9 @@ class FlexiDepthPolicy(RoutedDepthPolicy):
     def score(self, index: int, x: torch.Tensor) -> torch.Tensor | None:
         return self.technique.score(index, x)
 
+    def scored(self, index: int) -> bool:
+        return module_at(self.technique.routers, index) is not None
+
     def select(self, index: int, score: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
         return score > self.technique.config.threshold
 

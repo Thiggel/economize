@@ -42,7 +42,18 @@ from ...core.technique import register_technique
 from ...errors import ConfigError
 from ...registry import Registry
 from ...validation import check_number, check_positive, check_registered, check_unit_interval
-from .base import GENERATION_PHASES, DepthPolicy, DepthTechnique, ScalarScore, valid_mask
+from .base import (
+    GENERATION_PHASES,
+    STEP_FILL,
+    STEP_RUN,
+    STEP_SKIP,
+    DepthPolicy,
+    DepthTechnique,
+    ScalarScore,
+    StepAction,
+    StepOps,
+    valid_mask,
+)
 
 if TYPE_CHECKING:
     from ...arch import ArchAdapter
@@ -189,6 +200,10 @@ class ClassifierConfidence(ConfidenceMeasure):
         return self.technique.classifier(out).to(out.device)
 
 
+#: Step action of a layer after which the token may exit: run it and emit the confidence.
+_MEASURE = StepAction("measure", runs=True, emits_signal=True)
+
+
 class CalmPolicy(DepthPolicy):
     """Early exit per token with K/V computed from the exit state (see the module docstring)."""
 
@@ -198,6 +213,34 @@ class CalmPolicy(DepthPolicy):
         self.measure = technique.measure
         self.exited: torch.Tensor | None = None
         self._threshold: torch.Tensor | None = None
+        self._step_threshold = 0.0
+        self._step_exited = False
+
+    # ---- steps: one confidence read per measured layer; after the exit every layer only fills its K/V --------
+    supports_steps: ClassVar[bool] = True
+
+    def start_step(self, generated: int) -> None:
+        self._step_threshold = float(self.technique.config.threshold_at(torch.tensor([generated]))[0])
+        self._step_exited = False
+
+    def plan(self, index: int) -> StepAction:
+        if self._step_exited:
+            return STEP_FILL if self.fill_kv else STEP_SKIP
+        return _MEASURE if self.technique.config.min_layer <= index < self.num_layers else STEP_RUN
+
+    def step_op(self, index: int, action: StepAction, hidden: torch.Tensor,
+                ops: StepOps) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if action is not _MEASURE:
+            return super().step_op(index, action, hidden, ops)
+        out = ops.run(index, hidden)
+        return out, self.measure(index, hidden, out).float().reshape(-1)
+
+    def after_op(self, index: int, action: StepAction, signal: float) -> None:
+        if self.measure.head_calls:
+            self.meter.add("confidence_head_tokens", 1)
+        if signal > self._step_threshold:
+            self._step_exited = True
+            self.meter.add("exits", 1)
 
     def begin_pass(self, hidden: torch.Tensor, ctx: LayerContext) -> None:
         self.exited = torch.zeros(hidden.shape[:2], dtype=torch.bool, device=hidden.device)
