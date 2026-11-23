@@ -85,6 +85,7 @@ plugins:
 hooks:
   - docs/hooks/techniques.py
   - docs/hooks/reproductions.py
+  - docs/hooks/method_status.py
   - docs/hooks/citations.py
 
 nav:

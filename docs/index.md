@@ -38,6 +38,12 @@ loop or with `transformers.Trainer`, and export to vLLM and SGLang.
 | [Extending economize](extending.md) | Adding techniques, model families, verifiers and backends |
 | [API reference](api/economize.md) | The public classes and functions |
 
+## Reproduction status
+
+Every method economize implements, the result we measured against the number its paper reports, and whether the result reproduces. Partial means the result lies outside a reasonable range of the paper's, with the reason next to the verdict. [Reproductions](reproductions.md) holds each study.
+
+<!-- method-status -->
+
 ## Citation
 
 If you use economize in your research, please cite it as described on [Citation](citation.md).

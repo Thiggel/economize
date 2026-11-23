@@ -1,0 +1,383 @@
+# The reproduction status of every method in economize, rendered on docs/index.md and docs/reproductions.md by
+# docs/hooks/method_status.py and copied into README.md (`python docs/hooks/method_status.py --write-readme`).
+#
+# One entry per method (a registered technique can hold several methods, e.g. quant = RTN, GPTQ, AWQ, ...). Every
+# listed technique must appear at least once. Fields:
+#   method     the name shown in the table
+#   technique  the registered economize technique that implements it
+#   paper      arXiv id ("2306.00978") or URL of the paper (or repository) that introduced the method
+#   status     reproduced | partial | not-reproduced | not-compared
+#   result     economize vs paper on the compared setting ("ours vs paper"); required unless not-compared
+#   studies    ids in docs/data/reproductions.yaml that hold the full numbers (optional)
+#   note       one short sentence: what differs, or why no comparison exists yet
+#
+# Verdicts: "reproduced" means within the seed spread or the stated tolerance of every compared paper number (or
+# better than the paper where the gap is explained), "partial" means some numbers match and others fall outside it.
+schema: 1
+methods:
+  # Drafting (lossless speculative decoding)
+  - method: EAGLE-3 (released drafter)
+    technique: eagle3
+    paper: "2503.01840"
+    status: partial
+    result: 2.82× mean speedup, τ 3.73 vs 4.44×, τ 6.1-6.7 (Llama-3.1-8B-Instruct, 5 benchmarks)
+    studies: [eagle3-llama-3-1-8b]
+    note: economize drafts EAGLE-3 as a chain of 5; the paper's number uses a dynamic draft tree.
+  - method: EAGLE-3 (Red Hat speculators drafter)
+    technique: eagle3
+    paper: https://huggingface.co/RedHatAI/Llama-3.1-8B-Instruct-speculator.eagle3
+    status: reproduced
+    result: τ 3.05 / 2.91 / 2.62 vs 3.02 / 2.83 / 2.50 (HumanEval / math / summarization, chain of 3)
+    studies: [eagle3-speculators-llama-3-1-8b]
+  - method: EAGLE-1 / EAGLE-2
+    technique: eagle
+    paper: "2406.16858"
+    status: not-compared
+    note: No study against the papers' settings yet.
+  - method: HASS
+    technique: eagle
+    paper: "2408.15766"
+    status: not-compared
+    note: Needs drafter training at the paper's scale.
+  - method: Medusa-1
+    technique: medusa
+    paper: "2401.10774"
+    status: partial
+    result: MAT 2.30 vs 2.31, speedup 1.51× vs 1.71× (Vicuna-7B, Spec-Bench)
+    studies: [medusa-vicuna-7b]
+    note: Acceptance matches; the leaderboard speedup was measured on a different A100 software stack.
+  - method: Hydra
+    technique: hydra
+    paper: "2402.05109"
+    status: not-compared
+    note: No study against the paper's setting yet.
+  - method: ReDrafter
+    technique: redrafter
+    paper: "2403.09919"
+    status: not-compared
+    note: No study against the paper's setting yet.
+  - method: DFlash
+    technique: dflash
+    paper: "2602.06036"
+    status: not-compared
+    note: No study against the paper's setting yet.
+  - method: PARD
+    technique: pard
+    paper: "2504.18583"
+    status: not-compared
+    note: No study against the paper's setting yet.
+  - method: Draft model (speculative sampling)
+    technique: draft_model
+    paper: "2211.17192"
+    status: reproduced
+    result: speedup 1.58× vs 1.52×, MAT 2.48 vs 2.28 (Vicuna-7B with vicuna-68m, Spec-Bench)
+    studies: [draft-model-vicuna-7b]
+    note: economize drafts a fixed 5 tokens where the reference adapts the count, hence the higher MAT.
+  - method: Draft model on another device
+    technique: placed_draft_model
+    paper: "2211.17192"
+    status: not-compared
+    note: Same numerics as the draft model; no paper number for the multi-GPU placement.
+  - method: Gemma 4 assistant
+    technique: gemma4_assistant
+    paper: https://ai.google.dev/gemma/docs/mtp/mtp
+    status: not-compared
+    note: No published acceptance numbers to compare with.
+  - method: Vendor MTP heads (DeepSeek-V3, GLM-4.5, MiMo, Qwen3.5)
+    technique: vendor_mtp
+    paper: "2412.19437"
+    status: not-compared
+    note: Not yet run at the scale of the published models.
+  - method: Prompt lookup
+    technique: lookup
+    paper: https://github.com/apoorvumang/prompt-lookup-decoding
+    status: reproduced
+    result: MAT 1.74 vs 1.73, speedup 1.50× (Vicuna-7B, Spec-Bench)
+    studies: [lookup-vicuna-7b]
+  - method: Lookup with a fallback drafter
+    technique: hybrid
+    paper: https://github.com/apoorvumang/prompt-lookup-decoding
+    status: not-compared
+    note: A combination of two drafters; no paper number for it.
+  - method: Lookahead decoding
+    technique: lookahead
+    paper: "2402.02057"
+    status: not-compared
+    note: No study against the paper's setting yet.
+  - method: REST
+    technique: rest
+    paper: "2311.08252"
+    status: not-compared
+    note: No study against the paper's setting yet.
+  - method: SuffixDecoding
+    technique: suffix_decoding
+    paper: "2411.04975"
+    status: not-compared
+    note: No study against the paper's setting yet.
+  - method: FR-Spec
+    technique: frspec
+    paper: "2502.14856"
+    status: not-compared
+    note: No study against the paper's setting yet.
+  - method: LayerSkip (early-exit self-drafting)
+    technique: early_exit
+    paper: "2404.16710"
+    status: not-compared
+    note: The released LayerSkip checkpoints are gated.
+  - method: Draft & Verify / SWIFT / CLaSp (layer-skip self-drafting)
+    technique: layer_skip
+    paper: "2410.06916"
+    status: not-compared
+    note: No study against the papers' settings yet.
+  - method: Self-drafting through other techniques
+    technique: draft_with
+    paper: "2410.11305"
+    status: not-compared
+    note: A composition of techniques; no single paper number for it.
+  - method: Kangaroo
+    technique: kangaroo
+    paper: "2404.18911"
+    status: not-compared
+    note: Needs adapter training at the paper's scale.
+  - method: KnapSpec
+    technique: knapspec
+    paper: "2602.20217"
+    status: not-compared
+    note: No study against the paper's setting yet.
+  - method: Hidden Transfer
+    technique: hidden_transfer
+    paper: "2404.12022"
+    status: not-compared
+    note: Needs training at the paper's scale.
+  - method: MagicDec
+    technique: magicdec
+    paper: "2408.11049"
+    status: not-compared
+    note: Long-context benchmark runs pending.
+  - method: TriForce
+    technique: triforce
+    paper: "2404.11912"
+    status: not-compared
+    note: Long-context benchmark runs pending.
+  - method: FREE
+    technique: free
+    paper: "2310.05424"
+    status: not-compared
+    note: Needs exit-model training at the paper's scale.
+  - method: DMTD
+    technique: dmtd
+    paper: "2510.11958"
+    status: not-compared
+    note: Needs training at the paper's scale.
+  # Draft compression
+  - method: Draft quantization (QSpec-style)
+    technique: draft_quant
+    paper: "2410.11305"
+    status: not-compared
+    note: Applied to other drafters; no single paper number for it.
+  # Dynamic depth
+  - method: CALM
+    technique: calm
+    paper: "2207.07061"
+    status: not-compared
+    note: The paper trains T5 encoder-decoders; no decoder-only number to compare with.
+  - method: GateSkip
+    technique: gateskip
+    paper: "2510.13876"
+    status: not-compared
+    note: Needs gate training at the paper's scale.
+  - method: Mixture-of-Depths
+    technique: mod
+    paper: "2404.02258"
+    status: not-compared
+    note: The paper pretrains from scratch; economize adds routers to pretrained models.
+  - method: FlexiDepth
+    technique: flexidepth
+    paper: "2503.23798"
+    status: not-compared
+    note: Needs router training at the paper's scale.
+  - method: SkipDecode
+    technique: skipdecode
+    paper: "2307.02628"
+    status: not-compared
+    note: The paper fine-tunes OPT models with its schedule; no matching checkpoint.
+  - method: LoRA-Drop
+    technique: loradrop
+    paper: "2601.02569"
+    status: not-compared
+    note: Needs LoRA training at the paper's scale.
+  # Weights
+  - method: RTN
+    technique: quant
+    paper: "2210.17323"
+    status: reproduced
+    result: INT4 g128 ppl 5.72 vs 5.73, INT3 g128 6.66 vs 6.66 (Llama-2-7B, WikiText-2)
+    studies: [awq-int4-llama-2-7b, awq-int3-llama-2-7b, awq-int4-llama-7b, gptq-per-channel-llama-7b]
+  - method: GPTQ
+    technique: quant
+    paper: "2210.17323"
+    status: reproduced
+    result: INT4 g128 ppl 5.67 ± 0.05 vs 5.69, INT3 per channel 8.11 vs 8.07 (Llama-2-7B / LLaMA-7B)
+    studies: [awq-int4-llama-2-7b, gptq-per-channel-llama-7b, qserve-int4-llama-3-8b, qserve-int4-mistral-7b,
+              awq-gsm8k-llama-2-7b]
+    note: GPTQ without act-order on LLaMA-7B varies by ±0.34 ppl over calibration seeds; the paper's 6.22 lies inside.
+  - method: AWQ
+    technique: quant
+    paper: "2306.00978"
+    status: reproduced
+    result: INT4 g128 ppl 5.61 vs 5.60, INT3 6.24 vs 6.24 (Llama-2-7B); GSM8K 12.6 ± 0.4 vs 13.6
+    studies: [awq-int4-llama-2-7b, awq-int3-llama-2-7b, awq-int4-llama-7b, awq-mistral-7b-instruct,
+              awq-gsm8k-llama-2-7b, qserve-int4-llama-3-8b, qserve-int4-mistral-7b]
+    note: On Mistral-7B-Instruct the absolute perplexities differ (another FP16 evaluation protocol); the drops match.
+  - method: torchao FP8 / INT8 / INT4 weights
+    technique: quant
+    paper: https://github.com/pytorch/ao
+    status: partial
+    result: HellaSwag 60.50 vs 59.86 (FP8, Llama-3.1-8B); speedup int4wo 1.94× vs 2.03×, float8dq 0.98× vs 1.26×
+    studies: [torchao-fp8-llama-3-1-8b]
+    note: Quality matches; torchao's speedups use torch.compile, which the eager int8/fp8 paths do not.
+  - method: SmoothQuant, HQQ, NVFP4
+    technique: quant
+    paper: "2211.10438"
+    status: not-compared
+    note: No study against the papers' settings yet.
+  - method: QuaRot rotations
+    technique: rotate
+    paper: "2404.00456"
+    status: not-compared
+    note: No study against the paper's setting yet.
+  - method: Wanda
+    technique: prune
+    paper: "2306.11695"
+    status: reproduced
+    result: 50% ppl 7.26 vs 7.26 (LLaMA-7B), 2:4 11.29 vs 11.02 (Llama-2-7B); zero-shot 56.2 vs 56.2
+    studies: [wanda-llama-7b, wanda-llama-2-7b, wanda-zero-shot-llama-2-7b]
+    note: The 2:4 Llama-2 gap also appears with the official Wanda code on the same software stack.
+  - method: SparseGPT
+    technique: prune
+    paper: "2301.00774"
+    status: reproduced
+    result: 50% ppl 7.27 vs 7.22 (LLaMA-7B), 2:4 10.25 vs 10.17 (Llama-2-7B)
+    studies: [wanda-llama-7b, wanda-llama-2-7b, wanda-zero-shot-llama-2-7b]
+  - method: Magnitude pruning
+    technique: prune
+    paper: "2306.11695"
+    status: reproduced
+    result: 50% ppl 17.22 vs 17.29, 2:4 42.56 vs 42.13 (LLaMA-7B)
+    studies: [wanda-llama-7b, wanda-llama-2-7b]
+  - method: SLEB
+    technique: depth_prune
+    paper: "2402.09025"
+    status: reproduced
+    result: 20% of blocks, ppl 8.93 ± 0.21 vs 9.14 (WikiText-2), 11.82 ± 0.48 vs 12.32 (C4), Llama-2-7B
+    studies: [sleb-llama-2-7b-wikitext2, sleb-llama-2-7b-c4]
+  - method: ShortGPT
+    technique: depth_prune
+    paper: "2403.03853"
+    status: reproduced
+    result: removes layers 21-29 of Llama-2-7B, the same set as the paper
+    note: Checked on the removed layers; the paper's benchmark mixture is not fully specified.
+  - method: SVD-LLM
+    technique: lowrank
+    paper: "2403.07378"
+    status: partial
+    result: 20% compression, ppl 7.66 vs 7.94 (LLaMA-7B), 7.30 vs 10.21 (Mistral-7B), 9.49 vs 8.41 (Vicuna-7B)
+    studies: [svd-llm-llama-7b, svd-llm-llama-7b-c4, svd-llm-other-7b-models]
+    note: Four of five settings match or beat the paper; Vicuna-7B is 1.1 ppl worse, for reasons not yet found.
+  - method: SliceGPT
+    technique: slicegpt
+    paper: "2401.15024"
+    status: not-compared
+    note: No study against the paper's setting yet.
+  - method: FLAP / LLM-Pruner / Minitron width pruning
+    technique: width_prune
+    paper: "2407.14679"
+    status: not-compared
+    note: Runs so far use other models than the papers.
+  - method: LittleBit
+    technique: littlebit
+    paper: "2506.13771"
+    status: not-compared
+    note: Needs quantization-aware training at the paper's scale.
+  # Activation sparsity
+  - method: TEAL
+    technique: teal
+    paper: "2408.14690"
+    status: reproduced
+    result: ppl increase at 50% +0.70 vs +0.80 (Llama-3-8B), +0.37 vs +0.36 (Llama-2-7B)
+    studies: [teal-llama-3-8b, teal-llama-2-7b]
+    note: Absolute perplexities differ because the evaluation text differs; the increases match or are smaller.
+  - method: CATS
+    technique: cats
+    paper: "2404.08763"
+    status: not-compared
+    note: No study against the paper's setting yet.
+  - method: Deja Vu
+    technique: dejavu
+    paper: "2310.17157"
+    status: not-compared
+    note: Needs predictor training at the paper's scale.
+  # KV cache and attention
+  - method: KIVI
+    technique: kivi
+    paper: "2402.02750"
+    status: reproduced
+    result: KIVI-2 change on CoQA −0.6 vs −0.8 (Llama-2-7B), −1.3 vs −1.1 (Mistral-7B); GSM8K −0.8 vs −0.8 (Llama-2-7B)
+    studies: [kivi-llama-2-7b-coqa, kivi-llama-2-7b-gsm8k, kivi-mistral-7b-coqa, kivi-mistral-7b-gsm8k]
+  - method: KIVI (fused kernel)
+    technique: kivi_fused
+    paper: "2402.02750"
+    status: not-compared
+    note: Same numerics as KIVI; a kernel, so no separate paper number.
+  - method: FP8 KV cache
+    technique: kv_fp8
+    paper: "2209.05433"
+    status: partial
+    result: Mistral-7B ppl +0.007 vs +0.00; Llama-3-8B-Instruct GSM8K drop −1.52 vs −0.46
+    studies: [kv-fp8-mistral-7b, kv-fp8-llama-3-8b-instruct]
+    note: The reference uses calibrated KV scales; the unscaled e4m3 run loses more on GSM8K (scaled run pending).
+  - method: FP8 KV cache (fused kernel)
+    technique: kv_fp8_fused
+    paper: "2209.05433"
+    status: not-compared
+    note: Same numerics as the FP8 KV cache; a kernel, so no separate paper number.
+  - method: SnapKV
+    technique: kv_evict
+    paper: "2404.14469"
+    status: reproduced
+    result: LongBench 39.87 vs 35.50 (budget 128), 42.86 vs 41.35 (2048), Llama-3-8B-Instruct
+    studies: [kv-eviction-llama-3-8b-instruct]
+    note: Our full-cache baseline is also 1.7 points higher (43.13 vs 41.46).
+  - method: H2O
+    technique: kv_evict
+    paper: "2306.14048"
+    status: reproduced
+    result: LongBench 35.37 vs 35.37 (budget 128), 41.82 vs 39.35 (2048), Llama-3-8B-Instruct
+    studies: [kv-eviction-llama-3-8b-instruct]
+    note: Matches with scores accumulated over the prompt (h2o_prefill), as the reference does.
+  - method: StreamingLLM
+    technique: kv_evict
+    paper: "2309.17453"
+    status: reproduced
+    result: LongBench 34.33 vs 32.00 (budget 128), 40.65 vs 37.82 (2048), Llama-3-8B-Instruct
+    studies: [kv-eviction-llama-3-8b-instruct]
+  - method: KV eviction (fused kernel)
+    technique: kv_evict_fused
+    paper: "2406.02069"
+    status: not-compared
+    note: Same numerics as KV eviction; a kernel, so no separate paper number.
+  - method: DuoAttention
+    technique: duo_attention
+    paper: "2410.10819"
+    status: not-compared
+    note: No study against the paper's setting yet.
+  - method: Quest
+    technique: quest
+    paper: "2406.10774"
+    status: not-compared
+    note: No study against the paper's setting yet.
+  - method: MInference
+    technique: minference
+    paper: "2407.02490"
+    status: not-compared
+    note: No study against the paper's setting yet.
