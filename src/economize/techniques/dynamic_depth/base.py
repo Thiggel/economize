@@ -662,8 +662,8 @@ class ScoredDepthPolicy(DepthPolicy):
 
     def probe(self, index: int, hidden: torch.Tensor) -> torch.Tensor:
         members = self.groups()[index] if self.decision_group != 1 else (index,)
-        scores = [self.score(member, hidden) for member in members]
-        assert all(score is not None for score in scores)
+        scores = [score for member in members if (score := self.score(member, hidden)) is not None]
+        assert len(scores) == len(members)
         return torch.cat([score.float().reshape(-1) for score in scores])
 
     def after_probe(self, index: int, values: tuple[float, ...]) -> StepAction:
