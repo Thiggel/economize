@@ -41,8 +41,8 @@ from ...registry import Registry
 from ...validation import check_choice, check_positive, check_unit_interval
 from .base import (
     DepthTechnique,
-    LayeredDepthConfig,
     RoutedDepthPolicy,
+    ScoredDepthConfig,
     layer_modules,
     module_at,
     second_half,
@@ -118,7 +118,7 @@ class BottleneckRouter(nn.Module):
 
 
 @dataclass(frozen=True)
-class FlexiDepthConfig(LayeredDepthConfig):
+class FlexiDepthConfig(ScoredDepthConfig):
     """FlexiDepth.
 
     Attributes:
@@ -180,7 +180,8 @@ class FlexiDepthPolicy(RoutedDepthPolicy):
     the branch; the scores stay in :attr:`scores` for the layer penalty."""
 
     def __init__(self, technique: FlexiDepthTechnique) -> None:
-        super().__init__(technique.adapter.num_layers, technique.config.phases)
+        super().__init__(technique.adapter.num_layers, technique.config.phases,
+                         decision_group=technique.config.decision_group)
         self.technique = technique
 
     def score(self, index: int, x: torch.Tensor) -> torch.Tensor | None:

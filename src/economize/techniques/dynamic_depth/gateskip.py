@@ -25,8 +25,8 @@ from ...core.technique import register_technique
 from ...validation import check_choice, check_number, check_unit_interval
 from .base import (
     DepthTechnique,
-    LayeredDepthConfig,
     ScalarScore,
+    ScoredDepthConfig,
     ScoredDepthPolicy,
     gated_residual,
     layer_modules,
@@ -45,7 +45,7 @@ GATESKIP_RULES = ("threshold", "budget")
 
 
 @dataclass(frozen=True)
-class GateSkipConfig(LayeredDepthConfig):
+class GateSkipConfig(ScoredDepthConfig):
     """GateSkip, layer-level variant (residual-gated layer skipping; see the module docstring).
 
     Attributes:
@@ -87,7 +87,8 @@ class GateSkipPolicy(ScoredDepthPolicy):
     update (the others are zeroed, as at inference)."""
 
     def __init__(self, technique: GateSkipTechnique) -> None:
-        super().__init__(technique.adapter.num_layers, technique.config.phases)
+        super().__init__(technique.adapter.num_layers, technique.config.phases,
+                         decision_group=technique.config.decision_group)
         self.technique = technique
         self.train_budget = 1.0
 

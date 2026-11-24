@@ -260,6 +260,17 @@ class DraftWithTechnique(Technique):
 
     # ---- the pieces of a draft step ------------------------------------------------------------------------------
     @property
+    def policy(self) -> LayerPolicy | None:
+        """The layer policy of the draft path (from a held technique's
+        :meth:`~economize.core.Technique.draft_policy`), or ``None``."""
+        return self._policy
+
+    @property
+    def overrides(self) -> Mapping[int, nn.Module]:
+        """The draft path's copies of decoder layers by 1-based index (empty: it runs the base layers)."""
+        return self._overrides
+
+    @property
     def run_layers(self) -> tuple[int, ...]:
         """The layers a draft step runs."""
         return tuple(i for i in range(1, self.adapter.num_layers + 1) if i not in self._skips)

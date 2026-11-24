@@ -1,9 +1,9 @@
 """CALM: confident adaptive language modeling, a token exits once a confidence measure exceeds a threshold.
 
-After every layer ``l`` from ``min_layer`` to ``L - 1`` the tokens of a generation step that have not exited yet
-compute a confidence ``c_l``; a token with ``c_l > threshold(t)`` exits, keeps its hidden state for the remaining
-layers, and is read out by the model's own final norm and head. Its K/V at the skipped layers are computed from the
-exit state, which is the paper's state propagation. Three confidence measures are registered in
+After every ``exit_stride``-th layer ``l`` from ``min_layer`` to ``L - 1`` the tokens of a generation step that
+have not exited yet compute a confidence ``c_l``; a token with ``c_l > threshold(t)`` exits, keeps its hidden state
+for the remaining layers, and is read out by the model's own final norm and head. Its K/V at the skipped layers
+are computed from the exit state, which is the paper's state propagation. Three confidence measures are registered in
 :data:`CONFIDENCE_MEASURES`:
 
 * ``softmax``: the gap between the two largest probabilities of the head's distribution at layer ``l``;
@@ -86,6 +86,8 @@ class CalmConfig(TechniqueConfig):
         threshold: ``lambda``; a token exits when its confidence is strictly above the (decayed) threshold, so ``1``
             never exits and reproduces the model.
         min_layer: First layer after which a token may exit.
+        exit_stride: The confidence is measured after every ``exit_stride``-th layer from ``min_layer`` on (layers
+            ``min_layer, min_layer + exit_stride, ...`` below ``L``), so a decode step reads fewer signals.
         decay_temperature: ``tau`` of the threshold decay (``0``: constant threshold).
         decay_horizon: ``N`` of the threshold decay (the generation length the schedule is laid out for).
     """
@@ -94,6 +96,7 @@ class CalmConfig(TechniqueConfig):
     confidence: str = "softmax"
     threshold: float = 0.9
     min_layer: int = 1
+    exit_stride: int = 1
     decay_temperature: float = 0.0
     decay_horizon: int = 256
 
@@ -101,12 +104,17 @@ class CalmConfig(TechniqueConfig):
         check_registered("confidence measure", self.confidence, CONFIDENCE_MEASURES)
         check_unit_interval("threshold", self.threshold, closed_high=True)
         check_positive("min_layer", self.min_layer)
+        check_positive("exit_stride", self.exit_stride)
         check_number("decay_temperature", self.decay_temperature, low=0)
         check_positive("decay_horizon", self.decay_horizon)
 
     def validate(self, adapter: ArchAdapter) -> None:
         if self.min_layer >= adapter.num_layers:
             raise ConfigError(f"min_layer must be below the number of layers ({adapter.num_layers})")
+
+    def measures(self, index: int, num_layers: int) -> bool:
+        """Whether the confidence is measured after layer ``index``."""
+        return self.min_layer <= index < num_layers and (index - self.min_layer) % self.exit_stride == 0
 
     def threshold_at(self, generated: torch.Tensor) -> torch.Tensor:
         """Threshold for tokens at generated positions ``generated`` (fp32, same shape)."""
@@ -226,7 +234,7 @@ class CalmPolicy(DepthPolicy):
     def plan(self, index: int) -> StepAction:
         if self._step_exited:
             return STEP_FILL if self.fill_kv else STEP_SKIP
-        return _MEASURE if self.technique.config.min_layer <= index < self.num_layers else STEP_RUN
+        return _MEASURE if self.technique.config.measures(index, self.num_layers) else STEP_RUN
 
     def step_op(self, index: int, action: StepAction, hidden: torch.Tensor,
                 ops: StepOps) -> tuple[torch.Tensor, torch.Tensor | None]:
@@ -254,7 +262,7 @@ class CalmPolicy(DepthPolicy):
     def transform(self, index: int, x: torch.Tensor, out: torch.Tensor, ran: torch.Tensor | None,
                   ctx: LayerContext) -> torch.Tensor | None:
         config = self.technique.config
-        if self.training or not config.min_layer <= index < self.num_layers:
+        if self.training or not config.measures(index, self.num_layers):
             return None
         assert self.exited is not None and self._threshold is not None
         exited = self.exited.to(out.device)
