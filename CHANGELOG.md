@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.7.0 (2026-11-25)
+
+### Added
+
+- Dynamic-depth techniques as self-speculative drafters: `DraftWith(<dynamic-depth config>)` holds GateSkip, CALM,
+  SkipDecode, LoRA-Drop, FlexiDepth or MoD on the draft path only. The drafter runs single-row draft steps through
+  the new step engine `economize.decoding.DepthSteps`, and the verify pass refills the K/V of the skipped layers, so
+  greedy decoding stays exact (fp32 tests show token equality for the GateSkip, CALM, SkipDecode and LoRA-Drop
+  drafters).
+- `DepthSteps` runs one-token decode steps of a single row without the skipped layers: `LayerPolicy` gained a step
+  interface (planned / probe / after_probe / step_op / after_op / end_step), the host plans each layer, skipped
+  layers launch no kernels, and the segments between router probes or exit signals replay from CUDA graphs. GateSkip,
+  MoD, FlexiDepth, SkipDecode, CALM (state, softmax and classifier confidence) and LoRA-Drop implement it; batches
+  and policies without it keep the eager path.
+- `CalmConfig(exit_stride=...)` measures the exit confidence every `exit_stride` layers from `min_layer`, and
+  GateSkip, FlexiDepth and MoD take `decision_group` (layers decided together at inference; 0 decides once per
+  token), so a decode step needs one host sync per group instead of one per probe.
+- Techniques can be stacked on a trained checkpoint: `attach()` accepts techniques the checkpoint holds no state for
+  and builds and calibrates them at attach (CATS, TEAL, Deja Vu, FLAP, ...). After a weight transform, techniques with
+  a loaded state take over the dense copies of base layers made by their first build
+  (`economize.modules.reusing_copies`), so a full-copy drafter survives int4 or 2:4 kernels and low-rank
+  factorization. `Technique.rebuild_config` and `Technique.rebuild_state` let a technique adapt its config and state
+  to the rewritten model (for example renumber layer indices after depth pruning).
+- `docs/data/method_status.yaml` records, for every implemented method, its paper, the result economize measured
+  against the paper's number, the reproduction studies and a verdict. The homepage and the README show it as one table
+  per family (`python docs/hooks/method_status.py --write-readme` refreshes the README copy; a test fails when it is
+  stale).
+
+### Fixed
+
+- EAGLE-3 and Kangaroo draft layers pin the q/k/v biases they resolved against the original model across weight
+  rewrites, so a compensating width prune (FLAP) that switches on the base model's attention biases no longer breaks
+  their rebuild.
+- A draft head width pinned in the config is validated against the full-attention layer's width (on Gemma-4 the
+  full-attention heads are wider than the sliding ones), instead of being rejected.
+- `DepthMeter` moves per-layer counts to its table's device, so dynamic-depth policies work on a model split over
+  several GPUs (`device_map="auto"`).
+- `OffloadedAdamW` synchronizes every device before the CPU update and before evaluation, and the trainer skips the
+  pre-evaluation `torch.cuda.empty_cache()` under expandable segments, which crashed multi-GPU runs.
+
 ## 0.6.0 (2026-11-21)
 
 ### Changed
@@ -59,7 +99,7 @@
 - `generate` with `do_sample=True` (the default of `pipeline("text-generation")`) on a drafting model whose
   verifier is not named verifies by rejection sampling, which keeps the sampled distribution exact. It used to raise
   `ConfigError` for the implicit greedy verifier. A verifier named explicitly is kept, and a greedy one still raises.
-- `model.half()`, `model.double()` and `model.to(dtype)` on an `EfficientModel` with a `jump` or `early_exit` drafter
+- `model.half()`, `model.double()` and `model.to(dtype)` on an `EfficientModel` with an `early_exit` drafter
   cast the base model and leave the drafter's float32 parameters in float32
   (`economize.modules.Float32Parameters`). The drafter used to be cast too and then failed on its float32 inputs.
 
