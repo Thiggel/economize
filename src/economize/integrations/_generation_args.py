@@ -73,13 +73,22 @@ def check_generation_config(config: GenerationConfig) -> None:
         raise ConfigError("economize generate cannot honour: " + "; ".join(problems))
 
 
+#: Names under which ``generate`` hands over the model's cache: ``past_key_values`` before transformers 5.24,
+#: ``cache`` from 5.24 on.
+_CACHE_KWARGS = frozenset({"past_key_values", "cache"})
+
+
 def check_model_kwargs(model_kwargs: Mapping[str, object]) -> None:
     """Raise :class:`ConfigError` for model inputs that economize would otherwise drop (embeddings, a filled cache,
-    multimodal inputs). The inputs that ``generate`` prepares on its own are accepted."""
-    cache = model_kwargs.get("past_key_values")
-    if cache is not None and _cache_length(cache) > 0:
-        raise ConfigError("economize generate starts from an empty cache; prefilled past_key_values are not supported")
-    unknown = sorted(k for k, v in model_kwargs.items() if k not in _PREPARED_MODEL_KWARGS | {"past_key_values"}
+    multimodal inputs). The inputs that ``generate`` prepares on its own, and an empty cache under either name
+    (``past_key_values`` or ``cache``), are accepted."""
+    for name in sorted(_CACHE_KWARGS):
+        cache = model_kwargs.get(name)
+        if cache is not None and _cache_length(cache) > 0:
+            raise ConfigError(
+                "economize generate starts from an empty cache; prefilled past_key_values are not supported"
+            )
+    unknown = sorted(k for k, v in model_kwargs.items() if k not in _PREPARED_MODEL_KWARGS | _CACHE_KWARGS
                      and v is not None)
     if unknown:
         raise ConfigError(f"economize generate cannot forward the model inputs {unknown}; pass input_ids only")

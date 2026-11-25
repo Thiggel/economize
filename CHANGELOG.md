@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.1 (2026-11-25)
+
+### Fixed
+
+- `EfficientModel.generate` accepts the empty cache that transformers 5.24 hands over under the renamed kwarg
+  `cache` (formerly `past_key_values`), instead of raising `ConfigError: economize generate cannot forward the model
+  inputs ['cache']`. A prefilled cache is rejected under either name.
+- transformers is capped below 5.24 (`transformers>=5.0,<5.24`) until the rest of economize is ported to the
+  renamed cache kwarg.
+
 ## 0.7.0 (2026-11-25)
 
 ### Added

@@ -8,11 +8,12 @@ from typing import Any
 import pytest
 import torch
 from eco_fakes import FakeEfficientModel, RecordingStreamer, make_tokenizer
-from transformers import LogitsProcessor, LogitsProcessorList, StoppingCriteria, StoppingCriteriaList
+from transformers import DynamicCache, LogitsProcessor, LogitsProcessorList, StoppingCriteria, StoppingCriteriaList
 
 import economize
 from economize import DecodeConfig, JumpConfig
 from economize.errors import ConfigError
+from economize.integrations._generation_args import check_model_kwargs
 from economize.integrations.generate import generate
 from helpers import PROMPT_LEN, VOCAB, make_tiny_model, perturb
 
@@ -286,6 +287,18 @@ def test_prefilled_cache_and_embeddings_raise(base: torch.nn.Module) -> None:
     embeds = base.get_input_embeddings()(prompt)
     with pytest.raises(ConfigError, match="inputs_embeds"):
         generate(FakeEfficientModel(base), inputs_embeds=embeds, max_new_tokens=4)
+
+
+@pytest.mark.parametrize("name", ["past_key_values", "cache"])
+def test_check_model_kwargs_accepts_an_empty_cache_under_either_name(base: torch.nn.Module, name: str) -> None:
+    # transformers 5.24 renamed generate's cache kwarg from past_key_values to cache
+    check_model_kwargs({name: DynamicCache(), "attention_mask": None, "use_cache": True})
+    check_model_kwargs({name: None})
+    prefilled = base(_prompt(), use_cache=True).past_key_values
+    with pytest.raises(ConfigError, match="empty cache"):
+        check_model_kwargs({name: prefilled})
+    with pytest.raises(ConfigError, match="inputs_embeds"):
+        check_model_kwargs({name: DynamicCache(), "inputs_embeds": torch.zeros(1, 2, 3)})
 
 
 # ---- the real core (skipped while the v0.2 core is being rebuilt) ---------------------------------------------

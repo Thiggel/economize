@@ -34,9 +34,10 @@ classifiers = [
 # APIs: economize subclasses transformers' cache and modeling classes, registers torch custom ops, and writes
 # safetensors and Hub checkpoints, so a new major is admitted only after the full CI passes on it
 # (tests/unit/test_packaging.py requires a cap and checks that it admits the tested release).
+# transformers is capped below 5.24, which renamed generate's cache kwarg, until economize is ported to it.
 dependencies = [
     "torch>=2.4,<3",
-    "transformers>=5.0,<6",
+    "transformers>=5.0,<5.24",
     "safetensors>=0.4,<1",
     "huggingface_hub>=1.0,<3",
 ]
